@@ -23,7 +23,9 @@ tvec  = np.arange(100)
 u     = utils.boxcar(np.array([[0,10,1]]))
 
 # connectivity params
+# roi0,layer0->roi1,layer0 : a = 1.
 A = utils.create_A_matrix(2,1,([(0,0),(1,0),1],),-1)
+# input->roi0,layer0 : c=1
 C = utils.create_C_matrix(2,1,([0,0,1],))
 
 # run simulation

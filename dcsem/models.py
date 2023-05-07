@@ -52,14 +52,17 @@ class BaseModel(object):
         for param in table:
             self.p[param] = table[param]
 
-    def add_noise(self, signal, SNR):
+    def get_params(self):
+        return self.p
+
+    def add_noise(self, signal, CNR):
         """
         :param signal: array
-        :param SNR: float [SNR defined as mean(abs(signal))/std(noise) ]
+        :param CNR: float [CNR defined as std(signal)/std(noise) ]
         :return: signal+noise
         """
-        mean_signal = np.mean(np.abs(signal))
-        std_noise   = mean_signal / SNR
+        std_signal  = np.std(signal)
+        std_noise   = std_signal / CNR
         noise       = np.random.normal(loc=0, scale=std_noise, size=signal.shape)
         return signal + noise
 
@@ -171,9 +174,9 @@ class DCM(BaseModel):
         return state_tc
 
 
-# Layer-DCM sub-class
-class LayerDCM(DCM):
-    """Layer DCM class - Can only do TWO layers (for now)
+# TwoLayer-DCM sub-class
+class TwoLayerDCM(DCM):
+    """Layer DCM class - Can only do TWO layers
     Inherits from the DCM class.
     Must re-implement the following functions:
         - init_params()
