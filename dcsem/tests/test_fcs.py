@@ -49,15 +49,50 @@ def test_Parameters():
 
 def test_DCM():
     from dcsem.models import DCM
-    dcm = models.DCM()
+    dcm = models.DCM(2)
     tvec = np.linspace(0,50,300)
     u = utils.stim_boxcar([[0,5,1]])
     A = np.array([[ -2.0,   0.],
               [  0.2,  -2.0]])
     C = np.array([1,0])
-    state_tc = dcm.simulate(tvec,u,A,C,num_roi=2)
+    dcm.set_params({'A':A,'C':C})
+    state_tc = dcm.simulate(tvec,u)
     assert np.all(np.isclose(sum(state_tc['bold']),[1.49680682, 0.18591665]))
 
 
 def test_TwoLayerDCM():
-    pass
+    ldcm = models.TwoLayerDCM(num_rois=1)
+    TR    = 1  # repetition time
+    ntime = 100  # number of time points
+    tvec  = np.linspace(0,ntime*TR,ntime)  # seconds
+
+    stim = [[0,30,1]]
+    u    = utils.stim_boxcar(stim)
+
+    A = np.array([[-1.,.0],
+                  [.0,-1.],
+                 ])
+    C = np.array([1,1])
+    ldcm.set_params({'l_d':.5,'A':A,'C':C})
+
+    state_tc = ldcm.simulate(tvec,u)
+    assert np.all(np.isclose(sum(state_tc['bold']),[1.5932011,  2.71178688]))
+
+def test_SEM():
+    sem = models.SEM(num_rois=2)
+    sem.set_params({'A':[[0,1],[.5,0]],'C':[10,0]})
+    TR    = 1  # repetition time
+    ntime = 100  # number of time points
+    tvec  = np.linspace(0,ntime*TR,ntime)  # seconds
+
+    sem1 = models.SEM(num_rois=2, params={'A':[[0,1],[.5,0]]})
+    sem2 = models.SEM(num_rois=2, params={'A':[[0,50],[-50,0]]})
+    assert np.linalg.norm(sem1.get_cov()-np.cov(sem1.simulate(tvec).T)) < 5
+    assert np.linalg.norm(sem1.get_cov()-np.cov(sem2.simulate(tvec).T)) > 10
+
+    num_rois = 3
+    A = np.array([[0,   0, 0], [-5,   0, 0], [1,  -1, 0]])
+    sem = models.SEM(num_rois=num_rois, params={'sigma':1,'A':A})
+    tvec=np.linspace(0,1,300)
+    y = sem.simulate(tvec)
+    assert np.isclose(sem.negloglik(y),1270,atol=300)
