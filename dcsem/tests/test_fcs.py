@@ -24,10 +24,37 @@ def test_create_A_matrix():
     A = utils.create_A_matrix(num_rois,num_layers,paired_connections,self_connections)
     assert  np.all(np.isclose(A,target_A))
 
+    # try with strings
+    paired_connections = ['R0,L1->R1,L0=1.',
+                          'R1,L0->R0,L1=-100',
+                          'R1,L0->R1,L1->10']
+    A = utils.create_A_matrix(num_rois,num_layers,paired_connections,self_connections)
+    assert  np.all(np.isclose(A,target_A))
+
+    A = utils.create_A_matrix(num_rois=2)
+    assert A.shape == (2,2)
+    assert np.all(A == 0)
+
+    A = utils.create_A_matrix(num_rois=2, num_layers=3)
+    assert A.shape == (6,6)
+    assert np.all(A == 0)
+
 def test_create_C_matrix():
     target_C = np.array([.1,0.5,0.,.3])
     C = utils.create_C_matrix(2,2,[(0,0,.1),(0,1,0.),(1,0,.5),(1,1,.3)])
     assert  np.all(np.isclose(C,target_C))
+
+    input_connections = ['R0,L0=.1', 'R0, L1 = 0.', 'R1, L0 = .5', 'R1,L1=.3']
+    C = utils.create_C_matrix(2, 2, input_connections)
+    assert  np.all(np.isclose(C,target_C))
+
+    C = utils.create_C_matrix(num_rois=2)
+    assert C.shape == (2,)
+    assert np.all(C == 0)
+
+    C = utils.create_C_matrix(num_rois=2, num_layers=3)
+    assert C.shape == (6,)
+    assert np.all(C == 0)
 
 def test_stim_boxcar():
     tvec = np.linspace(0,50,300)
@@ -37,7 +64,12 @@ def test_stim_boxcar():
 def test_stim_random():
     tvec = np.linspace(0,50,300)
     u = utils.stim_random(tvec)
-    assert np.isreal(sum(u(tvec)))
+    assert np.isreal(np.sum(u(tvec)))
+
+def test_stim_random_events():
+    tvec = np.linspace(0,1,10000)
+    u = utils.stim_random_events(tvec, p=0.5, n=3)
+    np.isclose(np.mean(np.mean(u(tvec),axis=1)),0.5,atol=0.2)
 
 # test models
 def test_Parameters():
@@ -96,3 +128,13 @@ def test_SEM():
     tvec=np.linspace(0,1,300)
     y = sem.simulate(tvec)
     assert np.isclose(sem.negloglik(y),1270,atol=300)
+
+    # fit
+    num_rois = 3
+    A = np.array([[0,   0, 0], [-5.,   0, 0], [1.,  -1., 0]])
+    sem = models.SEM(num_rois=num_rois, params={'sigma':1,'A':A})
+    tvec=np.linspace(0,1,300)
+    y = sem.simulate(tvec)
+    res = sem.fit(y, method='MH')
+    assert np.isclose(res.A[1,0],sem.p.A[1,0],atol=1)
+    assert np.isclose(res.sigma,sem.p.sigma,atol=1)

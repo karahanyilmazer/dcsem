@@ -11,7 +11,6 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 
-
 # Params class
 class Parameters(dict):
     """Dict-like class where elements can be accessed
@@ -137,7 +136,7 @@ class DCM(BaseModel):
             dfdt = s
             dvdt = (1/self.p.tau)*(f-v**(1/self.p.alpha))
             dqdt = (1/self.p.tau)*(f*(1-(1-self.p.E0)**(1/f))/self.p.E0-v**(1/self.p.alpha-1)*q)
-            dxdt = np.dot(self.p.A, x)+np.dot(self.p.C, u(t))
+            dxdt = np.dot(self.p.A, x)+self.p.C * u(t) #np.dot(self.p.C, u(t))
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
         return F
 
@@ -232,7 +231,7 @@ class TwoLayerDCM(DCM):
             dvsdt = 1/self.p.tau_d*(-vs+(vl-1))
             dqsdt = 1/self.p.tau_d*(-qs+(ql-1))
             # combines lower and upper
-            dxdt = np.dot(self.p.A, x)+np.dot(self.p.C, u(t))
+            dxdt = np.dot(self.p.A, x)+ self.p.C * u(t) #np.dot(self.p.C, u(t))
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt, dvsdt, dqsdt]
         return F
 
@@ -267,7 +266,7 @@ class SEM(BaseModel):
     def __init__(self, num_rois, params=None):
         super().__init__()
         self.num_rois = num_rois
-        self.p.A = np.zeros((num_rois, num_rois))
+        self.p.A = np.zeros((num_rois, num_rois), dtype=np.float64)
         self.p.sigma = 1.
         if params is not None:
             self.set_params(params)
@@ -286,18 +285,70 @@ class SEM(BaseModel):
 
         return np.dot(np.linalg.inv(I-A), u).T
 
-    def get_cov(self):
-        M = np.linalg.inv(np.identity(self.num_rois)-self.p.A)
-        return self.p.sigma**2*np.dot(M,M.T)
+    def get_cov(self, A=None, sigma=None):
+        if A is None:
+            A = self.p.A
+        if sigma is None:
+            sigma = self.p.sigma
 
-    def negloglik(self, y):
+        mat = np.linalg.inv(np.identity(self.num_rois)-A)
+        return sigma**2*np.dot(mat, mat.T)
+
+    def negloglik(self, y, A=None, sigma=None):
         T, N = y.shape
         S = np.dot(y.T,y) / (T-1)
-        C = self.get_cov()
+        C = self.get_cov(A, sigma)
         invC = np.linalg.inv(C)
         _, logdetC = np.linalg.slogdet(C)
         _, logdetS = np.linalg.slogdet(S)
         return T/2*(logdetC-logdetS+N*np.log(2*np.pi)+np.trace(S@invC))
 
+    def get_num_free_params(self):
+        return 1 + np.count_nonzero(self.p.A)
+
+    def init_free_params(self, y=None):
+        if y is None:
+            return self.p_from_A_sigma(self.p.A, self.p.sigma)
+        else:
+            return self.p_from_A_sigma(self.p.A*0., np.std(y))
+
+    def A_sigma_from_p(self, p):
+        A = np.zeros_like(self.p.A)
+        ind = np.flatnonzero(self.p.A)
+        A.ravel()[ind] = p[1:]
+        sigma = p[0]
+        return A, sigma
+
+    def p_from_A_sigma(self, A, sigma):
+        a = A.ravel()[np.flatnonzero(self.p.A)]
+        return np.append(sigma, a)
+
     def fit(self, y, method='MH'):
-        pass
+        num_params = self.get_num_free_params()
+        p0 = self.init_free_params(y)
+
+        def fn_negloglik(p):
+            A, sigma = self.A_sigma_from_p(p)
+            return self.negloglik(y, A, sigma)
+        def fn_neglogpr(p):
+            return 0
+
+        if method == 'MH':
+            from dcsem.utils import MH
+            mh = MH(fn_negloglik, fn_neglogpr)
+            LB = np.full(p0.shape, -np.infty)
+            LB[0] = 0
+            samples = mh.fit(p0, LB=LB)
+            p = Parameters()
+            p.x = np.mean(samples, axis=0)
+            p.cov = np.cov(samples.T)
+            p.samples = samples
+        else:
+            def fn_loss(p):
+                return fn_negloglik(p)+fn_neglogpr(p)
+            # from scipy.optimise import fit_curve
+            return None
+
+        p.A, p.sigma = self.A_sigma_from_p(p.x)
+
+        return p

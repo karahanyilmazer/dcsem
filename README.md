@@ -1,5 +1,8 @@
 # dcsem
 
+This library implements DCM and SEM for FMRI data. In addition, it implements "Layers" versions of both.
+
+
 
 ## Getting started
 
@@ -11,12 +14,10 @@ pip install -e .
 ```
 
 ## Usage
+In the below example, we create a simple two-ROI DCM model. 
 ```python
 import numpy as np
 from dcsem import models, utils
-
-# instantiate object
-dcm = models.DCM()
 
 # input
 tvec  = np.arange(100)
@@ -28,8 +29,15 @@ A = utils.create_A_matrix(2,1,([(0,0),(1,0),1],),-1)
 # input->roi0,layer0 : c=1
 C = utils.create_C_matrix(2,1,([0,0,1],))
 
+# instantiate object
+dcm = models.DCM(num_rois=2, params={'A':A,'C':C})
+
 # run simulation
-state_tc = dcm.simulate(tvec,u,A,C,num_roi=2)
+state_tc = dcm.simulate(tvec,u)
+
+# plot results
+import matplotlib.pyplot as plt
+plt.plot(tvec, state_tc['bold'])
 ```
 
 
