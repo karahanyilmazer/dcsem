@@ -85,8 +85,9 @@ for s,l in zip(state_tc,lambdas):
 plt.grid()
 plt.show()
 ```
-Effect of changing $\lamda_d$ on the BOLD activity in the upper layer. 
-![layers](dcsem/static/DCM_layers_lambda.png)
+Effect of changing $\lamda_d$ on the BOLD activity in the upper layer.
+
+<img src="dcsem/static/DCM_layers_lambda.png" alt="LayerSEM" width="300" >
 
 ### Simulating and fitting data with a Layer SEM
 
@@ -122,7 +123,8 @@ fig = utils.plot_posterior(estimated, estimated_cov, samples=res.samples, actual
 
 You should obtain something like the below:
 
-![layerSEM]("dcsem/static/LayerSEM_posterior.png")
+<img src="dcsem/static/LayerSEM_posterior.png" alt="LayerSEM" width="300" >
+
 
 ### Implementation of DCM for layer FMRI
 
