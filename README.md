@@ -85,7 +85,7 @@ for s,l in zip(state_tc,lambdas):
 plt.grid()
 plt.show()
 ```
-Effect of changing $\lamda_d$ on the BOLD activity in the upper layer.
+Effect of changing $\lambda_d$ on the BOLD activity in the upper layer.
 
 <img src="dcsem/static/DCM_layers_lambda.png" alt="LayerSEM" width="300" >
 
