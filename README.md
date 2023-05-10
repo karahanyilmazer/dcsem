@@ -198,7 +198,7 @@ The covariance implied by the model is $C=\sigma^2 (I-A)^{-1}(I-A)^{-T}$, which 
 
 For Layer SEM, the same equation applies, but the observations are of the form:
 
-$$ y_k=P_k x $$,
+$$ y_k=P_k x, $$
 
 where $\{P_k\}$ are partial volume matrices that combine signals from different layers. Combined with the generative equation for $x$ we have:
 
