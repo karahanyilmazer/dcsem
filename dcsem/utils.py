@@ -6,6 +6,8 @@
 #
 # Copyright (C) 2023 University of Oxford
 # SHBASECOPYRIGHT
+import os.path
+
 import numpy as np
 
 constants = {
@@ -72,10 +74,14 @@ def create_C_matrix(num_rois, num_layers=1, input_connections=None):
 
 def stim_boxcar(stim):
     """Create boxcar stimulus
-    :param stim: three-column array with onset, duration, amplitude (all in seconds)
+    :param stim: three-column array or text file with onset, duration, amplitude (all in seconds)
     :return: function
     """
     # Boxcar input
+    import os
+    if type(stim) == str:
+        if os.path.exists(stim):
+            stim = np.loadtxt(stim)
     stim = np.asarray(stim)
     if stim.shape[1] == 3:
         stim = stim.T

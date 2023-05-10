@@ -9,6 +9,8 @@
 
 from dcsem import utils, models
 import numpy as np
+from pathlib import Path
+testsPath = Path(__file__).parent
 
 # test utils
 def test_create_A_matrix():
@@ -59,6 +61,10 @@ def test_create_C_matrix():
 def test_stim_boxcar():
     tvec = np.linspace(0,50,300)
     u = utils.stim_boxcar([[0,5,1],[10,10,.5]])
+    assert sum(u(tvec)) == 60.
+
+    stim_file = str(testsPath / 'test_data' / '3col.txt')
+    u = utils.stim_boxcar(stim_file)
     assert sum(u(tvec)) == 60.
 
 def test_stim_random():
