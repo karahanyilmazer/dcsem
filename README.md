@@ -20,7 +20,6 @@ In the below example, we create a simple two-ROI DCM model.
 ```python
 import numpy as np
 from dcsem import models, utils
-
 # input
 tvec  = np.arange(100) # time vector (seconds)
 u     = utils.stim_boxcar(np.array([[0,10,1]])) # stimulus function (here onset=0, duration=10s, magnitude=1)
@@ -53,10 +52,7 @@ plt.plot(tvec, state_tc['bold'])
 Below is how you can generate data for layer DCM. We generate a 1 ROI layer DCM, and we change the value of the blood draining parameter $\lambda_d$ (see theory section) and examine its effect on the activity in the two layers (replicating the result from Heinzle et al, figure 2c).
 
 ```python
-# Let's replicate figure 2c from Heinzle paper
-
-# 1 ROI, 2 Layers. Input feed to both, and some drainage occurs. Change lambda then plot upper and lower layer separately
-
+from dcsem import models, utils
 TR    = 1  # repetition time
 ntime = 100  # number of time points 
 tvec  = np.linspace(0,ntime*TR,ntime)  # seconds
@@ -89,7 +85,44 @@ for s,l in zip(state_tc,lambdas):
 plt.grid()
 plt.show()
 ```
-<img src="dcsem/static/DCM_layers_lambda.jpg" alt="layers" width="200" height="100">
+Effect of changing $\lamda_d$ on the BOLD activity in the upper layer. 
+![layers](dcsem/static/DCM_layers_lambda.png)
+
+### Simulating and fitting data with a Layer SEM
+
+The API of the MultiLayerSEM class is quite similar to DCM, except we don't have an input (the input is random noise).
+
+In the below example, we simulate a 2 ROI, 3 layer model and we fit the parameters to the simulated data and plot the posterior distributions.
+
+```python
+from dcsem import models, utils
+import numpy as np
+num_rois   = 2
+num_layers = 3
+A = utils.create_A_matrix(num_rois,num_layers,
+                          ['R0,L2 -> R1,L1 = 1.5',
+                           'R1,L0 -> R0,L0 = 0.5',
+                           'R1,L2 -> R0,L0 = 0.5'])
+sigma = 1.
+lsem  = models.MultiLayerSEM(num_rois,num_layers,params={'A':A, 'sigma':sigma})
+TIs   = [400, 600, 800, 1000] # inversion times
+y     = lsem.simulate_IR(tvec, TIs)
+tvec  = np.linspace(0,1,100)
+res   = lsem.fit_IR(tvec, y, TIs)
+```
+Now plot the posterior distributions:
+
+```python
+# Compare fitted to simulated params
+ground_truth  = lsem.p_from_A_sigma( A, sigma )
+estimated     = res.x
+estimated_cov = res.cov
+fig = utils.plot_posterior(estimated, estimated_cov, samples=res.samples, actual=ground_truth)
+```
+
+You should obtain something like the below:
+
+![layerSEM]("dcsem/static/LayerSEM_posterior.png")
 
 ### Implementation of DCM for layer FMRI
 
