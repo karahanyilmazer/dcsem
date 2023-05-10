@@ -161,3 +161,49 @@ $$
 \tau & \Longleftrightarrow & \tau_0.
 \end{array}
 $$
+
+### Two-Layer extension 
+Extending the model to incorporate multiple layers can be straightforwardly done by considering each layer as its own region, but we would like to additionally model the effect of venous blood flowing up towards the pial surface. This is achieved using two additional state variables $v_s(t), q_s(t)$ (volume and dHB concentration) which have the following dynamics:
+
+$$ 
+\begin{array}{rcl}
+\tau_d\frac{dv_s}{dt} & = & -v_s + (1-v_l)  \\
+\tau_d\frac{dq_s}{dt} & = & -q_s + (1-q_l)  
+\end{array}
+$$
+
+where $v_l$ and $q_l$ are volume/dHb state parameters of the ower layer. These equation mean changes in blood volume/dHb in lower layers drive the blood draining signal. 
+
+The state equations for the upper layer dynamics are slightly different to the standard balloon model, with the addition of fthe two new state variables:
+
+$$ 
+\begin{array}{rcl}
+\tau\frac{dv_u}{dt} & = & -v_u^{1/\alpha} + f_u + \lambda_d v_s  \\
+\tau\frac{dq_u}{dt} & = & -\frac{v_u^{1/\alpha}}{v_u}q_u+f_u\frac{1-(1-E_0)^{1/f_u}}{E_0} + \lambda_d q_s 
+\end{array}
+$$
+
+## SEM and Layer SEM
+
+
+Structural Equation Model:
+
+$$ x = Ax + u, $$
+
+where $u$ is $N(0,\sigma^2)$. 
+
+This implies: $x=(I-A)^{-1}(u)$, which is the generative model.
+
+The covariance implied by the model is $C=\sigma^2 (I-A)^{-1}(I-A)^{-T}$, which is to be compared to the empirical covariance $S=cov(x)$.
+
+For Layer SEM, the same equation applies, but the observations are of the form:
+
+$$ y_k=P_k x $$,
+
+where $\{P_k\}$ are partial volume matrices that combine signals from different layers. Combined with the generative equation for $x$ we have:
+
+$y_k = P_k (I-A)^{-1}(u)$
+
+and therefore $C_k = \sigma^2  P_k(I-A)^{-1}(I-A)^{-T} P_k^T$.
+
+
