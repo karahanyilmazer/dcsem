@@ -8,7 +8,7 @@ with open('requirements.txt', 'rt') as f:
 with open("README.md", "r") as fh:
     long_description = fh.read()
 
-setup(name='dcsen',
+setup(name='dcsem',
       description='DCM and SEM tool',
       author='Saad Jbabdi',
       author_email='saad.jbabdi@ndcn.ox.ac.uk',

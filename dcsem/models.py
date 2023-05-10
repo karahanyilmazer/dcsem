@@ -266,7 +266,8 @@ class SEM(BaseModel):
     def __init__(self, num_rois, params=None):
         super().__init__()
         self.num_rois = num_rois
-        self.p.A = np.zeros((num_rois, num_rois), dtype=np.float64)
+        self.num_states = num_rois
+        self.p.A = np.zeros((self.num_states, self.num_states), dtype=np.float64)
         self.p.sigma = 1.
         if params is not None:
             self.set_params(params)
@@ -279,8 +280,8 @@ class SEM(BaseModel):
         model implies: x = (I-A)^(-1)(u)
                        cov(x) = (I-A)^{-1}cov(u)(I-A)^{-T}
         """
-        u = np.random.normal(loc=0., scale=self.p.sigma, size=(self.num_rois, len(tvec)))
-        I = np.identity(self.num_rois)
+        u = np.random.normal(loc=0., scale=self.p.sigma, size=(self.num_states, len(tvec)))
+        I = np.identity(self.num_states)
         A = self.p.A
 
         return np.dot(np.linalg.inv(I-A), u).T
@@ -291,13 +292,14 @@ class SEM(BaseModel):
         if sigma is None:
             sigma = self.p.sigma
 
-        mat = np.linalg.inv(np.identity(self.num_rois)-A)
+        mat = np.linalg.inv(np.identity(self.num_states)-A)
         return sigma**2*np.dot(mat, mat.T)
 
-    def negloglik(self, y, A=None, sigma=None):
+    def negloglik(self, y, A=None, sigma=None, C=None):
         T, N = y.shape
         S = np.dot(y.T,y) / (T-1)
-        C = self.get_cov(A, sigma)
+        if C is None:
+            C = self.get_cov(A, sigma)
         invC = np.linalg.inv(C)
         _, logdetC = np.linalg.slogdet(C)
         _, logdetS = np.linalg.slogdet(S)
@@ -323,6 +325,19 @@ class SEM(BaseModel):
         a = A.ravel()[np.flatnonzero(self.p.A)]
         return np.append(sigma, a)
 
+    def fit_MH(self, p0, fn_negloglik, fn_neglogpr):
+        from dcsem.utils import MH
+        mh = MH(fn_negloglik, fn_neglogpr)
+        LB = np.full(p0.shape, -np.infty)
+        LB[0] = 0 # first element is sigma, should be positive
+        samples = mh.fit(p0, LB=LB)
+        p = Parameters()
+        p.x = np.mean(samples, axis=0)
+        p.cov = np.cov(samples.T)
+        p.samples = samples
+        p.A, p.sigma = self.A_sigma_from_p(p.x)
+        return p
+
     def fit(self, y, method='MH'):
         num_params = self.get_num_free_params()
         p0 = self.init_free_params(y)
@@ -334,21 +349,88 @@ class SEM(BaseModel):
             return 0
 
         if method == 'MH':
-            from dcsem.utils import MH
-            mh = MH(fn_negloglik, fn_neglogpr)
-            LB = np.full(p0.shape, -np.infty)
-            LB[0] = 0
-            samples = mh.fit(p0, LB=LB)
-            p = Parameters()
-            p.x = np.mean(samples, axis=0)
-            p.cov = np.cov(samples.T)
-            p.samples = samples
+            p = self.fit_MH(p0, fn_negloglik, fn_neglogpr)
         else:
-            def fn_loss(p):
-                return fn_negloglik(p)+fn_neglogpr(p)
-            # from scipy.optimise import fit_curve
-            return None
-
-        p.A, p.sigma = self.A_sigma_from_p(p.x)
+            raise(Exception('Only MH method is implemented'))
 
         return p
+
+# Layer SEM
+class MultiLayerSEM(SEM):
+    def __init__(self, num_rois, num_layers, params=None):
+        super().__init__(num_rois)
+        self.num_layers = num_layers
+        self.num_states = num_rois * num_layers
+        # Connectivity Matrix should be larger for MultiLayerSEM
+        self.p.A = np.zeros((self.num_rois*self.num_layers, self.num_rois*self.num_layers), dtype=np.float64)
+        # Define default values for T1s
+        from dcsem.utils import constants
+        self.T1s = np.linspace(constants['LowerLayerT1'],
+                               constants['UpperLayerT1'],
+                               num_layers)
+        if params is not None:
+            self.set_params(params)
+
+    def __str__(self):
+        ret = super().__str__()
+        ret += f"T1s = {self.T1s}"
+        return ret
+
+    def get_Pmat(self, TIs):
+        """Make partial volume matrix
+        T1s: T1 of each layer
+        TIs: TI of each measurement
+        """
+        E = np.abs(1-2*np.outer(np.array(TIs),1/np.array(self.T1s)))
+        E = E / np.sum(E, axis=1, keepdims=True)
+
+        allP = []
+        for i, ti in enumerate(TIs):
+            P = []
+            for j,t1 in enumerate(self.T1s):
+                pv = np.identity(self.num_rois)*E[i, j]
+                P.append(pv)
+            allP.append(np.concatenate(P, axis=1))
+
+        return allP
+
+    def simulate_IR(self, tvec, TIs):
+        """
+        x = Ax+u
+        for k:
+            y[k] = P[k]*x
+        """
+        P = self.get_Pmat(TIs)
+        x = self.simulate(tvec)
+        y = [np.dot(p, x.T).T for p in P]
+        return y
+
+    def get_cov_PV(self, P, A=None, sigma=None):
+        return P@self.get_cov(A, sigma)@P.T
+
+    def fit_IR(self, tvec, y, TIs, method='MH'):
+        num_params = self.get_num_free_params()
+        p0 = self.init_free_params(y)
+        P  = self.get_Pmat(TIs)
+
+        def fn_negloglik(p):
+            A, sigma = self.A_sigma_from_p(p)
+            L = 0
+            for k, Pmat in enumerate(P):
+                Ck = self.get_cov_PV(Pmat, A, sigma)
+                L += self.negloglik(y[k], A, sigma, Ck)
+            return L
+        def fn_neglogpr(p):
+            return 0
+
+        if method == 'MH':
+            p = self.fit_MH(p0, fn_negloglik, fn_neglogpr)
+        else:
+            raise(Exception('Only MH method is implemented'))
+
+        return p
+
+
+
+
+

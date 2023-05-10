@@ -8,6 +8,11 @@
 # SHBASECOPYRIGHT
 import numpy as np
 
+constants = {
+    'LowerLayerT1' : 800,  # ms
+    'UpperLayerT1' : 1200, # ms
+}
+
 def create_A_matrix(num_rois, num_layers=1, paired_connections=None, self_connections=None):
     """Make a connectivity matrix
     params:

@@ -138,3 +138,15 @@ def test_SEM():
     res = sem.fit(y, method='MH')
     assert np.isclose(res.A[1,0],sem.p.A[1,0],atol=1)
     assert np.isclose(res.sigma,sem.p.sigma,atol=1)
+
+def test_MultiLayerSEM():
+    lsem = models.MultiLayerSEM(1,2)
+    assert min(lsem.T1s) == utils.constants['LowerLayerT1']
+    assert max(lsem.T1s) == utils.constants['UpperLayerT1']
+
+    lsem = models.MultiLayerSEM(2,2)
+    TIs  = [400, 600, 800, 1000]
+    tvec = np.linspace(0,1,100)
+    y    = lsem.simulate_IR(tvec, TIs)
+    res = lsem.fit_IR(tvec, y, TIs, method='MH')
+    assert np.all(np.isclose(res.x, [1.,.5,1.], atol=2))
