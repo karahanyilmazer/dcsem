@@ -15,6 +15,32 @@ constants = {
     'UpperLayerT1' : 1200, # ms
 }
 
+def parse_matrix_file(matfile, num_rois=None, num_layers=None, self_conn=None):
+    """Interprets matrix file as either A or C matrix
+    File can either be explicit matrix definition or defined in terms of input/output/layer etc.
+
+    :param matfile: str
+    :return: numpy array (2D for Amat and 1D for Cmat)
+    """
+    # try to see if it's an explicit file by loading with numpy
+    try:
+        mat = np.loadtxt(os.path.expanduser(matfile))
+        return mat
+    except:
+        if num_layers is None and num_rois is None:
+            raise(Exception('Matrix is defined with text. You need to specify num_rois/num_layers'))
+        # Read the file
+        conn = []
+        with open(os.path.expanduser(matfile), 'r') as f:
+            conn = [l.rstrip() for l in f]
+        # see if it is A or C (we need num_rois and num_layers)
+        if '->' in conn[0]:
+            return create_A_matrix(num_rois, num_layers, paired_connections=conn, self_connections=self_conn)
+        else:
+            return create_C_matrix(num_rois, num_layers, input_connections=conn)
+
+
+
 def create_A_matrix(num_rois, num_layers=1, paired_connections=None, self_connections=None):
     """Make a connectivity matrix
     params:
@@ -80,8 +106,8 @@ def stim_boxcar(stim):
     # Boxcar input
     import os
     if type(stim) == str:
-        if os.path.exists(stim):
-            stim = np.loadtxt(stim)
+        if os.path.exists(os.path.expanduser(stim)):
+            stim = np.loadtxt(os.path.expanduser(stim))
     stim = np.asarray(stim)
     if stim.shape[1] == 3:
         stim = stim.T

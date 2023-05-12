@@ -194,6 +194,12 @@ class TwoLayerDCM(DCM):
         self.p.tau_d = 1.   # delay
         self.p.tau_l = 2.66 # delay
         self.p.tau_d = 2.66 # delay
+        # Define default values for T1s
+        from dcsem.utils import constants
+        self.T1s = np.linspace(constants['LowerLayerT1'],
+                               constants['UpperLayerT1'],
+                               self.num_layers)
+
         # set user-defined params
         if params is not None:
             self.set_params(params)
@@ -367,7 +373,7 @@ class MultiLayerSEM(SEM):
         from dcsem.utils import constants
         self.T1s = np.linspace(constants['LowerLayerT1'],
                                constants['UpperLayerT1'],
-                               num_layers)
+                               self.num_layers)
         if params is not None:
             self.set_params(params)
 

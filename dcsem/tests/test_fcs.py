@@ -13,6 +13,23 @@ from pathlib import Path
 testsPath = Path(__file__).parent
 
 # test utils
+def test_parse_matrix_file():
+    target_A = np.array([[  -3.,    0.,    0.,    0.],[   0.,   -3.,    1.,    0.],[   0., -100.,   -3.,    0.],[   0.,   10.,    0.,   -3.]])
+    A = utils.parse_matrix_file(str(testsPath / 'test_data' / 'Amat.txt'))
+    assert np.all(np.isclose(A, target_A))
+    A = utils.parse_matrix_file(str(testsPath / 'test_data' / 'Amat_text.txt'),2,2)
+    assert np.all(np.isclose(A, target_A))
+
+    A = utils.parse_matrix_file(str(testsPath / 'test_data' / 'Amat_text.txt'),2,2,-3)
+    assert np.all(np.isclose(A, target_A))
+
+    target_C = np.array([.1,0.5,0.,.3])
+    C = utils.parse_matrix_file(str(testsPath / 'test_data' / 'Cmat.txt'))
+    assert np.all(np.isclose(C, target_C))
+    C = utils.parse_matrix_file(str(testsPath / 'test_data' / 'Cmat_text.txt'),2,2)
+    assert np.all(np.isclose(C, target_C))
+
+
 def test_create_A_matrix():
     target_A = np.array([[  -3.,    0.,    0.,    0.],[   0.,   -3.,    1.,    0.],[   0., -100.,   -3.,    0.],[   0.,   10.,    0.,   -3.]])
     num_rois = 2
