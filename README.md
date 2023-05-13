@@ -15,8 +15,67 @@ pip install -e .
 
 ## Usage
 
-### Simulating data using DCM generative model
-In the below example, we create a simple two-ROI DCM model. 
+### Using the command-line wrappers
+The easiest way to run the simulations is by using the command line wrapper tools `dcsem_sim` and `dcsem_fit`.
+
+To get the usage, simply type:
+
+```bash
+dcsem_fit --help
+```
+
+It is best to run the simulator using a configuration file which defines all the parameters. Here is an example which simulates a DCM model with 3 regions and 2 layers per region:
+
+```bash
+# Comments are ignored
+outdir = /path/to/output/folder
+
+# Model
+model = DCM 
+
+# Network definitions:
+num_rois = 3
+num_layers = 2
+Amat = /path/to/Amat.txt
+Cmat = /path/to/Cmat.txt
+
+# Time series params
+time_points = 200  
+tr = 0.72 
+cnr = 20
+```
+Once the configuration file has been created, you can run the simulation using:
+
+```bash
+dcsem_sim --config my_configuration.txt
+```
+
+### Defining the connectivity matrices A and C
+The files `Amat.txt` and `Cmat.txt` required to run the simulations can have two different formats. They can either be explicitly given.
+
+For example, the network shown below has two ROIs with connectivity between the upper and lower layers between the ROIs.
+
+The corresponding connectivity matrix (assuming all connection parameters equal 1 and self-connections equal -1) is:
+
+```bash
+echo -1  0  0  0  > Amat.txt
+echo  0 -1  0  0 >> Amat.txt
+echo  0  1 -1  0 >> Amat.txt
+echo  1  0  0 -1 >> Amat.txt
+```
+
+The same info could be given with the following text file:
+
+```text
+R0, L0 -> R1, L1 = 1
+R1, L0 -> R0, L1 = 1
+```
+The self connections can also be added to the above for each roi and layer, or it can be included in the command-line interface using the `--self_conn` flag.
+
+
+### Using the python interface
+
+The simulations can also be directly run using the python interface. In the below example, we create a simple two-ROI DCM model. 
 ```python
 import numpy as np
 from dcsem import models, utils
