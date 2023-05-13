@@ -1,0 +1,38 @@
+#!/usr/bin/env python
+
+# dcsem_fit.py - wrapper script for fitting data
+#
+# Author: Saad Jbabdi <saad@fmrib.ox.ac.uk>
+#
+# Copyright (C) 2023 University of Oxford
+# SHBASECOPYRIGHT
+import argparse
+
+p = argparse.ArgumentParser("DCSEM - Simulator")
+p.add_argument('--model', required=True, type=str, dest='model',
+                   metavar='<MODEL>', help='Model to use. Either DCM or SEM')
+p.add_argument('--num_rois', required=True, type=int,
+                help='Number of ROIs')
+p.add_argument('--num_layers', required=True, type=int,
+                help='Number of Layers per ROI')
+p.add_argument('--time_points', required=True, type=int,
+                help='Number of Ltime points')
+p.add_argument('--tr', required=False, type=float, default=1.,
+                help='Repetition time (seconds). Default = 1s')
+p.add_argument('--Amat', required=False, type=str,
+                help='A matrix specification (text file)')
+p.add_argument('--Cmat', required=False, type=int,
+                help='C matrix specification (text file)')
+p.add_argument('--sigma', required=False, type=float,default=1.,
+                help='Value of Sigma for SEM')
+p.add_argument('--cnr', required=False, type=float,
+                help='Value of CNR for DCM')
+p.add_argument('--self_conn', required=False, type=float,default=-1,
+                help='Value of Sigma for SEM')
+p.add_argument('--stimulus', required=False, type=str,
+                help="Stimulus. Either 3-column format file, or 'random'")
+p.add_argument('--verbose', action='store_true', help='Verbose mode')
+p.add_argument('--outdir', required=True, type=str,
+                help='output folder')
+
+args = p.parse_args()

@@ -117,6 +117,11 @@ else:
 
 
 # save more information
+np.savetxt(outdir+'/Amat.txt', model.p.A)
+if model.model == 'DCM':
+    np.savetxt(outdir+'/Cmat.txt', model.p.C)
+
+
 info = {}
 info['model'] = model.model
 info['num_rois'] = model.num_rois
