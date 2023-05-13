@@ -13,7 +13,7 @@ setup(name='dcsem',
       author='Saad Jbabdi',
       author_email='saad.jbabdi@ndcn.ox.ac.uk',
       packages=['dcsem',],
-      scripts=['dcsem/scripts/dcsem_sim.py',],
+      scripts=['dcsem/scripts/dcsem_sim',],
       install_requires=install_requires,
       )
 
