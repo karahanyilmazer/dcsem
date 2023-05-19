@@ -111,8 +111,8 @@ def test_DCM():
               [  0.2,  -2.0]])
     C = np.array([1,0])
     dcm.set_params({'A':A,'C':C})
-    state_tc = dcm.simulate(tvec,u)
-    assert np.all(np.isclose(sum(state_tc['bold']),[1.49680682, 0.18591665]))
+    bold, state_tc = dcm.simulate(tvec,u)
+    assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665]))
 
 
 def test_TwoLayerDCM():
@@ -130,8 +130,8 @@ def test_TwoLayerDCM():
     C = np.array([1,1])
     ldcm.set_params({'l_d':.5,'A':A,'C':C})
 
-    state_tc = ldcm.simulate(tvec,u)
-    assert np.all(np.isclose(sum(state_tc['bold']),[1.5932011,  2.71178688]))
+    bold, state_tc = ldcm.simulate(tvec,u)
+    assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688]))
 
 def test_SEM():
     sem = models.SEM(num_rois=2)
@@ -142,14 +142,14 @@ def test_SEM():
 
     sem1 = models.SEM(num_rois=2, params={'A':[[0,1],[.5,0]]})
     sem2 = models.SEM(num_rois=2, params={'A':[[0,50],[-50,0]]})
-    assert np.linalg.norm(sem1.get_cov()-np.cov(sem1.simulate(tvec).T)) < 5
-    assert np.linalg.norm(sem1.get_cov()-np.cov(sem2.simulate(tvec).T)) > 10
+    assert np.linalg.norm(sem1.get_cov()-np.cov(sem1.simulate(tvec)[0].T)) < 5
+    assert np.linalg.norm(sem1.get_cov()-np.cov(sem2.simulate(tvec)[0].T)) > 10
 
     num_rois = 3
     A = np.array([[0,   0, 0], [-5,   0, 0], [1,  -1, 0]])
     sem = models.SEM(num_rois=num_rois, params={'sigma':1,'A':A})
     tvec=np.linspace(0,1,300)
-    y = sem.simulate(tvec)
+    y, _ = sem.simulate(tvec)
     assert np.isclose(sem.negloglik(y),1270,atol=300)
 
     # fit
@@ -157,7 +157,7 @@ def test_SEM():
     A = np.array([[0,   0, 0], [-5.,   0, 0], [1.,  -1., 0]])
     sem = models.SEM(num_rois=num_rois, params={'sigma':1,'A':A})
     tvec=np.linspace(0,1,300)
-    y = sem.simulate(tvec)
+    y, _ = sem.simulate(tvec)
     res = sem.fit(y, method='MH')
     assert np.isclose(res.A[1,0],sem.p.A[1,0],atol=1)
     assert np.isclose(res.sigma,sem.p.sigma,atol=1)
@@ -170,6 +170,35 @@ def test_MultiLayerSEM():
     lsem = models.MultiLayerSEM(2,2)
     TIs  = [400, 600, 800, 1000]
     tvec = np.linspace(0,1,100)
-    y    = lsem.simulate_IR(tvec, TIs)
+    y = lsem.simulate_IR(tvec, TIs)
     res = lsem.fit_IR(tvec, y, TIs, method='MH')
     assert np.all(np.isclose(res.x, [1.,.5,1.], atol=2))
+
+def test_state_tc_to_dict():
+    # test for dcm
+    dcm = models.DCM(num_rois=3)
+    tvec = np.linspace(0,50,300)
+    u    = utils.stim_boxcar([[0,30,1]])
+    _, state_tc = dcm.simulate(tvec, u)
+    state_tc = dcm.state_tc_to_dict(state_tc)
+    assert len(state_tc['q']) == 3
+    assert len(state_tc['q']['R0']) == 300
+
+    ldcm = models.TwoLayerDCM(num_rois=3)
+    _, state_tc = ldcm.simulate(tvec, u)
+    state_tc = ldcm.state_tc_to_dict(state_tc)
+    assert len(state_tc['q']) == 6
+    assert len(state_tc['q']['R0L1']) == 300
+
+    # test for sem
+    sem = models.SEM(num_rois=3)
+    _, state_tc = sem.simulate(tvec)
+    state_tc = sem.state_tc_to_dict(state_tc)
+    assert len(state_tc['x']) == 3
+    assert len(state_tc['x']['R0']) == 300
+
+    lsem = models.MultiLayerSEM(num_rois=3, num_layers=4)
+    _, state_tc = lsem.simulate(tvec)
+    state_tc = lsem.state_tc_to_dict(state_tc)
+    assert len(state_tc['x']) == 12
+    assert len(state_tc['x']['R0L3']) == 300

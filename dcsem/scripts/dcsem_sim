@@ -22,24 +22,30 @@ required.add_argument('--num_rois', required=True, type=int,
 required.add_argument('--num_layers', required=True, type=int,
                       help='Number of Layers per ROI')
 required.add_argument('--time_points', required=True, type=int,
-                help='Number of Ltime points')
+                      help='Number of Ltime points')
 optional.add_argument('--tr', required=False, type=float, default=1.,
-                help='Repetition time (seconds). Default = 1s')
+                      help='Repetition time (seconds). Default = 1s')
 optional.add_argument('--Amat', required=False, type=str,
-                help='A matrix specification (text file)')
+                      help='A matrix specification (text file)')
 optional.add_argument('--Cmat', required=False, type=str,
-                help='C matrix specification (text file)')
+                      help='C matrix specification (text file)')
 optional.add_argument('--sigma', required=False, type=float,default=1.,
-                help='Value of Sigma for SEM')
+                      help='Value of Sigma for SEM')
 optional.add_argument('--cnr', required=False, type=float,
-                help='Value of CNR for DCM')
+                      help='Value of CNR for DCM')
 optional.add_argument('--self_conn', required=False, type=float,default=-1.,
-                help='Value of Sigma for SEM')
+                      help='Value of Sigma for SEM')
 optional.add_argument('--stim', required=False, type=str,
-                help="Stimulus. Either 3-column format file, or 'random'")
+                      help="Stimulus. Either 3-column format file, or 'random'")
 optional.add_argument('--verbose', action='store_true', help='Verbose mode')
 required.add_argument('--outdir', required=True, type=str,
-                help='output folder')
+                      help='output folder')
+optional.add_argument('--TIs', required=False, type=float, nargs='*',
+                      help='Inversion times for IR-FMRI simulations')
+optional.add_argument('--T1s', required=False, nargs='*',
+                      help='T1 values for the different layers. Must match --num_layers')
+
+# Config file
 optional.add('--config', required=False, is_config_file=True,
              help='configuration file')
 
@@ -92,28 +98,60 @@ if args.verbose:
     print('begin simulation')
 tvec = np.linspace(0, args.time_points * args.tr, args.time_points)
 if args.model == 'SEM':
-    sim = model.simulate(tvec)
+    bold, state_tc = model.simulate(tvec)
 else:
     # stimulus:
     if args.stim == 'random':
+        if args.verbose:
+            print('... random stimulus')
         u = utils.stim_random(tvec, args.num_rois*args.num_layers)
     else:
+        if args.verbose:
+            print('... boxcar stimulus')
         u = utils.stim_boxcar(args.stim)
-    sim = model.simulate(tvec, u = u, CNR=args.cnr)
+    bold, state_tc = model.simulate(tvec, u = u, CNR=args.cnr)
+
+state_tc = model.state_tc_to_dict(state_tc)
+Results = {'BOLD' : bold, 'State_tc' : state_tc}
+
+# If TIs are provided, simulate the IR-BOLD signals
+if args.TIs:
+    TIs = args.TIs
+    if args.verbose:
+        print(f'TIs = {TIs}')
+    T1s = []
+    if args.T1s:
+        T1s = args.T1s
+        if len(T1s) != args.num_layers:
+            raise(Exception('Number of T1s does not match number of layers'))
+        else:
+            model.T1s = T1s
+
+    IR_signals = model.simulate_IR(tvec, TIs=TIs)
+    for ti, signal in zip(TIs, IR_signals):
+        Results[f'IR-BOLD_TI{int(ti)}'] = signal
 
 # Save results here
 if args.verbose:
-    print('save results')
+    print(f'save results to {args.outdir}')
 
 outdir = os.path.expanduser(args.outdir)
 os.makedirs(outdir, exist_ok=True)
 
-if args.model == 'SEM':
-    np.savetxt(outdir+"/y.txt", sim)
-    quickplot(sim, outdir+'/y.png')
-else:
-    np.savetxt(outdir+"/y.txt", sim['bold'])
-    quickplot(sim['bold'], outdir+'/y.png')
+import pandas as pd
+for name in Results['State_tc']:
+    D = Results['State_tc'][name]
+    pd.DataFrame(D).to_csv(outdir+f'/state_tc_{name}.csv', index=False)
+
+if args.TIs:
+    for ti in TIs:
+        name = f'IR-BOLD_TI{int(ti)}'
+        signal = Results[name]
+        np.savetxt(outdir+f'{name}.txt', signal)
+        quickplot(signal, outdir+f'/{name}.png')
+
+np.savetxt(outdir+"/bold.txt", bold)
+quickplot(bold, outdir+'/bold.png')
 
 
 # save more information

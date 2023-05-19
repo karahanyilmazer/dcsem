@@ -27,6 +27,11 @@ class BaseModel(object):
     def __init__(self):
         self.model = self.__class__.__name__
         self.p = Parameters()
+        self.num_rois = None
+        self.num_layers = None
+        self.state_vars = []
+        # Base class knows about T1s so it can generate IR-BOLD
+        self.T1s = None
 
     def __str__(self):
         """Print out model parameters
@@ -39,6 +44,10 @@ class BaseModel(object):
         return out
 
     def simulate(self):
+        """Implementation of the simulator
+        :return:
+        tuple : (BOLD, State_tc)
+        """
         raise(Exception('This is not implemented in the base class'))
 
     def fit(self, y):
@@ -54,6 +63,30 @@ class BaseModel(object):
     def get_params(self):
         return self.p
 
+    def state_tc_to_dict(self, state_tc):
+        """Turn state_tc to dict of dict for saving
+        :param state_tc: dict of array
+        :return:
+        dict of dict
+        """
+        if type(state_tc) == np.ndarray:
+            state_tc = {self.state_vars[0] : state_tc}
+        Results = {}
+        for v in self.state_vars:
+            D = {}
+            if state_tc[v].shape[1] == self.num_rois:
+                for roi in range(self.num_rois):
+                    name = f'R{roi}'
+                    D[name] = state_tc[v][:, roi]
+            else:
+                for layer in range(self.num_layers):
+                    for roi in range(self.num_rois):
+                        idx = roi+layer*self.num_rois
+                        name = f'R{roi}L{layer}'
+                        D[name] = state_tc[v][:, idx]
+            Results[v] = D
+        return Results
+
     def add_noise(self, signal, CNR):
         """
         :param signal: array
@@ -65,7 +98,41 @@ class BaseModel(object):
         noise       = np.random.normal(loc=0, scale=std_noise, size=signal.shape)
         return signal + noise
 
+    def get_Pmat(self, TIs):
+        """Make partial volume matrix
+        T1s: T1 of each layer
+        TIs: TI of each measurement
+        """
+        E = np.abs(1-2*np.outer(np.array(TIs),1/np.array(self.T1s)))
+        E = E / np.sum(E, axis=1, keepdims=True)
 
+        allP = []
+        for i, ti in enumerate(TIs):
+            P = []
+            for j,t1 in enumerate(self.T1s):
+                pv = np.identity(self.num_rois)*E[i, j]
+                P.append(pv)
+            allP.append(np.concatenate(P, axis=1))
+
+        return allP
+
+    def simulate_IR(self, tvec, TIs):
+        """
+        x = Ax+u
+        for k:
+            y[k] = P[k]*x
+        """
+        if self.T1s is None:
+            raise(Exception('Must set the T1s'))
+        if self.num_rois is None:
+            raise(Exception('Must set num_rois'))
+
+        P = self.get_Pmat(TIs)
+        y = []
+        for p in P:
+            bold, _ = self.simulate(tvec)
+            y.append(np.dot(p, bold.T).T)
+        return y
 
 class DCM(BaseModel):
     def __init__(self, num_rois, params=None):
@@ -76,10 +143,10 @@ class DCM(BaseModel):
         super().__init__()
         # conn params
         self.num_rois = num_rois
+        self.num_layers = 1
         self.p.A = np.zeros((num_rois, num_rois))
         self.p.C = np.zeros(num_rois)
         # rCBF component params
-        self.p = Parameters()
         self.p.kappa = 1.92
         self.p.gamma = 0.41
         # Balloon component params
@@ -96,6 +163,9 @@ class DCM(BaseModel):
             self.set_params(params)
         # State variables
         self.state_vars = ['s', 'f', 'v', 'q', 'x']
+        # Define default values for T1s
+        from dcsem.utils import constants
+        self.T1s = (constants['LowerLayerT1']+constants['UpperLayerT1'])/2.
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change
@@ -122,8 +192,8 @@ class DCM(BaseModel):
 
         # Turn to numpy arrays and add bold timecourse
         state_tc = {key:np.asarray(state_tc[key]) for key in state_tc}
-        state_tc['bold'] = np.asarray(BOLD_tc)
-        return state_tc
+
+        return np.asarray(BOLD_tc), state_tc
 
     def get_func(self):
         # state vector:
@@ -165,13 +235,13 @@ class DCM(BaseModel):
                         method='LSODA')
 
         # create results dict
-        state_tc = self.collect_results(ivp)
+        bold, state_tc = self.collect_results(ivp)
 
         # Add noise to BOLD timecourse
         if CNR is not None:
-            state_tc['bold'] = self.add_noise(state_tc['bold'], CNR)
+            bold = self.add_noise(bold, CNR)
 
-        return state_tc
+        return bold, state_tc
 
 
 # TwoLayer-DCM sub-class
@@ -241,7 +311,7 @@ class TwoLayerDCM(DCM):
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt, dvsdt, dqsdt]
         return F
 
-    def collect_results(self,ivp):
+    def collect_results(self, ivp):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
         num_state = 6
@@ -255,15 +325,7 @@ class TwoLayerDCM(DCM):
 
         # Turn lists into numpy arrays and add BOLD
         state_tc = {key:np.asarray(state_tc[key]) for key in state_tc}
-        state_tc['bold'] = np.asarray(BOLD_tc)
-        return state_tc
-
-    @staticmethod
-    def bold2IR(bold, TI, T1l, T1u):
-        TI = np.array(TI)
-        return np.dot(bold, np.c_[np.abs(1-2*np.exp(-TI/T1l)), np.abs(1-2*np.exp(-TI/T1u))].T)
-
-
+        return np.asarray(BOLD_tc), state_tc
 
 
 # Structural Equation Modelling
@@ -272,11 +334,13 @@ class SEM(BaseModel):
     def __init__(self, num_rois, params=None):
         super().__init__()
         self.num_rois = num_rois
-        self.num_states = num_rois
+        self.num_layers = 1
+        self.num_states = num_rois*self.num_layers
         self.p.A = np.zeros((self.num_states, self.num_states), dtype=np.float64)
         self.p.sigma = 1.
         if params is not None:
             self.set_params(params)
+        self.state_vars = ['x']
 
     def simulate(self, tvec):
         """Simulate time courses
@@ -289,8 +353,9 @@ class SEM(BaseModel):
         u = np.random.normal(loc=0., scale=self.p.sigma, size=(self.num_states, len(tvec)))
         I = np.identity(self.num_states)
         A = self.p.A
+        x = np.dot(np.linalg.inv(I-A), u).T
 
-        return np.dot(np.linalg.inv(I-A), u).T
+        return x, x
 
     def get_cov(self, A=None, sigma=None):
         if A is None:
@@ -381,35 +446,6 @@ class MultiLayerSEM(SEM):
         ret = super().__str__()
         ret += f"T1s = {self.T1s}"
         return ret
-
-    def get_Pmat(self, TIs):
-        """Make partial volume matrix
-        T1s: T1 of each layer
-        TIs: TI of each measurement
-        """
-        E = np.abs(1-2*np.outer(np.array(TIs),1/np.array(self.T1s)))
-        E = E / np.sum(E, axis=1, keepdims=True)
-
-        allP = []
-        for i, ti in enumerate(TIs):
-            P = []
-            for j,t1 in enumerate(self.T1s):
-                pv = np.identity(self.num_rois)*E[i, j]
-                P.append(pv)
-            allP.append(np.concatenate(P, axis=1))
-
-        return allP
-
-    def simulate_IR(self, tvec, TIs):
-        """
-        x = Ax+u
-        for k:
-            y[k] = P[k]*x
-        """
-        P = self.get_Pmat(TIs)
-        x = self.simulate(tvec)
-        y = [np.dot(p, x.T).T for p in P]
-        return y
 
     def get_cov_PV(self, P, A=None, sigma=None):
         return P@self.get_cov(A, sigma)@P.T
