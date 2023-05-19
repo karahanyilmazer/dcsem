@@ -43,7 +43,7 @@ class BaseModel(object):
         out += "--------------------------\n"
         return out
 
-    def simulate(self):
+    def simulate(self, u=None):
         """Implementation of the simulator
         :return:
         tuple : (BOLD, State_tc)
@@ -116,7 +116,7 @@ class BaseModel(object):
 
         return allP
 
-    def simulate_IR(self, tvec, TIs):
+    def simulate_IR(self, tvec, TIs, u=None):
         """
         x = Ax+u
         for k:
@@ -130,7 +130,7 @@ class BaseModel(object):
         P = self.get_Pmat(TIs)
         y = []
         for p in P:
-            bold, _ = self.simulate(tvec)
+            bold, _ = self.simulate(tvec, u=u)
             y.append(np.dot(p, bold.T).T)
         return y
 
@@ -210,7 +210,7 @@ class DCM(BaseModel):
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
         return F
 
-    def simulate(self, tvec, u, CNR=None):
+    def simulate(self, tvec, u=None, CNR=None):
         """Generate BOLD+state time courses using ODE solver
         params:
         tvec (array)  - Times where states are evaluated
@@ -222,6 +222,10 @@ class DCM(BaseModel):
 
         # get main function
         F = self.get_func()
+
+        # if no input, set to zero
+        if u is None:
+            u = lambda x:0
 
         # intialise
         p0 = self.init_states()
@@ -257,8 +261,8 @@ class TwoLayerDCM(DCM):
         super().__init__(num_rois, params)
         # matrices A and C should be double the size
         self.num_layers = 2
-        self.p.A = np.zeros((self.num_rois*self.num_layers,self.num_rois*self.num_layers))
-        self.p.C = np.zeros(self.num_rois*2)
+        self.p.A = np.zeros((self.num_rois*self.num_layers, self.num_rois*self.num_layers))
+        self.p.C = np.zeros(self.num_rois*self.num_layers)
         # haemo parmas
         self.p.l_d   = 0.5  # coupling param
         self.p.tau_d = 1.   # delay
@@ -328,6 +332,97 @@ class TwoLayerDCM(DCM):
         return np.asarray(BOLD_tc), state_tc
 
 
+import numpy as np
+from dcsem.models import DCM
+class MultiLayerDCM(DCM):
+    def __init__(self, num_rois, num_layers, params=None):
+        super().__init__(num_rois, params)
+        self.num_rois = num_rois
+        self.num_layers = num_layers
+        self.num_states = 5*num_rois*num_layers + 2*num_rois*(num_layers-1)
+        self.p.A = np.zeros((self.num_rois*self.num_layers, self.num_rois*self.num_layers))
+        self.p.C = np.zeros(self.num_rois*self.num_layers)
+        # haemo parmas
+        self.p.l_d   = 0.5  # coupling param
+        self.p.tau_d = 2.66 # delay
+        # Define default values for T1s
+        from dcsem.utils import constants
+        self.T1s = np.linspace(constants['LowerLayerT1'],
+                               constants['UpperLayerT1'],
+                               self.num_layers)
+
+        # set user-defined params
+        if params is not None:
+            self.set_params(params)
+        self.state_vars.extend(['vs', 'qs'])
+
+    def init_states(self):
+        zeros = np.full(self.num_rois*self.num_layers, 0.)
+        ones  =  np.full(self.num_rois*self.num_layers, 1.)
+        s0,x0 = zeros, zeros
+        f0,v0,q0 = ones, ones, ones
+
+        ones_l  =  np.full(self.num_rois*(self.num_layers-1), 1.)
+        vs0, qs0 = ones_l, ones_l
+
+        return self.merge_p(s0, f0, v0, q0, x0, vs0, qs0)
+
+    def split_p(self, p):
+        # do stuff
+        n = 5*self.num_rois*self.num_layers
+        m = 2*self.num_rois*(self.num_layers-1)
+        s, f, v, q, x = np.array_split(p[:n], 5)
+        vs, qs = np.array_split(p[n:], 2)
+        return s, f, v, q, x, vs, qs
+
+    @staticmethod
+    def merge_p(s, f, v, q, x, vs, qs):
+        return np.r_[s, f, v, q, x, vs, qs]
+
+    def get_func(self):
+        # state vector:
+        # p = [s,f,v,q,x,vs,qs]
+        # dpdt = F(t,p)
+
+        def F(t, p, u):
+            s, f, v, q, x, vs, qs = self.split_p(p)
+
+            # combines all layers
+            dsdt = x-self.p.kappa*s-self.p.gamma*(f-1)
+            dfdt = s
+            # drain effect here
+            drain_v = np.r_[np.zeros(self.num_rois),self.p.l_d*vs]
+            drain_q = np.r_[np.zeros(self.num_rois),self.p.l_d*qs]
+            dvdt = (1/self.p.tau)*(f-v**(1/self.p.alpha)) + drain_v
+            dqdt = (1/self.p.tau)*(f*(1-(1-self.p.E0)**(1/f))/self.p.E0-v**(1/self.p.alpha-1)*q) + drain_q
+            # delay eqs
+            vl = v[:self.num_rois*(self.num_layers-1)] #]np.array_split(v,self.num_layers)
+            ql = q[:self.num_rois*(self.num_layers-1)]
+
+            dvsdt = 1/self.p.tau_d*(-vs+(vl-1))
+            dqsdt = 1/self.p.tau_d*(-qs+(ql-1))
+            # combines all layers
+            dxdt = np.dot(self.p.A, x)+ self.p.C * u(t)
+            return self.merge_p(dsdt, dfdt, dvdt, dqdt, dxdt, dvsdt, dqsdt)
+        return F
+
+    def collect_results(self, ivp):
+        BOLD_tc = []
+        state_tc = {key:[] for key in self.state_vars}
+        num_state = 6
+        for idx in range(len(ivp.t)):
+            p = ivp.y[:,idx]
+            s, f, v, q, x, vs, qs = self.split_p(p)
+            BOLD_tc.append(self.calc_BOLD(q, v))
+            for key in self.state_vars:
+                state_tc[key].append(eval(key))
+
+        # Turn lists into numpy arrays and add BOLD
+        state_tc = {key:np.asarray(state_tc[key]) for key in state_tc}
+        return np.asarray(BOLD_tc), state_tc
+
+
+
 # Structural Equation Modelling
 # SEM class
 class SEM(BaseModel):
@@ -342,8 +437,9 @@ class SEM(BaseModel):
             self.set_params(params)
         self.state_vars = ['x']
 
-    def simulate(self, tvec):
+    def simulate(self, tvec, u=None):
         """Simulate time courses
+        (here u is ignored and instead random noise is used)
         model is : x = Ax + u
         where u ~ N(0, sigma^2)
 

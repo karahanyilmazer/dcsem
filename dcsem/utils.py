@@ -137,6 +137,24 @@ def stim_random_events(tvec, p=0.5, n=1):
     return u
 
 
+def plot_signals(model, signal, tvec=None):
+    if tvec is None:
+        tvec = np.linspace(0,len(signal),len(signal))
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(ncols=model.num_rois, nrows=model.num_layers, sharex=True, sharey=True)
+
+    for r in range(model.num_rois):
+        for l in range(model.num_layers):
+            idx = r + model.num_rois*l
+            ax = axes[model.num_layers-1-l,r]
+            ax.plot(tvec, signal[:, idx])
+            ax.grid()
+            ax.set_title(f'R{r}, L{l}')
+    fig.subplots_adjust(wspace=0, top=0.9)
+    return fig
+
+
 # MCMC fitting class
 class MH(object):
     def __init__(self, loglik, logpr, burnin=1000, sampleevery=10, njumps=5000, update=20):

@@ -133,6 +133,30 @@ def test_TwoLayerDCM():
     bold, state_tc = ldcm.simulate(tvec,u)
     assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688]))
 
+
+def test_MultiLayerDCM():
+
+    tvec = np.linspace(0,100,300)
+    u = utils.stim_boxcar([[0,2,1]])
+
+
+    conn = ['R0,L2->R1,L2=3.',
+            'R1,L0->R0,L0=.2',
+            'R1,L0->R0,L2=.2']
+
+    A = utils.create_A_matrix(2,3,conn,-1)
+    C = utils.create_C_matrix(2,3,['R0,L0=1','R0,L1=1','R0,L2=1'])
+
+    ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1})
+
+    bold, state_tc = ldcm.simulate(tvec, u)
+    assert np.isclose(np.mean(bold),0.004449409616566336)
+
+    TIs = [300, 600]
+    ir_bold = ldcm.simulate_IR(tvec, TIs, u)
+    assert np.isclose(np.mean(ir_bold[1]), 0.0014695061027040852)
+
+
 def test_SEM():
     sem = models.SEM(num_rois=2)
     sem.set_params({'A':[[0,1],[.5,0]],'C':[10,0]})
