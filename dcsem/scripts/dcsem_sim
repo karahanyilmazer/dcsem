@@ -55,7 +55,7 @@ args = p.parse_args()
 
 from dcsem import models, utils
 import numpy as np
-import os
+import os, warnings
 
 # plotting function
 def quickplot(ts, image_file):
@@ -67,7 +67,7 @@ def quickplot(ts, image_file):
 
 if args.model == 'SEM':
     if args.stim:
-        raise(Warning('Stimulus file will be ignored as this is running an SEM!'))
+        warnings.warn('Stimulus file will be ignored as this is running an SEM!')
     if args.num_layers > 1:
         model = models.MultiLayerSEM(num_rois=args.num_rois, num_layers=args.num_layers)
     else:
