@@ -98,6 +98,35 @@ def create_C_matrix(num_rois, num_layers=1, input_connections=None):
             C[r+l*num_rois] = v
     return C
 
+def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=None):
+    """ DvE hierarchical model
+    # Two-Layers:
+        feed-forward : top to bottom
+        feed-back : bottom to all
+    # Three-Layers:
+        feed-forward : top to middle
+        feed-back : bottom to all but middle
+
+    :param num_rois: int
+    :param num_layers: int (2 or 3)
+    :param connections: 'random' or 'ones' or list of numbers
+    :param self_connections: float or list of numbers
+    :return:
+    """
+    def val():
+        return 1. if connections is None else np.random.rand()
+    if num_layers not in [2,3]:
+        raise(Exception('num_layers must be 2 or 3'))
+    conn = []
+    Ltop = num_layers-1
+    for i in range(num_rois-1):
+        # feed-forward:
+        conn.append(f'R{i},L{Ltop}->R{i+1},L{Ltop-1}={val()}')
+        # feed-back:
+        conn.append(f'R{i+1},L{0}->R{i},L{Ltop}={val()}')
+        conn.append(f'R{i+1},L{0}->R{i},L{0}={val()}')
+    return create_A_matrix(num_rois, num_layers, conn, self_connections)
+
 def stim_boxcar(stim):
     """Create boxcar stimulus
     :param stim: three-column array or text file with onset, duration, amplitude (all in seconds)
@@ -137,22 +166,39 @@ def stim_random_events(tvec, p=0.5, n=1):
     return u
 
 
-def plot_signals(model, signal, tvec=None):
+def plot_signals(model, signal, tvec=None, labels=None):
+
+    nt, nc = signal[0].shape if type(signal)==list else signal.shape
+
     if tvec is None:
-        tvec = np.linspace(0,len(signal),len(signal))
+        tvec = np.linspace(0,nt,nt)
     import matplotlib.pyplot as plt
 
-    fig, axes = plt.subplots(ncols=model.num_rois, nrows=model.num_layers, sharex=True, sharey=True)
+    ncols = model.num_rois
+    nrows = model.num_layers if nc>ncols else 1
 
-    for r in range(model.num_rois):
-        for l in range(model.num_layers):
-            idx = r + model.num_rois*l
-            ax = axes[model.num_layers-1-l,r]
-            ax.plot(tvec, signal[:, idx])
+    fig, axes = plt.subplots(ncols=ncols, nrows=nrows, sharex=True, sharey=True)
+    for r in range(ncols):
+        for l in range(nrows):
+            idx = r + ncols*l
+            if nrows > 1:
+                ax = axes[model.num_layers-1-l,r]
+            else:
+                ax = axes[r]
+            if type(signal) == list:
+                for i, s in enumerate(signal):
+                    ax.plot(tvec, s[:, idx], label=labels[i])
+                ax.legend()
+            else:
+                ax.plot(tvec, signal[:, idx])
             ax.grid()
-            ax.set_title(f'R{r}, L{l}')
+            if nrows > 1:
+                ax.set_title(f'R{r}, L{l}')
+            else:
+                ax.set_title(f'R{r}')
     fig.subplots_adjust(wspace=0, top=0.9)
     return fig
+
 
 
 # MCMC fitting class

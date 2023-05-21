@@ -75,6 +75,20 @@ def test_create_C_matrix():
     assert C.shape == (6,)
     assert np.all(C == 0)
 
+def test_create_DvE_matrix():
+    conn = [
+    'R0,L2->R1,L1=1.',
+    'R1,L0->R0,L0=1.',
+    'R1,L0->R0,L2=1.'
+    ]
+    num_rois = 2
+    num_layers = 3
+
+    A1 = utils.create_DvE_matrix(num_rois,num_layers,self_connections=-1)
+    A2 = utils.create_A_matrix(num_rois,num_layers,conn, self_connections=-1)
+    assert np.all(np.isclose(A1, A2))
+
+
 def test_stim_boxcar():
     tvec = np.linspace(0,50,300)
     u = utils.stim_boxcar([[0,5,1],[10,10,.5]])
@@ -155,6 +169,18 @@ def test_MultiLayerDCM():
     TIs = [300, 600]
     ir_bold = ldcm.simulate_IR(tvec, TIs, u)
     assert np.isclose(np.mean(ir_bold[1]), 0.0014695061027040852)
+
+    # Is MultiLayer(2) like TwoLayer?
+    A = utils.create_DvE_matrix(3,2,connections=1,self_connections=-2)
+    C = utils.create_C_matrix(3,2,['R0,L0=1','R0,L1=1'])
+
+    ldcm1 = models.MultiLayerDCM(3,2,params={'A':A,'C':C,'l_d':1})
+    ldcm2 = models.TwoLayerDCM(3,params={'A':A,'C':C,'l_d':1})
+
+    bold1, _ = ldcm1.simulate(tvec, u)
+    bold2, _ = ldcm1.simulate(tvec, u)
+
+    assert np.isclose( np.mean(bold1), np.mean(bold2))
 
 
 def test_SEM():
