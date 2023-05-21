@@ -97,6 +97,9 @@ def test_stim_boxcar():
     stim_file = str(testsPath / 'test_data' / '3col.txt')
     u = utils.stim_boxcar(stim_file)
     assert sum(u(tvec)) == 60.
+    #stim_file = str(testsPath / 'test_data' / '3col_1stim.txt')
+    #u = utils.stim_boxcar(stim_file)
+
 
 def test_stim_random():
     tvec = np.linspace(0,50,300)
@@ -161,24 +164,24 @@ def test_MultiLayerDCM():
     A = utils.create_A_matrix(2,3,conn,-1)
     C = utils.create_C_matrix(2,3,['R0,L0=1','R0,L1=1','R0,L2=1'])
 
-    ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1})
+    ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1,'tau_d':1.})
 
     bold, state_tc = ldcm.simulate(tvec, u)
-    assert np.isclose(np.mean(bold),0.004449409616566336)
+    assert np.isclose(np.mean(bold),0.005505226607304188)
 
     TIs = [300, 600]
     ir_bold = ldcm.simulate_IR(tvec, TIs, u)
-    assert np.isclose(np.mean(ir_bold[1]), 0.0014695061027040852)
+    assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605)
 
     # Is MultiLayer(2) like TwoLayer?
     A = utils.create_DvE_matrix(3,2,connections=1,self_connections=-2)
     C = utils.create_C_matrix(3,2,['R0,L0=1','R0,L1=1'])
 
-    ldcm1 = models.MultiLayerDCM(3,2,params={'A':A,'C':C,'l_d':1})
-    ldcm2 = models.TwoLayerDCM(3,params={'A':A,'C':C,'l_d':1})
+    ldcm1 = models.MultiLayerDCM(3,2,params={'A':A,'C':C,'l_d':0})
+    ldcm2 = models.TwoLayerDCM(3,params={'A':A,'C':C,'l_d':0})
 
     bold1, _ = ldcm1.simulate(tvec, u)
-    bold2, _ = ldcm1.simulate(tvec, u)
+    bold2, _ = ldcm2.simulate(tvec, u)
 
     assert np.isclose( np.mean(bold1), np.mean(bold2))
 

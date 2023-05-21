@@ -265,9 +265,7 @@ class TwoLayerDCM(DCM):
         self.p.C = np.zeros(self.num_rois*self.num_layers)
         # haemo parmas
         self.p.l_d   = 0.5  # coupling param
-        self.p.tau_d = 1.   # delay
-        self.p.tau_l = 2.66 # delay
-        self.p.tau_d = 2.66 # delay
+        self.p.tau_d = 2.66   # delay
         # Define default values for T1s
         from dcsem.utils import constants
         self.T1s = np.linspace(constants['LowerLayerT1'],
@@ -332,8 +330,6 @@ class TwoLayerDCM(DCM):
         return np.asarray(BOLD_tc), state_tc
 
 
-import numpy as np
-from dcsem.models import DCM
 class MultiLayerDCM(DCM):
     def __init__(self, num_rois, num_layers, params=None):
         super().__init__(num_rois, params)
@@ -362,8 +358,8 @@ class MultiLayerDCM(DCM):
         s0,x0 = zeros, zeros
         f0,v0,q0 = ones, ones, ones
 
-        ones_l  =  np.full(self.num_rois*(self.num_layers-1), 1.)
-        vs0, qs0 = ones_l, ones_l
+        zeros_l  =  np.full(self.num_rois*(self.num_layers-1), 0.)
+        vs0, qs0 = zeros_l, zeros_l
 
         return self.merge_p(s0, f0, v0, q0, x0, vs0, qs0)
 
@@ -396,7 +392,7 @@ class MultiLayerDCM(DCM):
             dvdt = (1/self.p.tau)*(f-v**(1/self.p.alpha)) + drain_v
             dqdt = (1/self.p.tau)*(f*(1-(1-self.p.E0)**(1/f))/self.p.E0-v**(1/self.p.alpha-1)*q) + drain_q
             # delay eqs
-            vl = v[:self.num_rois*(self.num_layers-1)] #]np.array_split(v,self.num_layers)
+            vl = v[:self.num_rois*(self.num_layers-1)]
             ql = q[:self.num_rois*(self.num_layers-1)]
 
             dvsdt = 1/self.p.tau_d*(-vs+(vl-1))

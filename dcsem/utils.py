@@ -167,7 +167,14 @@ def stim_random_events(tvec, p=0.5, n=1):
 
 
 def plot_signals(model, signal, tvec=None, labels=None):
+    """Plot signals splitted by ROIs and Layers
 
+    :param model: the model!
+    :param signal: can be list of signals
+    :param tvec: array
+    :param labels: list
+    :return: figure object
+    """
     nt, nc = signal[0].shape if type(signal)==list else signal.shape
 
     if tvec is None:
