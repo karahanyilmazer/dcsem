@@ -97,8 +97,8 @@ def test_stim_boxcar():
     stim_file = str(testsPath / 'test_data' / '3col.txt')
     u = utils.stim_boxcar(stim_file)
     assert sum(u(tvec)) == 60.
-    #stim_file = str(testsPath / 'test_data' / '3col_1stim.txt')
-    #u = utils.stim_boxcar(stim_file)
+    stim_file = str(testsPath / 'test_data' / '3col_1stim.txt')
+    u = utils.stim_boxcar(stim_file)
 
 
 def test_stim_random():

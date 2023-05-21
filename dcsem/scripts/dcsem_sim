@@ -66,19 +66,20 @@ def quickplot(ts, image_file):
 
 
 if args.model == 'SEM':
+    if args.stim:
+        raise(Warning('Stimulus file will be ignored as this is running an SEM!'))
     if args.num_layers > 1:
         model = models.MultiLayerSEM(num_rois=args.num_rois, num_layers=args.num_layers)
     else:
         model = models.SEM(num_rois=args.num_rois)
 elif args.model == 'DCM':
-    if args.num_layers == 2:
+    if args.num_layers > 1:
+        # model = models.MultiLayerDCM(num_rois=args.num_rois, num_layers=args.num_layers)
         model = models.TwoLayerDCM(num_rois=args.num_rois)
-    elif args.num_layers == 1:
-        model = models.DCM(num_rois=args.num_rois)
     else:
-        raise(Exception('DCM only implemented for 1 or 2 layers'))
+        model = models.DCM(num_rois=args.num_rois)
 else:
-    raise(Exception('Unknown model'))
+    raise(Exception(f'Unknown model {args.model}'))
 
 # A matrix
 if args.Amat:
@@ -87,7 +88,7 @@ if args.Amat:
 
 # C matrix (in case of DCM)
 if args.Cmat and args.model == 'DCM':
-    C = utils.parse_matrix_file(args.Amat, args.num_rois, args.num_layers)
+    C = utils.parse_matrix_file(args.Cmat, args.num_rois, args.num_layers)
     model.set_params({'C': C})
 
 if args.verbose:
@@ -97,10 +98,13 @@ if args.verbose:
 if args.verbose:
     print('begin simulation')
 tvec = np.linspace(0, args.time_points * args.tr, args.time_points)
-if args.model == 'SEM':
-    bold, state_tc = model.simulate(tvec)
-else:
+
+sim_args = {'tvec' : tvec}
+u = None
+if args.model == 'DCM':
     # stimulus:
+    if args.stim is None:
+        raise(Exception('Must specify stim when using DCM'))
     if args.stim == 'random':
         if args.verbose:
             print('... random stimulus')
@@ -109,8 +113,13 @@ else:
         if args.verbose:
             print('... boxcar stimulus')
         u = utils.stim_boxcar(args.stim)
-    bold, state_tc = model.simulate(tvec, u = u, CNR=args.cnr)
+    sim_args ['u'] = u
+    sim_args ['CNR'] = args.cnr
 
+# Do simulations
+bold, state_tc = model.simulate(**sim_args)
+
+# collect results
 state_tc = model.state_tc_to_dict(state_tc)
 Results = {'BOLD' : bold, 'State_tc' : state_tc}
 
@@ -127,7 +136,7 @@ if args.TIs:
         else:
             model.T1s = T1s
 
-    IR_signals = model.simulate_IR(tvec, TIs=TIs)
+    IR_signals = model.simulate_IR(tvec, TIs=TIs, u=u)
     for ti, signal in zip(TIs, IR_signals):
         Results[f'IR-BOLD_TI{int(ti)}'] = signal
 
@@ -138,6 +147,9 @@ if args.verbose:
 outdir = os.path.expanduser(args.outdir)
 os.makedirs(outdir, exist_ok=True)
 
+fig = utils.plot_signals(model, signal = bold, tvec=tvec)
+fig.savefig( outdir+'/bold_split_roi.png')
+
 import pandas as pd
 for name in Results['State_tc']:
     D = Results['State_tc'][name]
@@ -147,8 +159,12 @@ if args.TIs:
     for ti in TIs:
         name = f'IR-BOLD_TI{int(ti)}'
         signal = Results[name]
-        np.savetxt(outdir+f'{name}.txt', signal)
+        np.savetxt(outdir+f'/{name}.txt', signal)
         quickplot(signal, outdir+f'/{name}.png')
+
+    fig = utils.plot_signals(model, signal = IR_signals, tvec=tvec, labels=[f'TI={ti}' for ti in TIs])
+    fig.savefig( outdir+'/ir-bold_split_roi.png')
+
 
 np.savetxt(outdir+"/bold.txt", bold)
 quickplot(bold, outdir+'/bold.png')

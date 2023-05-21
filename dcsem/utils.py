@@ -136,7 +136,7 @@ def stim_boxcar(stim):
     import os
     if type(stim) == str:
         if os.path.exists(os.path.expanduser(stim)):
-            stim = np.loadtxt(os.path.expanduser(stim))
+            stim = np.loadtxt(os.path.expanduser(stim), ndmin=2)
     stim = np.asarray(stim)
     if stim.shape[1] == 3:
         stim = stim.T
