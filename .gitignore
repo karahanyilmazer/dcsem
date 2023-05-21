@@ -11,3 +11,4 @@ dcsem/.DS_Store
 dcsem/__pycache__/models.cpython-38.pyc
 dcsem/__pycache__/utils.cpython-38.pyc
 dcsem/tests/__pycache__/test_fcs.cpython-38-pytest-6.2.5.pyc
+dcsem/auxilary/__pycache__
