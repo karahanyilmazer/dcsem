@@ -131,6 +131,14 @@ def test_DCM():
     bold, state_tc = dcm.simulate(tvec,u)
     assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665]))
 
+    dcm.set_params(dict(zip(['kappa', 'gamma', 'alpha', 'E0', 'tau', 'k1', 'k2', 'k3', 'V0'],[1,2,3,4,5,6,7,8,9])))
+
+    params = ['a0_0', 'a1_0', 'a1_1', 'c0', 'kappa', 'gamma', 'alpha', 'E0', 'tau', 'k1', 'k2', 'k3', 'V0']
+    assert set(params) == set(dcm.get_p_names())
+    assert np.all(np.isclose(dcm.get_p(), [-2.  ,  0.2 , -2.  ,  1.  ,  1,2,3,4,5,6,7,8,9]))
+
+    dcm.set_p([-2.  ,  0.2 , -2.  ,  1.  ,  10,20,30,40,50,60,70,80,90])
+    assert np.all(np.isclose(dcm.get_p(), [-2.  ,  0.2 , -2.  ,  1.  ,  10,20,30,40,50,60,70,80,90]))
 
 def test_TwoLayerDCM():
     ldcm = models.TwoLayerDCM(num_rois=1)

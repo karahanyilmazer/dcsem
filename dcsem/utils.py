@@ -364,12 +364,14 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
     """
     from scipy.stats import norm
     import matplotlib.pyplot as plt
-    fig = plt.figure(figsize=(10, 10))
+    # fig = plt.figure(figsize=(10, 10))
+
     n = means.size
+    fig, axes = plt.subplots(ncols=n, nrows=n, sharex='col', figsize=((8,8)))
     nbins = 50
     k = 1
-    for i in range(n):
-        for j in range(n):
+    for j in range(n):
+        for i in range(n):
             if i == j:
                 x = np.linspace(means[i] - 5 * np.sqrt(cov[i, i]),
                                 means[i] + 5 * np.sqrt(cov[i, i]), nbins)

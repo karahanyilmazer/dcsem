@@ -10,11 +10,10 @@
 import numpy as np
 from scipy.integrate import solve_ivp
 
-
 # Params class
 class Parameters(dict):
     """Dict-like class where elements can be accessed
-    either ysing p.x or p['x']
+    either using p.x or p['x']
     """
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -30,6 +29,8 @@ class BaseModel(object):
         self.num_rois = None
         self.num_layers = None
         self.state_vars = []
+        self.Anz = None
+        self.Cnz = None
         # Base class knows about T1s so it can generate IR-BOLD
         self.T1s = None
 
@@ -58,10 +59,103 @@ class BaseModel(object):
         :param table: dict
         """
         for param in table:
-            self.p[param] = table[param]
+            if param == 'A':
+                self.p.A = np.array(table[param], dtype=np.float64)
+                self.Anz = np.nonzero(self.p.A)
+            elif param == 'C':
+                self.p.C = np.array(table[param], dtype=np.float64)
+                self.Cnz = np.nonzero(self.p.C)
+            else:
+                self.p[param] = table[param]
 
     def get_params(self):
         return self.p
+
+    # table -> p_names
+    def get_p_names(self, param_table=None):
+        """ Get list of parameter names (splitting matrix coeffs into own params)
+        :param param_table: dict
+        :return: list
+        """
+        if param_table is None:
+            param_table = self.p
+        names = []
+        for param in param_table:
+            if isinstance(param_table[param], (int, float)):
+                names.append(param)
+            else:
+                if param == 'A':
+                    names.extend([f'a{ij[0]}_{ij[1]}' for ij in np.array(self.Anz).T])
+                elif param == 'C':
+                    names.extend([f'c{i[0]}' for i in np.array(self.Cnz).T])
+        return names
+
+    def get_p(self, param_table=None):
+        """ Get parameters as a list
+        :param param_table: dict
+        :return: list of param values
+        """
+        if param_table is None:
+            param_table = self.p
+        values = []
+        for param in param_table:
+            if isinstance(param_table[param], (int, float)):
+                values.append(param_table[param])
+            else:
+                if param == 'A':
+                    A = param_table['A']
+                    values.extend([A[ij[0],ij[1]] for ij in np.array(self.Anz).T])
+                elif param == 'C':
+                    C = param_table['C']
+                    values.extend([C[i[0]] for i in np.array(self.Cnz).T])
+        return np.array(values)
+
+    # p -> table
+    def set_p(self, p):
+        """Set model parameters from a list (rather than a table)
+        :param p: list
+        :return: None
+        """
+        idx = 0
+        for param in self.p:
+            if isinstance(self.p[param], (int, float)):
+                self.p[param] = p[idx]
+                idx += 1
+            else:
+                if param == 'A':
+                    for ij in np.array(self.Anz).T:
+                        self.p['A'][ij[0],ij[1]] = p[idx]
+                        idx += 1
+                elif param == 'C':
+                    for i in np.array(self.Cnz).T:
+                        self.p['C'][i[0]] = p[idx]
+                        idx += 1
+
+    # p -> table
+    def p_to_table(self, p):
+        """Set model parameters from a list (rather than a table)
+        :param p: list
+        :return: dict
+        """
+        import copy
+        D = copy.deepcopy(self.p)
+        #D = {key: value for key, value in self.p.items()}
+        idx = 0
+        for param in self.p:
+            if isinstance(self.p[param], (int, float)):
+                D[param] = float(p[idx])
+                idx += 1
+            else:
+                if param == 'A':
+                    for ij in np.array(self.Anz).T:
+                        D['A'][ij[0],ij[1]] = float(p[idx])
+                        idx += 1
+                elif param == 'C':
+                    for i in np.array(self.Cnz).T:
+                        D['C'][i[0]] = float(p[idx])
+                        idx += 1
+        return D
+
 
     def state_tc_to_dict(self, state_tc):
         """Turn state_tc to dict of dict for saving
@@ -161,6 +255,9 @@ class DCM(BaseModel):
         # Set user-specified parameters
         if params is not None:
             self.set_params(params)
+        # Keep track of non-zero A and C
+        self.Anz = np.nonzero(self.p.A)
+        self.Cnz = np.nonzero(self.p.C)
         # State variables
         self.state_vars = ['s', 'f', 'v', 'q', 'x']
         # Define default values for T1s
@@ -210,12 +307,13 @@ class DCM(BaseModel):
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
         return F
 
-    def simulate(self, tvec, u=None, CNR=None):
+    def simulate(self, tvec, u=None, CNR=None, solver='LSODA'):
         """Generate BOLD+state time courses using ODE solver
         params:
         tvec (array)  - Times where states are evaluated
         u (function)  - Input function u(t) should be scalar for t scalar
         SNR (float)   - Signal to noise ratio (SNR=mean(abs(signal))/std(noise))
+        solver (str) - method of integration (see scipy.integrate.slove_ivp 'method')
         returns:
         dict with all state time courses + BOLD
         """
@@ -236,7 +334,7 @@ class DCM(BaseModel):
                         y0=p0,
                         args=(u,),
                         t_eval=tvec,
-                        method='LSODA')
+                        method=solver)
 
         # create results dict
         bold, state_tc = self.collect_results(ivp)
@@ -431,6 +529,8 @@ class SEM(BaseModel):
         self.p.sigma = 1.
         if params is not None:
             self.set_params(params)
+        # Keep track of non-zero A and C
+        self.Anz = np.nonzero(self.p.A)
         self.state_vars = ['x']
 
     def simulate(self, tvec, u=None):
@@ -478,22 +578,26 @@ class SEM(BaseModel):
             return self.p_from_A_sigma(self.p.A*0., np.std(y))
 
     def A_sigma_from_p(self, p):
-        A = np.zeros_like(self.p.A)
-        ind = np.flatnonzero(self.p.A)
-        A.ravel()[ind] = p[1:]
-        sigma = p[0]
+        D = self.p_to_table(p)
+        A, sigma = D['A'], D['sigma']
         return A, sigma
 
     def p_from_A_sigma(self, A, sigma):
-        a = A.ravel()[np.flatnonzero(self.p.A)]
-        return np.append(sigma, a)
+        return self.get_p({'A':self.p.A*0, 'sigma': sigma})
+    #
+    def get_bounds(self):
+        p = self.get_p()
+        n = self.get_p_names()
+        UB = np.full(p.shape, np.infty)
+        LB = np.full(p.shape, -np.infty)
+        LB[ n.index('sigma') ] = 0
+        return LB, UB
 
     def fit_MH(self, p0, fn_negloglik, fn_neglogpr):
         from dcsem.utils import MH
         mh = MH(fn_negloglik, fn_neglogpr)
-        LB = np.full(p0.shape, -np.infty)
-        LB[0] = 0 # first element is sigma, should be positive
-        samples = mh.fit(p0, LB=LB)
+        LB, UB = self.get_bounds()
+        samples = mh.fit(p0, LB=LB, UB=UB)
         p = Parameters()
         p.x = np.mean(samples, axis=0)
         p.cov = np.cov(samples.T)
@@ -502,7 +606,6 @@ class SEM(BaseModel):
         return p
 
     def fit(self, y, method='MH'):
-        num_params = self.get_num_free_params()
         p0 = self.init_free_params(y)
 
         def fn_negloglik(p):
@@ -543,7 +646,6 @@ class MultiLayerSEM(SEM):
         return P@self.get_cov(A, sigma)@P.T
 
     def fit_IR(self, tvec, y, TIs, method='MH'):
-        num_params = self.get_num_free_params()
         p0 = self.init_free_params(y)
         P  = self.get_Pmat(TIs)
 
