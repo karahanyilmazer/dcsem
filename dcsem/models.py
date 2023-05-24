@@ -9,6 +9,7 @@
 
 import numpy as np
 from scipy.integrate import solve_ivp
+from functools import partial
 
 # Params class
 class Parameters(dict):
@@ -24,13 +25,13 @@ class BaseModel(object):
     """Base class from which DCM/SEM/etc. inherit
     """
     def __init__(self):
-        self.model = self.__class__.__name__
-        self.p = Parameters()
-        self.num_rois = None
-        self.num_layers = None
-        self.state_vars = []
-        self.Anz = None
-        self.Cnz = None
+        self.model = self.__class__.__name__ # Name of the model
+        self.p = Parameters()    # Parameters of the model, everything that could be fitted to data
+        self.num_rois = None     # Number of ROIs
+        self.num_layers = None   # Number of layers per ROI
+        self.state_vars = []     # Stave variables (things changing with time that are not directly observed)
+        self.Anz = None          # Non-zero entries of the connectivity matrix
+        self.Cnz = None          # non-zero entries of the input modulation matrix
         # Base class knows about T1s so it can generate IR-BOLD
         self.T1s = None
 
@@ -51,8 +52,76 @@ class BaseModel(object):
         """
         raise(Exception('This is not implemented in the base class'))
 
-    def fit(self, y):
+    ###################################################
+    # Child classes must implement the below methods
+    def init_free_params(self, y=None):
         raise(Exception('This is not implemented in the base class'))
+    def fn_negloglik(self, p, y):
+        raise(Exception('This is not implemented in the base class'))
+    def fn_neglogpr(self, p):
+        raise(Exception('This is not implemented in the base class'))
+    def get_bounds(self):
+        raise(Exception('This is not implemented in the base class'))
+    ####################################################
+
+    def fit_MH(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
+        from dcsem.utils import MH
+        mh = MH(fn_negloglik, fn_neglogpr)
+        LB, UB = self.get_bounds()
+        if fixed_vars is not None:
+            mask = [p not in fixed_vars for p in self.get_p_names()]
+        else:
+            mask = None
+        samples = mh.fit(p0, LB=LB, UB=UB, mask=mask)
+        p = Parameters()
+        p.x = np.mean(samples, axis=0)
+        p.cov = np.cov(samples.T)
+        p.samples = samples
+        return p
+
+    def fit_NL(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
+        from lmfit import Parameters, minimize
+        import lmfit
+        params = Parameters()
+        for idx, p in enumerate(self.get_p_names()):
+            params.add(p, value=p0[idx], vary = True if fixed_vars is None else p not in fixed_vars)
+        def fn_neglogpost(params):
+            x = params
+            if type(x) == lmfit.parameter.Parameters:
+                x = [params[name] for name in self.get_p_names()]
+            return fn_negloglik(x) + fn_neglogpr(x)
+        results = minimize(fn_neglogpost, params, method='nelder')
+        p = Parameters()
+        p.x = np.array([results.params[name].value for name in self.get_p_names()])
+        if results.covar is None:
+            import numdifftools as nd
+            Hfun = nd.Hessian(fn_neglogpost)
+            p.hessian = Hfun(p.x)
+            p.cov = np.linalg.inv(p.hessian)
+        p.samples=None
+        return p
+
+    def fit(self, y, p0 = None, method='MH', fixed_vars=None):
+        """Main fitting method
+
+        :param y: (array)
+        :param method: either 'MH' (Metropolis Hastings) or 'NL' (nonlinear fitting)
+        :param fixed_vars: list of variables to fix
+        :return:
+        """
+        if p0 is None:
+            p0 = self.init_free_params(y)
+
+        fn_negloglik = partial(self.fn_negloglik, y=y)
+        fn_neglogpr = self.fn_neglogpr
+
+        if method == 'MH':
+            p = self.fit_MH(p0, fn_negloglik, fn_neglogpr, fixed_vars)
+        else:
+            p = self.fit_NL(p0, fn_negloglik, fn_neglogpr, fixed_vars)
+
+        return p
+
 
     def set_params(self, table):
         """Set model parameters
@@ -292,6 +361,14 @@ class DCM(BaseModel):
 
         return np.asarray(BOLD_tc), state_tc
 
+    def fn_negloglik(self, p, y):
+        # y_pred = simulate(p)
+        # return mse(y_pred, y)
+        pass
+
+    def fn_neglogpr(self, p):
+            return 0
+
     def get_func(self):
         # state vector:
         # p = [s,f,v,q,x]
@@ -303,7 +380,7 @@ class DCM(BaseModel):
             dfdt = s
             dvdt = (1/self.p.tau)*(f-v**(1/self.p.alpha))
             dqdt = (1/self.p.tau)*(f*(1-(1-self.p.E0)**(1/f))/self.p.E0-v**(1/self.p.alpha-1)*q)
-            dxdt = np.dot(self.p.A, x)+self.p.C * u(t) #np.dot(self.p.C, u(t))
+            dxdt = np.dot(self.p.A, x)+self.p.C * u(t)
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
         return F
 
@@ -593,33 +670,22 @@ class SEM(BaseModel):
         LB[ n.index('sigma') ] = 0
         return LB, UB
 
-    def fit_MH(self, p0, fn_negloglik, fn_neglogpr):
-        from dcsem.utils import MH
-        mh = MH(fn_negloglik, fn_neglogpr)
-        LB, UB = self.get_bounds()
-        samples = mh.fit(p0, LB=LB, UB=UB)
-        p = Parameters()
-        p.x = np.mean(samples, axis=0)
-        p.cov = np.cov(samples.T)
-        p.samples = samples
+    def fit_MH(self, p0, fn_negloglik=None, fn_neglogpr=None, fixed_vars=None):
+        if fn_negloglik is None:
+            fn_negloglik = self.fn_negloglik
+        if fn_neglogpr is None:
+            fn_neglogpr = self.fn_neglogpr
+        p = super().fit_MH(p0, fn_negloglik, fn_neglogpr, fixed_vars)
         p.A, p.sigma = self.A_sigma_from_p(p.x)
         return p
 
-    def fit(self, y, method='MH'):
-        p0 = self.init_free_params(y)
+    def fn_negloglik(self, p, y):
+        A, sigma = self.A_sigma_from_p(p)
+        return self.negloglik(y, A, sigma)
 
-        def fn_negloglik(p):
-            A, sigma = self.A_sigma_from_p(p)
-            return self.negloglik(y, A, sigma)
-        def fn_neglogpr(p):
+    def fn_neglogpr(self, p):
             return 0
 
-        if method == 'MH':
-            p = self.fit_MH(p0, fn_negloglik, fn_neglogpr)
-        else:
-            raise(Exception('Only MH method is implemented'))
-
-        return p
 
 # Layer SEM
 class MultiLayerSEM(SEM):
@@ -645,7 +711,7 @@ class MultiLayerSEM(SEM):
     def get_cov_PV(self, P, A=None, sigma=None):
         return P@self.get_cov(A, sigma)@P.T
 
-    def fit_IR(self, tvec, y, TIs, method='MH'):
+    def fit_IR(self, y, TIs, method='MH'):
         p0 = self.init_free_params(y)
         P  = self.get_Pmat(TIs)
 

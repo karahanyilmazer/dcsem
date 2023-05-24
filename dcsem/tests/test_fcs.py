@@ -223,6 +223,22 @@ def test_SEM():
     assert np.isclose(res.A[1,0],sem.p.A[1,0],atol=1)
     assert np.isclose(res.sigma,sem.p.sigma,atol=1)
 
+    # fixed vars
+    num_rois = 3
+    A = np.array([[0,   0, 0], [-5,   0, 0], [1,  -1, 0]])
+    sem = models.SEM(num_rois=num_rois, params={'sigma':1,'A':A})
+    tvec=np.linspace(0,1,300)
+    y, _ = sem.simulate(tvec)
+    p0 = sem.init_free_params(y)
+    res = sem.fit(y, method='MH', fixed_vars=['sigma'])
+    idx = sem.get_p_names().index('sigma')
+    assert np.isclose(p0[idx], np.mean(res.samples[:,idx]))
+    # test nonlinear optimisation
+    res = sem.fit(y, method='NL')
+    np.isclose(res.x, [-5.02503194,  0.93447356, -1.00602463,  1.00193195])
+    np.isclose(np.mean(np.diag(res.cov)), 0.02628102327629696)
+
+
 def test_MultiLayerSEM():
     lsem = models.MultiLayerSEM(1,2)
     assert min(lsem.T1s) == utils.constants['LowerLayerT1']
@@ -232,7 +248,7 @@ def test_MultiLayerSEM():
     TIs  = [400, 600, 800, 1000]
     tvec = np.linspace(0,1,100)
     y = lsem.simulate_IR(tvec, TIs)
-    res = lsem.fit_IR(tvec, y, TIs, method='MH')
+    res = lsem.fit_IR(y, TIs, method='MH')
     assert np.all(np.isclose(res.x, [1.,.5,1.], atol=2))
 
 def test_state_tc_to_dict():
