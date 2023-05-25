@@ -118,6 +118,18 @@ def test_Parameters():
     assert p.y == 3
     assert p['x'] == 2
     assert p['y'] == 3
+    # test if output of modelling is the correct class type
+    num_rois   = 2
+    num_layers = 3
+    # set the A matrix
+    A = utils.create_DvE_matrix(num_rois = num_rois, num_layers=num_layers)
+    lsem = models.MultiLayerSEM(num_rois,num_layers, params={'A':A})
+    tvec = np.linspace(0,100,300)
+
+    y_sim,_ = lsem.simulate(tvec)
+    res   = lsem.fit(y_sim, method='NL')
+    assert type(res) == models.Parameters
+
 
 def test_DCM():
     from dcsem.models import DCM
@@ -250,6 +262,17 @@ def test_MultiLayerSEM():
     y = lsem.simulate_IR(tvec, TIs)
     res = lsem.fit_IR(y, TIs, method='MH')
     assert np.all(np.isclose(res.x, [1.,.5,1.], atol=2))
+    # test nonlinear opt
+    num_rois   = 2
+    num_layers = 3
+    # set the A matrix
+    A = utils.create_DvE_matrix(num_rois = num_rois, num_layers=num_layers)
+    lsem = models.MultiLayerSEM(num_rois,num_layers, params={'A':A})
+    tvec = np.linspace(0,100,300)
+    y_sim,_ = lsem.simulate(tvec)
+    res   = lsem.fit(y_sim, method='NL')
+    assert np.all(np.isclose(res.x, [1,1,1,1], atol=.5))
+
 
 def test_state_tc_to_dict():
     # test for dcm

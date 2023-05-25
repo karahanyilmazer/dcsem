@@ -80,9 +80,8 @@ class BaseModel(object):
         return p
 
     def fit_NL(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
-        from lmfit import Parameters, minimize
         import lmfit
-        params = Parameters()
+        params = lmfit.Parameters()
         for idx, p in enumerate(self.get_p_names()):
             params.add(p, value=p0[idx], vary = True if fixed_vars is None else p not in fixed_vars)
         def fn_neglogpost(params):
@@ -90,7 +89,7 @@ class BaseModel(object):
             if type(x) == lmfit.parameter.Parameters:
                 x = [params[name] for name in self.get_p_names()]
             return fn_negloglik(x) + fn_neglogpr(x)
-        results = minimize(fn_neglogpost, params, method='nelder')
+        results = lmfit.minimize(fn_neglogpost, params, method='nelder')
         p = Parameters()
         p.x = np.array([results.params[name].value for name in self.get_p_names()])
         if results.covar is None:
@@ -728,7 +727,8 @@ class MultiLayerSEM(SEM):
         if method == 'MH':
             p = self.fit_MH(p0, fn_negloglik, fn_neglogpr)
         else:
-            raise(Exception('Only MH method is implemented'))
+            p = self.fit_NL(p0, fn_negloglik, fn_neglogpr)
+            # raise(Exception('Only MH method is implemented'))
 
         return p
 

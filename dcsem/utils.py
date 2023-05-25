@@ -109,7 +109,7 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
 
     :param num_rois: int
     :param num_layers: int (2 or 3)
-    :param connections: 'random' or 'ones' or list of numbers
+    :param connections: 'random' or 'ones'
     :param self_connections: float or list of numbers
     :return:
     """
