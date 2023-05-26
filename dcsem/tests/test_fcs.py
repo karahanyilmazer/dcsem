@@ -141,7 +141,7 @@ def test_DCM():
     C = np.array([1,0])
     dcm.set_params({'A':A,'C':C})
     bold, state_tc = dcm.simulate(tvec,u)
-    assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665]))
+    assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665], rtol=1e-3))
 
     dcm.set_params(dict(zip(['kappa', 'gamma', 'alpha', 'E0', 'tau', 'k1', 'k2', 'k3', 'V0'],[1,2,3,4,5,6,7,8,9])))
 
@@ -168,7 +168,7 @@ def test_TwoLayerDCM():
     ldcm.set_params({'l_d':.5,'A':A,'C':C})
 
     bold, state_tc = ldcm.simulate(tvec,u)
-    assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688]))
+    assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688], rtol=1e-3))
 
 
 def test_MultiLayerDCM():
@@ -187,11 +187,11 @@ def test_MultiLayerDCM():
     ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1,'tau_d':1.})
 
     bold, state_tc = ldcm.simulate(tvec, u)
-    assert np.isclose(np.mean(bold),0.005505226607304188)
+    assert np.isclose(np.mean(bold),0.005505226607304188, atol=1e-5)
 
     TIs = [300, 600]
     ir_bold = ldcm.simulate_IR(tvec, TIs, u)
-    assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605)
+    assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605, atol=1e-5)
 
     # Is MultiLayer(2) like TwoLayer?
     A = utils.create_DvE_matrix(3,2,connections=1,self_connections=-2)
@@ -205,6 +205,17 @@ def test_MultiLayerDCM():
 
     assert np.isclose( np.mean(bold1), np.mean(bold2))
 
+def test_stochastic_DCM():
+    A = utils.create_A_matrix(num_rois = 2, num_layers=1, self_connections=-2)
+    C = utils.create_C_matrix(2, 1, input_connections=['R0,L0=1'])
+    ldcm = models.DCM(2, params={'A':A, 'C':C}, stochastic=True)
+    ldcm.state_noise_std = .01
+    tvec = np.linspace(0,100,300)
+    u= utils.stim_boxcar([[0,3,1]])
+    y_sim, state_tc = ldcm.simulate(tvec, u=u)
+    assert np.isclose(np.mean(y_sim), 1, atol=2)
+    y_sim, state_tc = ldcm.simulate(tvec, u=None)
+    assert np.isclose(np.mean(y_sim), 0, atol=2)
 
 def test_SEM():
     sem = models.SEM(num_rois=2)

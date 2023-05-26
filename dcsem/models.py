@@ -8,7 +8,6 @@
 # SHBASECOPYRIGHT
 
 import numpy as np
-from scipy.integrate import solve_ivp
 from functools import partial
 
 # Params class
@@ -297,7 +296,7 @@ class BaseModel(object):
         return y
 
 class DCM(BaseModel):
-    def __init__(self, num_rois, params=None):
+    def __init__(self, num_rois, params=None, stochastic=False):
         """Set default values for all parameters of Balloon model
         num_rois (int)
         params (dict) : use this to set up all or a subset of the parameters
@@ -331,6 +330,9 @@ class DCM(BaseModel):
         # Define default values for T1s
         from dcsem.utils import constants
         self.T1s = (constants['LowerLayerT1']+constants['UpperLayerT1'])/2.
+        # SDE or ODE
+        self.stochastic = stochastic
+        self.state_noise_std = .05
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change
@@ -348,8 +350,8 @@ class DCM(BaseModel):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
         num_state = 5
-        for idx in range(len(ivp.t)):
-            p = ivp.y[:, idx]
+        for idx in range(ivp.shape[1]):
+            p = ivp[:, idx]
             s, f, v, q, x = np.array_split(p, num_state)
             for key in self.state_vars:
                 state_tc[key].append(eval(key))
@@ -383,34 +385,54 @@ class DCM(BaseModel):
             return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
         return F
 
-    def simulate(self, tvec, u=None, CNR=None, solver='LSODA'):
+
+    def integrate(self, tvec, p0, u=None):
+        """Integrate the ODE/SDE
+
+        :param tvec: array
+        :param p0: initial state
+        :param u: input
+        :return: 2D array (states x time)
+        """
+        # if no input, set to zero
+        if u is None:
+            u = lambda x:0
+        # get main function
+        F = self.get_func()
+        def func(p,t):
+            return F(t,p,u)
+
+        if self.stochastic: # integrate SDE
+            from sdeint import itoint
+            solver = itoint
+            def G(y,t):
+                return np.diag(self.state_noise_std*np.ones(len(p0)))
+            args = {'f': func, 'G' : G, 'y0' : p0, 'tspan' : tvec}
+        else: # integrate ODE
+            from scipy.integrate import odeint
+            solver = odeint
+            args = {'func' : func, 'y0' : p0, 't' : tvec}
+
+        ivp = solver(**args).T
+
+        return ivp
+
+    def simulate(self, tvec, u=None, CNR=None):
         """Generate BOLD+state time courses using ODE solver
         params:
         tvec (array)  - Times where states are evaluated
         u (function)  - Input function u(t) should be scalar for t scalar
         SNR (float)   - Signal to noise ratio (SNR=mean(abs(signal))/std(noise))
-        solver (str) - method of integration (see scipy.integrate.slove_ivp 'method')
+        state_noise_std (float) - State noise standard deviation. If set, solve SDE instead of ODE
         returns:
         dict with all state time courses + BOLD
         """
 
-        # get main function
-        F = self.get_func()
-
-        # if no input, set to zero
-        if u is None:
-            u = lambda x:0
-
-        # intialise
+        # initialise
         p0 = self.init_states()
 
         # run solver
-        ivp = solve_ivp(fun=F,
-                        t_span=[min(tvec),max(tvec)],
-                        y0=p0,
-                        args=(u,),
-                        t_eval=tvec,
-                        method=solver)
+        ivp = self.integrate(tvec, p0, u)
 
         # create results dict
         bold, state_tc = self.collect_results(ivp)
@@ -431,8 +453,8 @@ class TwoLayerDCM(DCM):
         - get_func()
         - collect_results()
     """
-    def __init__(self, num_rois, params=None):
-        super().__init__(num_rois, params)
+    def __init__(self, num_rois, params=None, stochastic=False):
+        super().__init__(num_rois, params, stochastic)
         # matrices A and C should be double the size
         self.num_layers = 2
         self.p.A = np.zeros((self.num_rois*self.num_layers, self.num_rois*self.num_layers))
@@ -491,8 +513,8 @@ class TwoLayerDCM(DCM):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
         num_state = 6
-        for idx in range(len(ivp.t)):
-            p = ivp.y[:,idx]
+        for idx in range(ivp.shape[1]):
+            p = ivp[:,idx]
             s, f, v, q, x, vqs = np.array_split(p, num_state)
             vs,qs = np.array_split(vqs, self.num_layers)
             BOLD_tc.append(self.calc_BOLD(q, v))
@@ -505,8 +527,8 @@ class TwoLayerDCM(DCM):
 
 
 class MultiLayerDCM(DCM):
-    def __init__(self, num_rois, num_layers, params=None):
-        super().__init__(num_rois, params)
+    def __init__(self, num_rois, num_layers, params=None, stochastic=False):
+        super().__init__(num_rois, params, stochastic)
         self.num_rois = num_rois
         self.num_layers = num_layers
         self.num_states = 5*num_rois*num_layers + 2*num_rois*(num_layers-1)
@@ -580,8 +602,8 @@ class MultiLayerDCM(DCM):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
         num_state = 6
-        for idx in range(len(ivp.t)):
-            p = ivp.y[:,idx]
+        for idx in range(ivp.shape[1]):
+            p = ivp[:,idx]
             s, f, v, q, x, vs, qs = self.split_p(p)
             BOLD_tc.append(self.calc_BOLD(q, v))
             for key in self.state_vars:
