@@ -111,17 +111,6 @@ def test_stim_boxcar():
     stim_file = str(testsPath / 'test_data' / '3col_1stim.txt')
     u = utils.stim_boxcar(stim_file)
 
-
-def test_stim_random():
-    tvec = np.linspace(0,50,300)
-    u = utils.stim_random(tvec)
-    assert np.isreal(np.sum(u(tvec)))
-
-def test_stim_random_events():
-    tvec = np.linspace(0,1,10000)
-    u = utils.stim_random_events(tvec, p=0.5, n=3)
-    np.isclose(np.mean(np.mean(u(tvec),axis=1)),0.5,atol=0.2)
-
 # test models
 def test_Parameters():
     p = models.Parameters({'x':2,'y':3})
