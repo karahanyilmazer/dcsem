@@ -88,6 +88,17 @@ def test_create_DvE_matrix():
     A2 = utils.create_A_matrix(num_rois,num_layers,conn, self_connections=-1)
     assert np.all(np.isclose(A1, A2))
 
+def test_A_to_text():
+    A = np.random.rand(5*3,5*3)
+    conn = utils.A_to_text(A,5,3)
+    Anew = utils.create_A_matrix(5,3,conn)
+    assert np.all(np.isclose(A,Anew))
+
+def test_C_to_text():
+    C = np.random.rand(5*3)
+    conn = utils.C_to_text(C,5,3)
+    Cnew = utils.create_C_matrix(5,3,conn)
+    assert np.all(np.isclose(C,Cnew))
 
 def test_stim_boxcar():
     tvec = np.linspace(0,50,300)

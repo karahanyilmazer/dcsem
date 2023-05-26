@@ -127,6 +127,41 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
         conn.append(f'R{i+1},L{0}->R{i},L{0}={val()}')
     return create_A_matrix(num_rois, num_layers, conn, self_connections)
 
+def A_to_text(A, num_rois, num_layers):
+    """Form connectivity as text from matrix as array
+
+    :param A: 2D array
+    :param num_rois: int
+    :param num_layers: int
+    :return: list of connections as text
+    """
+    conn = []
+    for r_in in range(num_rois):
+        for l_in in range(num_layers):
+            col = r_in+l_in*num_rois # input is column
+            for r_out in range(num_rois):
+                for l_out in range(num_layers):
+                    row = r_out+l_out*num_rois
+                    if A[row,col] != 0:
+                        conn.append(f'R{r_in},L{l_in}->R{r_out},L{l_out}={A[row,col]}')
+    return conn
+
+def C_to_text(C, num_rois, num_layers):
+    """Form connectivity as text from matrix as array
+
+    :param C: 1D array
+    :param num_rois: int
+    :param num_layers: int
+    :return: list of connections as text
+    """
+    conn = []
+    for r in range(num_rois):
+        for l in range(num_layers):
+            row = r+l*num_rois # input is column
+            if C[row] != 0:
+                conn.append(f'R{r},L{l}={C[row]}')
+    return conn
+
 def stim_boxcar(stim):
     """Create boxcar stimulus
     :param stim: three-column array or text file with onset, duration, amplitude (all in seconds)
@@ -148,23 +183,6 @@ def stim_boxcar(stim):
                 return a
         return 0.
     return u
-
-def stim_random(tvec, n=1):
-    stim = np.random.triangular(-.5,0.,.5,(n,len(tvec)))
-    from scipy.interpolate import interp1d
-    f = interp1d(tvec, stim)
-    def u(t):
-        return f(t)
-    return u
-
-def stim_random_events(tvec, p=0.5, n=1):
-    stim = np.random.uniform(0.,1,(n,len(tvec))) > (1-p)
-    from scipy.interpolate import interp1d
-    f = interp1d(tvec, stim)
-    def u(t):
-        return f(t)
-    return u
-
 
 def plot_signals(model, signal, tvec=None, labels=None):
     """Plot signals splitted by ROIs and Layers
