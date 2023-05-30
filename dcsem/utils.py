@@ -117,6 +117,8 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
         return 1. if connections is None else np.random.rand()
     if num_layers not in [2,3]:
         raise(Exception('num_layers must be 2 or 3'))
+    if num_rois < 2:
+        raise(Exception('num_rois must be 2 or more'))
     conn = []
     Ltop = num_layers-1
     for i in range(num_rois-1):
