@@ -140,7 +140,7 @@ def test_DCM():
               [  0.2,  -2.0]])
     C = np.array([1,0])
     dcm.set_params({'A':A,'C':C})
-    bold, state_tc = dcm.simulate(tvec,u)
+    bold, state_tc = dcm.simulate(tvec,u=u)
     assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665], rtol=1e-3))
 
     dcm.set_params(dict(zip(['kappa', 'gamma', 'alpha', 'E0', 'tau', 'k1', 'k2', 'k3', 'V0'],[1,2,3,4,5,6,7,8,9])))
@@ -167,7 +167,7 @@ def test_TwoLayerDCM():
     C = np.array([1,1])
     ldcm.set_params({'l_d':.5,'A':A,'C':C})
 
-    bold, state_tc = ldcm.simulate(tvec,u)
+    bold, state_tc = ldcm.simulate(tvec,u=u)
     assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688], rtol=1e-3))
 
 
@@ -186,11 +186,11 @@ def test_MultiLayerDCM():
 
     ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1,'tau_d':1.})
 
-    bold, state_tc = ldcm.simulate(tvec, u)
+    bold, state_tc = ldcm.simulate(tvec, u=u)
     assert np.isclose(np.mean(bold),0.005505226607304188, atol=1e-5)
 
     TIs = [300, 600]
-    ir_bold = ldcm.simulate_IR(tvec, TIs, u)
+    ir_bold = ldcm.simulate_IR(tvec, TIs, u=u, normalise_pv=True)
     assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605, atol=1e-5)
 
     # Is MultiLayer(2) like TwoLayer?
@@ -200,8 +200,8 @@ def test_MultiLayerDCM():
     ldcm1 = models.MultiLayerDCM(3,2,params={'A':A,'C':C,'l_d':0})
     ldcm2 = models.TwoLayerDCM(3,params={'A':A,'C':C,'l_d':0})
 
-    bold1, _ = ldcm1.simulate(tvec, u)
-    bold2, _ = ldcm2.simulate(tvec, u)
+    bold1, _ = ldcm1.simulate(tvec, u=u)
+    bold2, _ = ldcm2.simulate(tvec, u=u)
 
     assert np.isclose( np.mean(bold1), np.mean(bold2))
 
@@ -270,7 +270,7 @@ def test_MultiLayerSEM():
     lsem = models.MultiLayerSEM(2,2)
     TIs  = [400, 600, 800, 1000]
     tvec = np.linspace(0,1,100)
-    y = lsem.simulate_IR(tvec, TIs)
+    y = lsem.simulate_IR(tvec, TIs, normalise_pv=True)
     res = lsem.fit_IR(y, TIs, method='MH')
     assert np.all(np.isclose(res.x, [1.,.5,1.], atol=2))
     # test nonlinear opt

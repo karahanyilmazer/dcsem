@@ -6,9 +6,9 @@
 #
 # Copyright (C) 2023 University of Oxford
 # SHBASECOPYRIGHT
+import copy
 
 import numpy as np
-from functools import partial
 
 # Params class
 class Parameters(dict):
@@ -44,7 +44,7 @@ class BaseModel(object):
         out += "--------------------------\n"
         return out
 
-    def simulate(self, u=None):
+    def simulate(self, p=None, u=None):
         """Implementation of the simulator
         :return:
         tuple : (BOLD, State_tc)
@@ -55,7 +55,7 @@ class BaseModel(object):
     # Child classes must implement the below methods
     def init_free_params(self, y=None):
         raise(Exception('This is not implemented in the base class'))
-    def fn_negloglik(self, p, y):
+    def fn_negloglik(self, p, kwargs):
         raise(Exception('This is not implemented in the base class'))
     def fn_neglogpr(self, p):
         raise(Exception('This is not implemented in the base class'))
@@ -99,18 +99,19 @@ class BaseModel(object):
         p.samples=None
         return p
 
-    def fit(self, y, p0 = None, method='MH', fixed_vars=None):
+    def fit(self, y, p0 = None, method='MH', fixed_vars=None, kwargs=None):
         """Main fitting method
 
         :param y: (array)
         :param method: either 'MH' (Metropolis Hastings) or 'NL' (nonlinear fitting)
         :param fixed_vars: list of variables to fix
+        :param kwargs: passed to the likelihood fct
         :return:
         """
         if p0 is None:
             p0 = self.init_free_params(y)
 
-        fn_negloglik = partial(self.fn_negloglik, y=y)
+        fn_negloglik = lambda p : self.fn_negloglik(p, **kwargs)
         fn_neglogpr = self.fn_neglogpr
 
         if method == 'MH':
@@ -259,13 +260,14 @@ class BaseModel(object):
         noise       = np.random.normal(loc=0, scale=std_noise, size=signal.shape)
         return signal + noise
 
-    def get_Pmat(self, TIs):
+    def get_Pmat(self, TIs, normalise=False):
         """Make partial volume matrix
         T1s: T1 of each layer
         TIs: TI of each measurement
         """
         E = np.abs(1-2*np.outer(np.array(TIs),1/np.array(self.T1s)))
-        E = E / np.sum(E, axis=1, keepdims=True)
+        if normalise:
+            E = E / np.sum(E, axis=1, keepdims=True)
 
         allP = []
         for i, ti in enumerate(TIs):
@@ -277,7 +279,7 @@ class BaseModel(object):
 
         return allP
 
-    def simulate_IR(self, tvec, TIs, u=None):
+    def simulate_IR(self, tvec, TIs, p=None, u=None, normalise_pv=False):
         """
         x = Ax+u
         for k:
@@ -288,11 +290,11 @@ class BaseModel(object):
         if self.num_rois is None:
             raise(Exception('Must set num_rois'))
 
-        P = self.get_Pmat(TIs)
+        P = self.get_Pmat(TIs, normalise=normalise_pv)
         y = []
-        for p in P:
-            bold, _ = self.simulate(tvec, u=u)
-            y.append(np.dot(p, bold.T).T)
+        for pmat in P:
+            bold, _ = self.simulate(tvec, u=u, p=p)
+            y.append(np.dot(pmat, bold.T).T)
         return y
 
 class DCM(BaseModel):
@@ -362,13 +364,29 @@ class DCM(BaseModel):
 
         return np.asarray(BOLD_tc), state_tc
 
-    def fn_negloglik(self, p, y):
-        # y_pred = simulate(p)
-        # return mse(y_pred, y)
-        pass
 
+    ###################################################
+    # Child classes must implement the below methods for fitting
+    def init_free_params(self, y=None):
+        return self.get_p()
+    def get_bounds(self):
+        LB = [-np.infty]*len(self.get_p())
+        UB = [ np.infty]*len(self.get_p())
+        return LB, UB
+    def fn_negloglik(self, p, y, tvec, u):
+        if self.stochastic:
+            raise(Exception('Fitting stochastic DCMs has not yet been implemented'))
+        # self.set_p(p)
+        y_pred, _ = self.simulate(tvec, p=p, u=u)
+        mse = np.mean((y-y_pred)**2)
+        return mse
     def fn_neglogpr(self, p):
             return 0
+
+    def fit(self, y, tvec, p0=None, u=None, method='MH', fixed_vars=None):
+        return super().fit(y, p0, method, fixed_vars, kwargs={'y':y,'tvec':tvec,'u':u})
+
+    ####################################################
 
     def get_func(self):
         # state vector:
@@ -417,10 +435,11 @@ class DCM(BaseModel):
 
         return ivp
 
-    def simulate(self, tvec, u=None, CNR=None):
+    def simulate(self, tvec, u=None, p=None, CNR=None):
         """Generate BOLD+state time courses using ODE solver
         params:
         tvec (array)  - Times where states are evaluated
+        p (array)     - The parameters used to simulate
         u (function)  - Input function u(t) should be scalar for t scalar
         SNR (float)   - Signal to noise ratio (SNR=mean(abs(signal))/std(noise))
         state_noise_std (float) - State noise standard deviation. If set, solve SDE instead of ODE
@@ -432,7 +451,15 @@ class DCM(BaseModel):
         p0 = self.init_states()
 
         # run solver
+        if p is not None:
+            # save a copy of the params
+            p_copy = copy.deepcopy(self.p)
+            self.p = Parameters(self.p_to_table(p))
         ivp = self.integrate(tvec, p0, u)
+
+        if p is not None:
+            # get params back
+            self.p = Parameters(p_copy)
 
         # create results dict
         bold, state_tc = self.collect_results(ivp)
@@ -631,7 +658,7 @@ class SEM(BaseModel):
         self.Anz = np.nonzero(self.p.A)
         self.state_vars = ['x']
 
-    def simulate(self, tvec, u=None):
+    def simulate(self, tvec, p=None, u=None):
         """Simulate time courses
         (here u is ignored and instead random noise is used)
         model is : x = Ax + u
@@ -640,10 +667,15 @@ class SEM(BaseModel):
         model implies: x = (I-A)^(-1)(u)
                        cov(x) = (I-A)^{-1}cov(u)(I-A)^{-T}
         """
+        if p is not None:
+            p_copy = copy.deepcopy(self.p)
+            self.p = Parameters(self.p_to_table(p))
         u = np.random.normal(loc=0., scale=self.p.sigma, size=(self.num_states, len(tvec)))
         I = np.identity(self.num_states)
         A = self.p.A
         x = np.dot(np.linalg.inv(I-A), u).T
+        if p is not None:
+            self.p = Parameters(p_copy)
 
         return x, x
 
@@ -706,6 +738,9 @@ class SEM(BaseModel):
 
     def fn_neglogpr(self, p):
             return 0
+
+    def fit(self, y, p0=None, method='MH', fixed_vars=None):
+        return super().fit(y, p0, method, fixed_vars, kwargs={'y':y})
 
 
 # Layer SEM
