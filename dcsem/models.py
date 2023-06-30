@@ -76,6 +76,8 @@ class BaseModel(object):
         p.x = np.mean(samples, axis=0)
         p.cov = np.cov(samples.T)
         p.samples = samples
+        p.negloglik = fn_negloglik(p.x)
+        p.neglogpr  = fn_neglogpr(p.x)
         return p
 
     def fit_NL(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
@@ -97,6 +99,8 @@ class BaseModel(object):
             p.hessian = Hfun(p.x)
             p.cov = np.linalg.inv(p.hessian)
         p.samples=None
+        p.negloglik = fn_negloglik(p.x)
+        p.neglogpr  = fn_neglogpr(p.x)
         return p
 
     def fit(self, y, p0 = None, method='MH', fixed_vars=None, kwargs=None):

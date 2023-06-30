@@ -109,12 +109,20 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
 
     :param num_rois: int
     :param num_layers: int (2 or 3)
-    :param connections: 'random' or 'ones'
+    :param connections: some number or 'random'
     :param self_connections: float or list of numbers
     :return:
     """
     def val():
-        return 1. if connections is None else np.random.rand()
+        if callable(connections):
+            return connections()
+        elif type(connections) == int or type(connections) == float:
+            return connections
+        elif connections == 'random':
+            return np.random.rand()
+        else:
+            return 1.
+
     if num_layers not in [2,3]:
         raise(Exception('num_layers must be 2 or 3'))
     if num_rois < 2:

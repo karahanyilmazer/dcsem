@@ -10,7 +10,7 @@ Clone the repo and install
 ```commandline
 git clone https://git.fmrib.ox.ac.uk/saad/dcsem.git
 cd dcsem
-pip install -e .
+pip install .
 ```
 
 ## Usage
@@ -21,7 +21,7 @@ The easiest way to run the simulations is by using the command line wrapper tool
 To get the usage, simply type:
 
 ```bash
-dcsem_fit --help
+dcsem_sim --help
 ```
 
 It is best to run the simulator using a configuration file which defines all the parameters. Here is an example which simulates a DCM model with 3 regions and 2 layers per region:
