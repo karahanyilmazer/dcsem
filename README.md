@@ -16,7 +16,7 @@ pip install .
 ## Usage
 
 ### Using the command-line wrappers
-The easiest way to run the simulations is by using the command line wrapper tools `dcsem_sim` and `dcsem_fit`.
+The easiest way to run the simulations is by using the command line wrapper tools `dcsem_sim` and `dcsem_fit` (BUT: `dcsem_fit` has not yet been implemented).
 
 To get the usage, simply type:
 
@@ -43,6 +43,9 @@ Cmat = /path/to/Cmat.txt
 time_points = 200  
 tr = 0.72 
 cnr = 20
+
+# Stimulus
+stim = /path/to/simulus.txt
 ```
 Once the configuration file has been created, you can run the simulation using:
 
@@ -51,7 +54,7 @@ dcsem_sim --config my_configuration.txt
 ```
 
 ### Defining the connectivity matrices A and C
-The files `Amat.txt` and `Cmat.txt` required to run the simulations can have two different formats. They can either be explicitly given.
+The files `Amat.txt` and `Cmat.txt` required to run the simulations can have two different formats. They can either be explicitly given or they can be "described" (see below).
 
 For example, the network shown below has two ROIs with connectivity between the upper and lower layers between the ROIs.
 
@@ -150,7 +153,7 @@ Effect of changing $\lambda_d$ on the BOLD activity in the upper layer.
 
 ### Simulating and fitting data with a Layer SEM
 
-The API of the MultiLayerSEM class is quite similar to DCM, except we don't have an input (the input is random noise).
+The API of the MultiLayerSEM class is quite similar to DCM, except we don't have an input (the input is random noise) and there are no self-connections.
 
 In the below example, we simulate a 2 ROI, 3 layer model and we fit the parameters to the simulated data and plot the posterior distributions.
 
@@ -187,7 +190,7 @@ You should obtain something like the below:
 
 ### Implementation of DCM for layer FMRI
 
-Based on [Heinzle et al. Neuroimage 2016](https://www.sciencedirect.com/science/article/pii/S1053811915009350)
+The theory below is based on [Heinzle et al. Neuroimage 2016](https://www.sciencedirect.com/science/article/pii/S1053811915009350)
 
 The traditional DCM model is composed of two elements, a state equation describing the evolution of neuronal dynamics $x(t)$ as a function of an input stimulus $u(t)$, and an equation linking neural dynamics to the BOLD signal $y(t)$ via the Buxton Balloon model (see [Buxton and Frank. 1997](https://pubmed.ncbi.nlm.nih.gov/8978388/) and [Friston et al. 2000](https://www.sciencedirect.com/science/article/pii/S105381190090630X)). The state equation is a simple order 1 ODE:
 
@@ -221,41 +224,41 @@ $$
 \end{array}
 $$
 
-### Two-Layer extension 
-Extending the model to incorporate multiple layers can be straightforwardly done by considering each layer as its own region, but we would like to additionally model the effect of venous blood flowing up towards the pial surface. This is achieved using two additional state variables $v_s(t), q_s(t)$ (volume and dHB concentration) which have the following dynamics:
+### Multi-Layer extension 
+Extending the model to incorporate multiple layers can be straightforwardly done by considering each layer as its own region, but (as in Heinzle et al.) we would like to additionally model the effect of venous blood flowing up towards the pial surface. This is achieved using two additional state variables (per layer) $v^{\star}_k(t), q^{\star}_k(t)$ (volume and dHB concentration) which have the following dynamics:
 
 $$ 
 \begin{array}{rcl}
-\tau_d\frac{dv_s}{dt} & = & -v_s + (1-v_l)  \\
-\tau_d\frac{dq_s}{dt} & = & -q_s + (1-q_l)  
+\tau_d\frac{dv^{\star}_{k}}{dt} & = & -v^{\star}_{k} + (1-v_{k-1})  \\
+\tau_d\frac{dq^{\star}_{k}}{dt} & = & -q^{\star}_{k} + (1-q_{k-1})  
 \end{array}
 $$
 
-where $v_l$ and $q_l$ are volume/dHb state parameters of the ower layer. These equation mean changes in blood volume/dHb in lower layers drive the blood draining signal. 
+where $v_{k-1}$ and $q_{k-1}$ are volume/dHb state parameters of the layer below layer $k$ (Sorry, I am labelling layers going from white matter to pial surface, which is obviously the wrong way round!). These equation mean changes in blood volume/dHb in lower layers drive the blood draining signal. 
 
-The state equations for the upper layer dynamics are slightly different to the standard balloon model, with the addition of fthe two new state variables:
+The state equations for the layer dynamics are slightly different to the standard balloon model, with the addition of the two new state variables added to all but the first layer:
 
 $$ 
 \begin{array}{rcl}
-\tau\frac{dv_u}{dt} & = & -v_u^{1/\alpha} + f_u + \lambda_d v_s  \\
-\tau\frac{dq_u}{dt} & = & -\frac{v_u^{1/\alpha}}{v_u}q_u+f_u\frac{1-(1-E_0)^{1/f_u}}{E_0} + \lambda_d q_s 
+\tau\frac{dv_k}{dt} & = & -v_k^{1/\alpha} + f_k + \lambda_d v^{\star}_{k}  \\
+\tau\frac{dq_k}{dt} & = & -\frac{v_k^{1/\alpha}}{v_u}q_k+f_k\frac{1-(1-E_0)^{1/f_k}}{E_0} + \lambda_d q^{\star}_{k} 
 \end{array}
 $$
+
 
 ## SEM and Layer SEM
 
-
-Structural Equation Model:
+Structural Equation Modelling is a non-dynamic model where activity in different regions are related through the equation:
 
 $$ x = Ax + u, $$
 
-where $u$ is $N(0,\sigma^2)$. 
+where the non-zero elements of $A$ determine the structure of the model and where $u$ is $N(0,\sigma^2)$. The matrix $A$ controls how the noise propagates through the rois 
 
-This implies: $x=(I-A)^{-1}(u)$, which is the generative model.
+The above equation implies: $x=(I-A)^{-1}(u)$, which is the generative model.
 
-The covariance implied by the model is $C=\sigma^2 (I-A)^{-1}(I-A)^{-T}$, which is to be compared to the empirical covariance $S=cov(x)$.
+The covariance implied by the model is $C=\sigma^2 (I-A)^{-1}(I-A)^{-T}$, which is to be compared to the empirical covariance $S=cov(x)$ in order to fit the free parameters (the non-zero elements of $A$ as well as the noise variance).
 
-For Layer SEM, the same equation applies, but the observations are of the form:
+For Layer SEM, we simply consider each layer as its own region in the definition of the $A$ matrix (unlike the DCM model above, there is no BOLD, and there is no blood draining model). In the case where the data that we acquire is an Inversion-Recovery spin echo or gradient echo acquisition, and assuming that we are not measuring the signal from each region but rather from a T1-weighted linear combination of the layers, the observation equation is:
 
 $$ y_k=P_k x, $$
 
@@ -263,6 +266,6 @@ where $\{P_k\}$ are partial volume matrices that combine signals from different 
 
 $y_k = P_k (I-A)^{-1}(u)$
 
-and therefore $C_k = \sigma^2  P_k(I-A)^{-1}(I-A)^{-T} P_k^T$.
+and therefore $C_k = \sigma^2  P_k(I-A)^{-1}(I-A)^{-T} P_k^T$. These model convariances are compared to the observed covariances in order to fit the free parameters (again, these are the non-zero elements of $A$ and the noise variance).
 
 
