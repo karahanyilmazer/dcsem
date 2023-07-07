@@ -445,10 +445,11 @@ class DCM(BaseModel):
         tvec (array)  - Times where states are evaluated
         p (array)     - The parameters used to simulate
         u (function)  - Input function u(t) should be scalar for t scalar
-        SNR (float)   - Signal to noise ratio (SNR=mean(abs(signal))/std(noise))
-        state_noise_std (float) - State noise standard deviation. If set, solve SDE instead of ODE
+        CNR (float)   - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
+
         returns:
-        dict with all state time courses + BOLD
+        array (BOLD time course)
+        dict with all state time courses
         """
 
         # initialise
@@ -733,7 +734,6 @@ class SEM(BaseModel):
         if fn_neglogpr is None:
             fn_neglogpr = self.fn_neglogpr
         p = super().fit_MH(p0, fn_negloglik, fn_neglogpr, fixed_vars)
-        p.A, p.sigma = self.A_sigma_from_p(p.x)
         return p
 
     def fn_negloglik(self, p, y):
@@ -744,7 +744,9 @@ class SEM(BaseModel):
             return 0
 
     def fit(self, y, p0=None, method='MH', fixed_vars=None):
-        return super().fit(y, p0, method, fixed_vars, kwargs={'y':y})
+        p = super().fit(y, p0, method, fixed_vars, kwargs={'y':y})
+        p.A, p.sigma = self.A_sigma_from_p(p.x)
+        return p
 
 
 # Layer SEM

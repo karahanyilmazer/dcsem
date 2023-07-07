@@ -104,11 +104,11 @@ C = utils.create_C_matrix(num_rois, num_layers,input_connections)
 dcm = models.DCM(num_rois, params={'A':A,'C':C})
 
 # run simulation
-state_tc = dcm.simulate(tvec, u)
+bold, state_tc = dcm.simulate(tvec, u)
 
 # plot results
 import matplotlib.pyplot as plt
-plt.plot(tvec, state_tc['bold'])
+plt.plot(tvec, bold)
 ```
 
 Below is how you can generate data for layer DCM. We generate a 1 ROI layer DCM, and we change the value of the blood draining parameter $\lambda_d$ (see theory section) and examine its effect on the activity in the two layers (replicating the result from Heinzle et al, figure 2c).
@@ -126,22 +126,22 @@ u    = utils.stim_boxcar(stim)
 A = utils.create_A_matrix(num_rois=1, num_layers=2, self_connections=-1.)
 C = utils.create_C_matrix(num_rois=1, num_layers=2, input_connections=['R0,L0=1.','R0,L1=1.'])
 
-state_tc = []
+bold_tc = []
 lambdas = [0,0.1,0.4,0.6,0.8,0.9] 
 for l in lambdas:
     ldcm = models.TwoLayerDCM(num_rois=1, params={'A':A, 'C':C, 'l_d':l})
-    state_tc.append(ldcm.simulate(tvec,u))
+    bold_tc.append(ldcm.simulate(tvec,u)[0])
 
 # Plotting
 import matplotlib.pyplot as plt
 plt.figure()
-for s,l in zip(state_tc,lambdas):
+for s,l in zip(bold_tc,lambdas):
     plt.subplot(1,2,1)
-    plt.plot(s['bold'][:,0],c=[l,l,l],alpha=.5)
+    plt.plot(s[:,0],c=[l,l,l],alpha=.5)
     plt.title('Lower layer')    
     plt.subplot(1,2,2)
     plt.title('Upper layer')    
-    plt.plot(s['bold'][:,1],c=[l,l,l],label=f'$\lambda_d$={l}')
+    plt.plot(s[:,1],c=[l,l,l],label=f'$\lambda_d$={l}')
     plt.legend()
 
 plt.grid()
