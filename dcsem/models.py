@@ -421,23 +421,23 @@ class DCM(BaseModel):
             u = lambda x:0
         # get main function
         F = self.get_func()
-        def func(p,t):
-            return F(t,p,u)
 
         if self.stochastic: # integrate SDE
             from sdeint import itoint
-            solver = itoint
             def G(y,t):
                 return np.diag(self.state_noise_std*np.ones(len(p0)))
+            def func(p, t):
+                return F(t, p, u)
             args = {'f': func, 'G' : G, 'y0' : p0, 'tspan' : tvec}
+            return itoint(**args).T
         else: # integrate ODE
-            from scipy.integrate import odeint
-            solver = odeint
-            args = {'func' : func, 'y0' : p0, 't' : tvec}
+            from scipy.integrate import solve_ivp
+            def func(t, p):
+                return F(t, p, u)
+            ivp = solve_ivp(func, t_span=[min(tvec),max(tvec)], y0=p0, t_eval=tvec)
+            return ivp.y
 
-        ivp = solver(**args).T
 
-        return ivp
 
     def simulate(self, tvec, u=None, p=None, CNR=None):
         """Generate BOLD+state time courses using ODE solver

@@ -187,11 +187,11 @@ def test_MultiLayerDCM():
     ldcm = models.MultiLayerDCM(2,3,params={'A':A,'C':C,'l_d':1,'tau_d':1.})
 
     bold, state_tc = ldcm.simulate(tvec, u=u)
-    assert np.isclose(np.mean(bold),0.005505226607304188, atol=1e-5)
+    assert np.isclose(np.mean(bold),0.005505226607304188, atol=1e-4)
 
     TIs = [300, 600]
     ir_bold = ldcm.simulate_IR(tvec, TIs, u=u, normalise_pv=True)
-    assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605, atol=1e-5)
+    assert np.isclose(np.mean(ir_bold[1]), 0.0017710985449277605, atol=1e-4)
 
     # Is MultiLayer(2) like TwoLayer?
     A = utils.create_DvE_matrix(3,2,connections=1,self_connections=-2)
