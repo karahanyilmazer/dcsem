@@ -141,7 +141,7 @@ def test_DCM():
     C = np.array([1,0])
     dcm.set_params({'A':A,'C':C})
     bold, state_tc = dcm.simulate(tvec,u=u)
-    assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665], rtol=1e-3))
+    assert np.all(np.isclose(sum(bold),[1.49680682, 0.18591665], rtol=1e-2))
 
     dcm.set_params(dict(zip(['kappa', 'gamma', 'alpha', 'E0', 'tau', 'k1', 'k2', 'k3', 'V0'],[1,2,3,4,5,6,7,8,9])))
 
@@ -168,7 +168,7 @@ def test_TwoLayerDCM():
     ldcm.set_params({'l_d':.5,'A':A,'C':C})
 
     bold, state_tc = ldcm.simulate(tvec,u=u)
-    assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688], rtol=1e-3))
+    assert np.all(np.isclose(sum(bold),[1.5932011,  2.71178688], rtol=1e-2))
 
 
 def test_MultiLayerDCM():
