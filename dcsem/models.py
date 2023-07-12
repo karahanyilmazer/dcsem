@@ -349,16 +349,18 @@ class DCM(BaseModel):
         zeros = np.full(self.num_rois, 0.)
         ones  =  np.full(self.num_rois, 1.)
         s0, x0 = zeros, zeros
+        s0 = zeros
         f0, v0, q0 = ones, ones, ones
-        return np.r_[s0, f0, v0, q0, x0]
+        return np.r_[s0, f0, v0, q0] #, x0]
 
-    def collect_results(self, ivp):
+    def collect_results(self, ivp, x_vec):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
-        num_state = 5
+        num_state = 4
         for idx in range(ivp.shape[1]):
             p = ivp[:, idx]
-            s, f, v, q, x = np.array_split(p, num_state)
+            s, f, v, q = np.array_split(p, num_state)
+            x = x_vec.T[idx]
             for key in self.state_vars:
                 state_tc[key].append(eval(key))
             BOLD_tc.append(self.calc_BOLD(q, v))
@@ -394,17 +396,16 @@ class DCM(BaseModel):
 
     def get_func(self):
         # state vector:
-        # p = [s,f,v,q,x]
+        # p = [s,f,v,q]
         # dpdt = F(t,p)
-        num_state = 5
-        def F(t, p, u):
-            s,f,v,q,x = np.array_split(p,num_state)
-            dsdt = x-self.p.kappa*s-self.p.gamma*(f-1)
+        num_state = 4
+        def F(t, p, x):
+            s,f,v,q = np.array_split(p, num_state)
+            dsdt = x(t)-self.p.kappa*s-self.p.gamma*(f-1)
             dfdt = s
             dvdt = (1/self.p.tau)*(f-v**(1/self.p.alpha))
             dqdt = (1/self.p.tau)*(f*(1-(1-self.p.E0)**(1/f))/self.p.E0-v**(1/self.p.alpha-1)*q)
-            dxdt = np.dot(self.p.A, x)+self.p.C * u(t)
-            return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt]
+            return np.r_[dsdt, dfdt, dvdt, dqdt]
         return F
 
 
@@ -414,30 +415,47 @@ class DCM(BaseModel):
         :param tvec: array
         :param p0: initial state
         :param u: input
-        :return: 2D array (states x time)
+        :return: 2D array (states x time), 1D array (x)
         """
         # if no input, set to zero
         if u is None:
             u = lambda x:0
         # get main function
         F = self.get_func()
+        # integrate to get x
+        x = self.integrate_x(tvec, u=u)
+        # create interpolator to get x(t) for all t
+        from scipy.interpolate import CubicSpline
+        x_fun = CubicSpline(tvec, x, axis=1)
 
-        if self.stochastic: # integrate SDE
+        from scipy.integrate import solve_ivp
+        def func(t, p):
+            return F(t, p, x_fun)
+        ivp = solve_ivp(func, t_span=[min(tvec),max(tvec)], y0=p0, t_eval=tvec).y
+
+        return ivp, x
+
+    def integrate_x(self, tvec, x0=None, u=None):
+        if u is None:
+            u = lambda x:0.
+        if x0 is  None:
+            x0 = np.zeros(self.p.A.shape[0])
+        def F(t, x, u):
+            dxdt = np.dot(self.p.A, x)+ self.p.C * u(t)
+            return dxdt
+        if self.stochastic:  # integrate SDE
             from sdeint import itoint
-            def G(y,t):
-                return np.diag(self.state_noise_std*np.ones(len(p0)))
+            def G(y, t):
+                return np.diag(self.state_noise_std*np.ones(len(x0)))
             def func(p, t):
                 return F(t, p, u)
-            args = {'f': func, 'G' : G, 'y0' : p0, 'tspan' : tvec}
-            return itoint(**args).T
+            x = itoint(f=func, G=G, y0=x0, tspan=tvec).T
         else: # integrate ODE
             from scipy.integrate import solve_ivp
             def func(t, p):
                 return F(t, p, u)
-            ivp = solve_ivp(func, t_span=[min(tvec),max(tvec)], y0=p0, t_eval=tvec)
-            return ivp.y
-
-
+            x = solve_ivp(func, t_span=[min(tvec),max(tvec)], y0=x0, t_eval=tvec).y
+        return x
 
     def simulate(self, tvec, u=None, p=None, CNR=None):
         """Generate BOLD+state time courses using ODE solver
@@ -460,14 +478,14 @@ class DCM(BaseModel):
             # save a copy of the params
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        ivp = self.integrate(tvec, p0, u)
+        ivp, x = self.integrate(tvec, p0, u)
 
         if p is not None:
             # get params back
             self.p = Parameters(p_copy)
 
         # create results dict
-        bold, state_tc = self.collect_results(ivp)
+        bold, state_tc = self.collect_results(ivp, x)
 
         # Add noise to BOLD timecourse
         if CNR is not None:
@@ -508,23 +526,23 @@ class TwoLayerDCM(DCM):
     def init_states(self):
         zeros = np.full(self.num_rois*self.num_layers, 0.)
         ones  =  np.full(self.num_rois*self.num_layers, 1.)
-        s0,x0,qvs0 = zeros, zeros, zeros
+        s0,qvs0 = zeros, zeros
         f0,v0,q0 = ones, ones, ones
 
-        return np.r_[s0, f0, v0, q0, x0, qvs0]
+        return np.r_[s0, f0, v0, q0, qvs0]
 
     def get_func(self):
         # state vector:
-        # p = [s,f,v,q,x,vs,qs]
+        # p = [s,f,v,q,vs,qs]
         # dpdt = F(t,p)
         # len(p) = n_rois * 5 * 2 + n_rois*2
-        num_state = 6
-        def F(t, p, u):
-            s, f, v, q, x, vqs = np.array_split(p, num_state)
+        num_state = 5
+        def F(t, p, x):
+            s, f, v, q, vqs = np.array_split(p, num_state)
             vs, qs = np.array_split(vqs,self.num_layers)
 
             # combines lower and upper
-            dsdt = x-self.p.kappa*s-self.p.gamma*(f-1)
+            dsdt = x(t)-self.p.kappa*s-self.p.gamma*(f-1)
             dfdt = s
             # drain effect here
             drain_v = np.r_[0*vs,self.p.l_d*vs]
@@ -537,17 +555,18 @@ class TwoLayerDCM(DCM):
             dvsdt = 1/self.p.tau_d*(-vs+(vl-1))
             dqsdt = 1/self.p.tau_d*(-qs+(ql-1))
             # combines lower and upper
-            dxdt = np.dot(self.p.A, x)+ self.p.C * u(t) #np.dot(self.p.C, u(t))
-            return np.r_[dsdt, dfdt, dvdt, dqdt, dxdt, dvsdt, dqsdt]
+            # dxdt = np.dot(self.p.A, x)+ self.p.C * u(t) #np.dot(self.p.C, u(t))
+            return np.r_[dsdt, dfdt, dvdt, dqdt, dvsdt, dqsdt]
         return F
 
-    def collect_results(self, ivp):
+    def collect_results(self, ivp, x_vec):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
-        num_state = 6
+        num_state = 5
         for idx in range(ivp.shape[1]):
             p = ivp[:,idx]
-            s, f, v, q, x, vqs = np.array_split(p, num_state)
+            s, f, v, q, vqs = np.array_split(p, num_state)
+            x = x_vec.T[idx]
             vs,qs = np.array_split(vqs, self.num_layers)
             BOLD_tc.append(self.calc_BOLD(q, v))
             for key in self.state_vars:
@@ -583,36 +602,36 @@ class MultiLayerDCM(DCM):
     def init_states(self):
         zeros = np.full(self.num_rois*self.num_layers, 0.)
         ones  =  np.full(self.num_rois*self.num_layers, 1.)
-        s0,x0 = zeros, zeros
+        s0 = zeros
         f0,v0,q0 = ones, ones, ones
 
         zeros_l  =  np.full(self.num_rois*(self.num_layers-1), 0.)
         vs0, qs0 = zeros_l, zeros_l
 
-        return self.merge_p(s0, f0, v0, q0, x0, vs0, qs0)
+        return self.merge_p(s0, f0, v0, q0, vs0, qs0)
 
     def split_p(self, p):
         # do stuff
-        n = 5*self.num_rois*self.num_layers
+        n = 4*self.num_rois*self.num_layers
         m = 2*self.num_rois*(self.num_layers-1)
-        s, f, v, q, x = np.array_split(p[:n], 5)
+        s, f, v, q = np.array_split(p[:n], 4)
         vs, qs = np.array_split(p[n:], 2)
-        return s, f, v, q, x, vs, qs
+        return s, f, v, q, vs, qs
 
     @staticmethod
-    def merge_p(s, f, v, q, x, vs, qs):
-        return np.r_[s, f, v, q, x, vs, qs]
+    def merge_p(s, f, v, q, vs, qs):
+        return np.r_[s, f, v, q, vs, qs]
 
     def get_func(self):
         # state vector:
-        # p = [s,f,v,q,x,vs,qs]
+        # p = [s,f,v,q,vs,qs]
         # dpdt = F(t,p)
 
-        def F(t, p, u):
-            s, f, v, q, x, vs, qs = self.split_p(p)
+        def F(t, p, x):
+            s, f, v, q, vs, qs = self.split_p(p)
 
             # combines all layers
-            dsdt = x-self.p.kappa*s-self.p.gamma*(f-1)
+            dsdt = x(t)-self.p.kappa*s-self.p.gamma*(f-1)
             dfdt = s
             # drain effect here
             drain_v = np.r_[np.zeros(self.num_rois),self.p.l_d*vs]
@@ -626,17 +645,18 @@ class MultiLayerDCM(DCM):
             dvsdt = 1/self.p.tau_d*(-vs+(vl-1))
             dqsdt = 1/self.p.tau_d*(-qs+(ql-1))
             # combines all layers
-            dxdt = np.dot(self.p.A, x)+ self.p.C * u(t)
-            return self.merge_p(dsdt, dfdt, dvdt, dqdt, dxdt, dvsdt, dqsdt)
+            # dxdt = np.dot(self.p.A, x)+ self.p.C * u(t)
+            return self.merge_p(dsdt, dfdt, dvdt, dqdt, dvsdt, dqsdt)
         return F
 
-    def collect_results(self, ivp):
+    def collect_results(self, ivp, x_vec):
         BOLD_tc = []
         state_tc = {key:[] for key in self.state_vars}
         num_state = 6
         for idx in range(ivp.shape[1]):
             p = ivp[:,idx]
-            s, f, v, q, x, vs, qs = self.split_p(p)
+            s, f, v, q, vs, qs = self.split_p(p)
+            x = x_vec.T[idx]
             BOLD_tc.append(self.calc_BOLD(q, v))
             for key in self.state_vars:
                 state_tc[key].append(eval(key))
