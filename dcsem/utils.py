@@ -11,9 +11,10 @@ import os.path
 import numpy as np
 
 constants = {
-    'LowerLayerT1' : 800,  # ms
-    'UpperLayerT1' : 1200, # ms
+    'LowerLayerT1': 800,  # ms
+    'UpperLayerT1': 1200,  # ms
 }
+
 
 def parse_matrix_file(matfile, num_rois=None, num_layers=None, self_conn=None):
     """Interprets matrix file as either A or C matrix
@@ -28,20 +29,30 @@ def parse_matrix_file(matfile, num_rois=None, num_layers=None, self_conn=None):
         return mat
     except:
         if num_layers is None and num_rois is None:
-            raise(Exception('Matrix is defined with text. You need to specify num_rois/num_layers'))
+            raise (
+                Exception(
+                    'Matrix is defined with text. You need to specify num_rois/num_layers'
+                )
+            )
         # Read the file
         conn = []
         with open(os.path.expanduser(matfile), 'r') as f:
             conn = [l.rstrip() for l in f]
         # see if it is A or C (we need num_rois and num_layers)
         if '->' in conn[0]:
-            return create_A_matrix(num_rois, num_layers, paired_connections=conn, self_connections=self_conn)
+            return create_A_matrix(
+                num_rois,
+                num_layers,
+                paired_connections=conn,
+                self_connections=self_conn,
+            )
         else:
             return create_C_matrix(num_rois, num_layers, input_connections=conn)
 
 
-
-def create_A_matrix(num_rois, num_layers=1, paired_connections=None, self_connections=None):
+def create_A_matrix(
+    num_rois, num_layers=1, paired_connections=None, self_connections=None
+):
     """Make a connectivity matrix
     params:
     -------
@@ -58,7 +69,7 @@ def create_A_matrix(num_rois, num_layers=1, paired_connections=None, self_connec
     The output A is organised by layers then by ROIs
 
     """
-    A = np.zeros([num_layers*num_rois]*2)
+    A = np.zeros([num_layers * num_rois] * 2)
     # Fill diagonal
     if self_connections is not None:
         np.fill_diagonal(A, self_connections)
@@ -67,12 +78,17 @@ def create_A_matrix(num_rois, num_layers=1, paired_connections=None, self_connec
         for c in paired_connections:
             if type(c) == str:
                 import re
-                c = [x.replace('R','').replace('L','') for x in re.split(',|->|=',c.replace(' ',''))]
+
+                c = [
+                    x.replace('R', '').replace('L', '')
+                    for x in re.split(',|->|=', c.replace(' ', ''))
+                ]
                 c = [(int(c[0]), int(c[1])), (int(c[2]), int(c[3])), float(c[-1])]
             (j, lj), (i, li), v = c
-            A[i+li*num_rois, j+lj*num_rois] = v
+            A[i + li * num_rois, j + lj * num_rois] = v
 
     return A
+
 
 def create_C_matrix(num_rois, num_layers=1, input_connections=None):
     """Make input connections matrix C
@@ -87,19 +103,24 @@ def create_C_matrix(num_rois, num_layers=1, input_connections=None):
     --------
     1D array (the connectivity matrix C)
     """
-    C = np.zeros(num_layers*num_rois)
+    C = np.zeros(num_layers * num_rois)
     if input_connections is not None:
         for c in input_connections:
             if type(c) == str:
                 import re
-                c = [x.replace('R','').replace('L','') for x in re.split(',|=',c.replace(' ',''))]
+
+                c = [
+                    x.replace('R', '').replace('L', '')
+                    for x in re.split(',|=', c.replace(' ', ''))
+                ]
                 c = [int(c[0]), int(c[1]), float(c[2])]
             r, l, v = c
-            C[r+l*num_rois] = v
+            C[r + l * num_rois] = v
     return C
 
+
 def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=None):
-    """ DvE hierarchical model
+    """DvE hierarchical model
     # Two-Layers:
         feed-forward : top to bottom
         feed-back : bottom to all
@@ -113,6 +134,7 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
     :param self_connections: float or list of numbers
     :return:
     """
+
     def val():
         if callable(connections):
             return connections()
@@ -121,21 +143,22 @@ def create_DvE_matrix(num_rois, num_layers, connections=None, self_connections=N
         elif connections == 'random':
             return np.random.rand()
         else:
-            return 1.
+            return 1.0
 
-    if num_layers not in [2,3]:
-        raise(Exception('num_layers must be 2 or 3'))
+    if num_layers not in [2, 3]:
+        raise (Exception('num_layers must be 2 or 3'))
     if num_rois < 2:
-        raise(Exception('num_rois must be 2 or more'))
+        raise (Exception('num_rois must be 2 or more'))
     conn = []
-    Ltop = num_layers-1
-    for i in range(num_rois-1):
+    Ltop = num_layers - 1
+    for i in range(num_rois - 1):
         # feed-forward:
         conn.append(f'R{i},L{Ltop}->R{i+1},L{Ltop-1}={val()}')
         # feed-back:
         conn.append(f'R{i+1},L{0}->R{i},L{Ltop}={val()}')
         conn.append(f'R{i+1},L{0}->R{i},L{0}={val()}')
     return create_A_matrix(num_rois, num_layers, conn, self_connections)
+
 
 def A_to_text(A, num_rois, num_layers):
     """Form connectivity as text from matrix as array
@@ -148,13 +171,14 @@ def A_to_text(A, num_rois, num_layers):
     conn = []
     for r_in in range(num_rois):
         for l_in in range(num_layers):
-            col = r_in+l_in*num_rois # input is column
+            col = r_in + l_in * num_rois  # input is column
             for r_out in range(num_rois):
                 for l_out in range(num_layers):
-                    row = r_out+l_out*num_rois
-                    if A[row,col] != 0:
+                    row = r_out + l_out * num_rois
+                    if A[row, col] != 0:
                         conn.append(f'R{r_in},L{l_in}->R{r_out},L{l_out}={A[row,col]}')
     return conn
+
 
 def C_to_text(C, num_rois, num_layers):
     """Form connectivity as text from matrix as array
@@ -167,10 +191,11 @@ def C_to_text(C, num_rois, num_layers):
     conn = []
     for r in range(num_rois):
         for l in range(num_layers):
-            row = r+l*num_rois # input is column
+            row = r + l * num_rois  # input is column
             if C[row] != 0:
                 conn.append(f'R{r},L{l}={C[row]}')
     return conn
+
 
 def stim_boxcar(stim):
     """Create boxcar stimulus
@@ -179,6 +204,7 @@ def stim_boxcar(stim):
     """
     # Boxcar input
     import os
+
     if type(stim) == str:
         if os.path.exists(os.path.expanduser(stim)):
             stim = np.loadtxt(os.path.expanduser(stim), ndmin=2)
@@ -186,13 +212,16 @@ def stim_boxcar(stim):
     if stim.shape[1] == 3:
         stim = stim.T
     onsets, durations, amplitudes = stim
+
     @np.vectorize
     def u(t, onsets=onsets, durations=durations, amplitudes=amplitudes):
-        for o,d,a in zip(onsets,durations,amplitudes):
-            if o<=t<=o+d:
+        for o, d, a in zip(onsets, durations, amplitudes):
+            if o <= t <= o + d:
                 return a
-        return 0.
+        return 0.0
+
     return u
+
 
 def plot_signals(model, signal, tvec=None, labels=None):
     """Plot signals splitted by ROIs and Layers
@@ -203,21 +232,21 @@ def plot_signals(model, signal, tvec=None, labels=None):
     :param labels: list
     :return: figure object
     """
-    nt, nc = signal[0].shape if type(signal)==list else signal.shape
+    nt, nc = signal[0].shape if type(signal) == list else signal.shape
 
     if tvec is None:
-        tvec = np.linspace(0,nt,nt)
+        tvec = np.linspace(0, nt, nt)
     import matplotlib.pyplot as plt
 
     ncols = model.num_rois
-    nrows = model.num_layers if nc>ncols else 1
+    nrows = model.num_layers if nc > ncols else 1
 
     fig, axes = plt.subplots(ncols=ncols, nrows=nrows, sharex=True, sharey=True)
     for r in range(ncols):
         for l in range(nrows):
-            idx = r + ncols*l
+            idx = r + ncols * l
             if nrows > 1:
-                ax = axes[model.num_layers-1-l,r]
+                ax = axes[model.num_layers - 1 - l, r]
             else:
                 ax = axes[r]
             if type(signal) == list:
@@ -235,10 +264,11 @@ def plot_signals(model, signal, tvec=None, labels=None):
     return fig
 
 
-
 # MCMC fitting class
 class MH(object):
-    def __init__(self, loglik, logpr, burnin=1000, sampleevery=10, njumps=5000, update=20):
+    def __init__(
+        self, loglik, logpr, burnin=1000, sampleevery=10, njumps=5000, update=20
+    ):
         """Metropolis Hastings class
         Params
         ------
@@ -279,7 +309,7 @@ class MH(object):
         if bounds is None:
             return LB, UB
         if not isinstance(bounds, list):
-            raise(Exception('bounds must either be a list or None'))
+            raise (Exception('bounds must either be a list or None'))
         for i, b in enumerate(bounds):
             LB[i] = b[0] if b[0] is not None else -np.inf
             UB[i] = b[1] if b[1] is not None else np.inf
@@ -339,6 +369,7 @@ class MH(object):
         if verbose:
             print("Begin MH sampling")
         from tqdm import tqdm
+
         for iter in tqdm(range(maxiter)):
             if verbose:
                 print(".... Iter {}/{}".format(iter, maxiter))
@@ -368,8 +399,9 @@ class MH(object):
                 acc *= 0
                 rej *= 0
 
-        samples = samples[self.burnin::self.sampleevery]
+        samples = samples[self.burnin :: self.sampleevery]
         return samples
+
 
 def plot_posterior(means, cov, labels=None, samples=None, actual=None):
     """
@@ -390,19 +422,23 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
     matplotlib figure
 
     """
-    from scipy.stats import norm
     import matplotlib.pyplot as plt
+    from scipy.stats import norm
+
     # fig = plt.figure(figsize=(10, 10))
 
     n = means.size
-    fig, axes = plt.subplots(ncols=n, nrows=n, sharex='col', figsize=((8,8)))
+    fig, axes = plt.subplots(ncols=n, nrows=n, sharex='col', figsize=((8, 8)))
     nbins = 50
     k = 1
     for j in range(n):
         for i in range(n):
             if i == j:
-                x = np.linspace(means[i] - 5 * np.sqrt(cov[i, i]),
-                                means[i] + 5 * np.sqrt(cov[i, i]), nbins)
+                x = np.linspace(
+                    means[i] - 5 * np.sqrt(cov[i, i]),
+                    means[i] + 5 * np.sqrt(cov[i, i]),
+                    nbins,
+                )
                 y = norm.pdf(x, means[i], np.sqrt(cov[i, i]))
 
                 plt.subplot(n, n, k)
@@ -417,13 +453,19 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
             else:
                 m = np.asarray([means[i], means[j]])
                 v = np.asarray([[cov[i, i], cov[i, j]], [cov[j, i], cov[j, j]]])
-                xi = np.linspace(means[i] - 5 * np.sqrt(cov[i, i]),
-                                 means[i] + 5 * np.sqrt(cov[i, i]), nbins)
-                xj = np.linspace(means[j] - 5 * np.sqrt(cov[j, j]),
-                                 means[j] + 5 * np.sqrt(cov[j, j]), nbins)
+                xi = np.linspace(
+                    means[i] - 5 * np.sqrt(cov[i, i]),
+                    means[i] + 5 * np.sqrt(cov[i, i]),
+                    nbins,
+                )
+                xj = np.linspace(
+                    means[j] - 5 * np.sqrt(cov[j, j]),
+                    means[j] + 5 * np.sqrt(cov[j, j]),
+                    nbins,
+                )
                 x = np.asarray([(a, b) for a in xi for b in xj])
                 x = x - m
-                h = np.sum(-.5 * (x * (x @ np.linalg.inv(v).T)), axis=1)
+                h = np.sum(-0.5 * (x * (x @ np.linalg.inv(v).T)), axis=1)
 
                 h = np.exp(h - h.max())
                 h = np.reshape(h, (nbins, nbins))
@@ -432,8 +474,7 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
                 plt.contour(xi, xj, h)
 
                 if samples is not None:
-                    plt.plot(samples[:, i], samples[:, j], 'k.', alpha=.1)
+                    plt.plot(samples[:, i], samples[:, j], 'k.', alpha=0.1)
             k = k + 1
 
     return fig
-
