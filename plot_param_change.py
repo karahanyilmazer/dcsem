@@ -6,6 +6,8 @@ from tqdm import tqdm
 
 from dcsem import models, utils
 
+plt.rcParams['font.family'] = 'Times New Roman'
+
 
 # Function to lighten colors progressively
 def lighten_color(color, factor):
@@ -47,7 +49,7 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
 # %%
 # Input
 time = np.arange(100)  # Time vector (seconds)
-u = utils.stim_boxcar([[0, 10, 1]])  # Stimulus function (onset, duration, amplitude)
+u = utils.stim_boxcar([[0, 30, 1]])  # Stimulus function (onset, duration, amplitude)
 
 # Connectivity parameters
 num_rois = 2
@@ -58,7 +60,7 @@ C = utils.create_C_matrix(num_rois, num_layers, ['R0, L0 = 1.0'])
 
 # Parameters to vary
 params = {
-    'kappa': np.linspace(0, 2, 9),
+    'kappa': np.linspace(1, 2, 9),
     'gamma': np.linspace(0, 1, 9),
     'alpha': np.linspace(0.1, 1, 9),
 }
