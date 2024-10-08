@@ -1,0 +1,143 @@
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+import scienceplots
+from scipy.optimize import minimize
+
+from dcsem import models, utils
+
+plt.style.use(['science', 'no-latex'])
+plt.rcParams['font.family'] = 'Times New Roman'
+
+
+# %%
+# Simulate observed data with specified parameters
+def simulate_observed_data(params, **kwargs):
+    dcm = models.DCM(
+        kwargs['num_rois'],
+        params={'A': kwargs['A'], 'C': kwargs['C'], **params},
+    )
+    return dcm.simulate(kwargs['time'], kwargs['u'])[0]
+
+
+# Objective function to minimize, generalized for any parameters
+def objective(params, param_names, time, u, A, C, bold_observed, num_rois):
+    # Map the parameter values to their names
+    params = dict(zip(param_names, params))
+    # Run DCM simulation with the provided parameters
+    dcm = models.DCM(
+        num_rois,
+        params={'A': A, 'C': C, **params},
+    )
+    bold_simulated = dcm.simulate(time, u)[0]
+
+    # Compute the sum of squared errors
+    return np.sum((bold_simulated - bold_observed) ** 2)
+
+
+# Estimate parameters using optimization
+def estimate_parameters(initial_values, bounds, param_names, **kwargs):
+    # Perform the minimization
+    result = minimize(
+        objective,
+        x0=initial_values,
+        args=(
+            param_names,
+            kwargs['time'],
+            kwargs['u'],
+            kwargs['A'],
+            kwargs['C'],
+            kwargs['bold_observed'],
+            kwargs['num_rois'],
+        ),
+        bounds=bounds,
+        method='L-BFGS-B',
+    )
+
+    # Map the optimized parameter values back to their names
+    estimated_params = dict(zip(param_names, result.x))
+    return estimated_params
+
+
+# Plot observed and estimated BOLD signals
+def plot_bold_signals(time, bold_observed, bold_estimated, num_rois):
+    _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
+    for i in range(num_rois):
+        axs[i].plot(time, bold_observed[:, i], label='Observed', lw=2)
+        axs[i].plot(
+            time,
+            bold_estimated[:, i],
+            label='Estimated',
+            ls='--',
+            lw=2,
+            c='tomato',
+        )
+        axs[i].set_title(f'ROI {i}')
+        axs[i].set_xlabel('Time (s)')
+        axs[i].legend()
+
+    axs[0].set_ylabel('BOLD Signal')
+
+    plt.tight_layout()
+    plt.show()
+
+
+# %%
+if __name__ == '__main__':
+    # Set up the time vector and stimulus function
+    time = np.arange(100)
+    u = utils.stim_boxcar([[0, 30, 1]])
+
+    # Connectivity parameters
+    num_rois = 2
+    num_layers = 1
+    connections = ['R0, L0 -> R1, L0 = 0.2']
+    A = utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+    C = utils.create_C_matrix(num_rois, num_layers, ['R0, L0 = 1.0'])
+
+    # Parameters for estimation
+    true_params = {'alpha': 0.5}
+    true_params = {'kappa': 0.5}
+    true_params = {'gamma': 0.5}
+    # true_params = {'alpha': 0.5, 'gamma': 0.5}
+    # true_params = {'alpha': 0.5, 'kappa': 0.5, 'gamma': 0.5}
+
+    param_names = true_params.keys()  # Names of parameters to estimate
+    initial_values = [0.1] * len(true_params)  # Initial guesses for parameters
+    bounds = [(0.1, 1.0)] * len(true_params)  # Bounds for each parameter
+
+    # Simulate observed data
+    bold_observed = simulate_observed_data(
+        true_params,
+        time=time,
+        u=u,
+        A=A,
+        C=C,
+        num_rois=num_rois,
+    )
+
+    # Estimate parameters
+    estimated_params = estimate_parameters(
+        initial_values,
+        bounds,
+        param_names,
+        time=time,
+        u=u,
+        A=A,
+        C=C,
+        bold_observed=bold_observed,
+        num_rois=num_rois,
+    )
+
+    # Simulate data using estimated parameters
+    bold_estimated = simulate_observed_data(
+        estimated_params, time=time, u=u, A=A, C=C, num_rois=num_rois
+    )
+
+    # Plot results
+    plot_bold_signals(time, bold_observed, bold_estimated, num_rois)
+
+    print(f'True parameters:\t{true_params}')
+    print(f'Estimated parameters:\t{estimated_params}')
+
+# %%
