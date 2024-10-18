@@ -11,20 +11,36 @@ plt.rcParams['font.family'] = 'Times New Roman'
 
 
 # %%
+def get_one_layer_A(L0=0.2):
+    connections = [f'R0, L0 -> R1, L0 = {L0}']  # ROI0 -> ROI1 connection
+    return utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+
+
+def get_one_layer_C(L0=1):
+    connections = [f'R0, L0 = {L0}']  # Input --> ROI0 connection
+    return utils.create_C_matrix(num_rois, num_layers, connections)
+
+
 # Simulate observed data with specified parameters
 def simulate_bold(params, **kwargs):
     dcm = models.DCM(
         kwargs['num_rois'],
-        params={'A': kwargs['A'], 'C': kwargs['C'], **params},
+        params={
+            'A': get_one_layer_A(params.get('A_L0', 0.2)),
+            'C': get_one_layer_C(params.get('C_L0', 1.0)),
+            **params,
+        },
     )
     return dcm.simulate(kwargs['time'], kwargs['u'])[0]
 
 
 # Objective function to minimize, generalized for any parameters
-def objective(params, param_names, time, u, A, C, bold_signal, num_rois):
+def objective(param_vals, param_names, time, u, bold_signal, num_rois):
 
     # Map the parameter values to their names
-    params = dict(zip(param_names, params))
+    params = dict(zip(param_names, param_vals))
+    A = get_one_layer_A(params.get('A_L0', 0.2))
+    C = get_one_layer_C(params.get('C_L0', 1.0))
     bold_simulated = simulate_bold(params, time=time, u=u, A=A, C=C, num_rois=num_rois)
 
     # Compute the sum of squared errors
@@ -41,8 +57,6 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
             param_names,
             kwargs['time'],
             kwargs['u'],
-            kwargs['A'],
-            kwargs['C'],
             kwargs['bold_signal'],
             kwargs['num_rois'],
         ),
@@ -89,22 +103,37 @@ if __name__ == '__main__':
     # Connectivity parameters
     num_rois = 2
     num_layers = 1
-    connections = ['R0, L0 -> R1, L0 = 0.2']
-    A = utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
-    C = utils.create_C_matrix(num_rois, num_layers, ['R0, L0 = 1.0'])
-
-    # Parameter names to simulate
-    params_to_sim = ['alpha', 'kappa', 'gamma']
-
-    # Parameter names to estimate
-    params_to_est = ['alpha', 'kappa']
 
     # Ground truth values for the parameters
-    true_params = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
+    true_params = {
+        'alpha': 0.5,
+        'kappa': 1.5,
+        'gamma': 0.5,
+        'A_L0': 0.2,
+        'C_L0': 1.0,
+    }
 
     # Initial guesses and bounds for the optimization
-    initial_values = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
-    bounds = {'alpha': (0.1, 1.0), 'kappa': (1.0, 2.0), 'gamma': (0.0, 1.0)}
+    initial_values = {
+        'alpha': 0.5,
+        'kappa': 1.5,
+        'gamma': 0.5,
+        'A_L0': 0,
+        'C_L0': 0.3,
+    }
+    bounds = {
+        'alpha': (0.1, 1.0),
+        'kappa': (1.0, 2.0),
+        'gamma': (0.0, 1.0),
+        'A_L0': (0, 1),
+        'C_L0': (0, 1),
+    }
+
+    # Parameter names to simulate
+    params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
+
+    # Parameter names to estimate
+    params_to_est = ['alpha', 'kappa', 'gamma', 'A_L0']
 
     # Filter the parameters to simulate and estimate
     true_params = {k: true_params[k] for k in params_to_sim}
@@ -116,8 +145,6 @@ if __name__ == '__main__':
         true_params,
         time=time,
         u=u,
-        A=A,
-        C=C,
         num_rois=num_rois,
     )
 
@@ -133,16 +160,12 @@ if __name__ == '__main__':
         params_to_est,
         time=time,
         u=u,
-        A=A,
-        C=C,
         bold_signal=bold_noisy,
         num_rois=num_rois,
     )
 
     # Simulate data using estimated parameters
-    bold_estimated = simulate_bold(
-        estimated_params, time=time, u=u, A=A, C=C, num_rois=num_rois
-    )
+    bold_estimated = simulate_bold(estimated_params, time=time, u=u, num_rois=num_rois)
 
     # Plot results
     plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois)
