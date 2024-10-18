@@ -21,7 +21,7 @@ def simulate_observed_data(params, **kwargs):
 
 
 # Objective function to minimize, generalized for any parameters
-def objective(params, param_names, time, u, A, C, bold_observed, num_rois):
+def objective(params, param_names, time, u, A, C, bold_signal, num_rois):
     # Map the parameter values to their names
     params = dict(zip(param_names, params))
     # Run DCM simulation with the provided parameters
@@ -32,7 +32,7 @@ def objective(params, param_names, time, u, A, C, bold_observed, num_rois):
     bold_simulated = dcm.simulate(time, u)[0]
 
     # Compute the sum of squared errors
-    return np.sum((bold_simulated - bold_observed) ** 2)
+    return np.sum((bold_simulated - bold_signal) ** 2)
 
 
 # Estimate parameters using optimization
@@ -47,7 +47,7 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
             kwargs['u'],
             kwargs['A'],
             kwargs['C'],
-            kwargs['bold_observed'],
+            kwargs['bold_signal'],
             kwargs['num_rois'],
         ),
         bounds=bounds,
@@ -60,10 +60,11 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
 
 
 # Plot observed and estimated BOLD signals
-def plot_bold_signals(time, bold_observed, bold_estimated, num_rois):
+def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois):
     _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
     for i in range(num_rois):
-        axs[i].plot(time, bold_observed[:, i], label='Observed', lw=2)
+        axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
+        axs[i].plot(time, bold_true[:, i], label='Ground Truth', lw=2)
         axs[i].plot(
             time,
             bold_estimated[:, i],
@@ -113,7 +114,7 @@ if __name__ == '__main__':
     bounds = [bounds[k] for k in param_names]
 
     # Simulate observed data
-    bold_observed = simulate_observed_data(
+    bold_true = simulate_observed_data(
         true_params,
         time=time,
         u=u,
@@ -121,6 +122,11 @@ if __name__ == '__main__':
         C=C,
         num_rois=num_rois,
     )
+
+    # Add noise to the observed data
+    snr = 30
+    sigma = np.max(bold_true) / snr
+    bold_noisy = bold_true + np.random.normal(0, sigma, bold_true.shape)
 
     # Estimate parameters
     estimated_params = estimate_parameters(
@@ -131,7 +137,7 @@ if __name__ == '__main__':
         u=u,
         A=A,
         C=C,
-        bold_observed=bold_observed,
+        bold_signal=bold_noisy,
         num_rois=num_rois,
     )
 
@@ -141,7 +147,7 @@ if __name__ == '__main__':
     )
 
     # Plot results
-    plot_bold_signals(time, bold_observed, bold_estimated, num_rois)
+    plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois)
 
     print(f'True parameters:\t{true_params}')
     print(f'Estimated parameters:\t{estimated_params}')
