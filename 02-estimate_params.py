@@ -38,7 +38,7 @@ def objective(params, param_names, time, u, A, C, bold_signal, num_rois):
 # Estimate parameters using optimization
 def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     # Perform the minimization
-    result = minimize(
+    opt = minimize(
         objective,
         x0=initial_values,
         args=(
@@ -55,8 +55,9 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     )
 
     # Map the optimized parameter values back to their names
-    estimated_params = dict(zip(param_names, result.x))
-    return estimated_params
+    estimated_params = dict(zip(param_names, opt.x.tolist()))
+
+    return estimated_params, opt.hess_inv.todense()
 
 
 # Plot observed and estimated BOLD signals
@@ -129,7 +130,7 @@ if __name__ == '__main__':
     bold_noisy = bold_true + np.random.normal(0, sigma, bold_true.shape)
 
     # Estimate parameters
-    estimated_params = estimate_parameters(
+    estimated_params, hess_inv = estimate_parameters(
         initial_values,
         bounds,
         param_names,
@@ -151,5 +152,11 @@ if __name__ == '__main__':
 
     print(f'True parameters:\t{true_params}')
     print(f'Estimated parameters:\t{estimated_params}')
+
+    print('Hessian inverse:')
+    print(hess_inv)
+
+    print('Variances of the estimated parameters:')
+    print(np.diag(hess_inv))
 
 # %%
