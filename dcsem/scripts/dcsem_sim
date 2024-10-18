@@ -7,6 +7,12 @@
 # Copyright (C) 2023 University of Oxford
 # SHBASECOPYRIGHT
 
+import os
+import warnings
+
+import numpy as np
+
+from dcsem import models, utils
 from dcsem.auxilary import configargparse as argparse
 
 p = argparse.ArgumentParser("DCSEM - Simulator")
@@ -15,53 +21,115 @@ required = p.add_argument_group('required arguments')
 optional = p.add_argument_group('additional options')
 
 
-required.add_argument('--model', required=True, type=str, dest='model', metavar='<MODEL>',
-                      help='Model to use. Either DCM or SEM')
-required.add_argument('--num_rois', required=True, type=int,
-                       help='Number of ROIs')
-required.add_argument('--num_layers', required=True, type=int,
-                      help='Number of Layers per ROI')
-required.add_argument('--time_points', required=True, type=int,
-                      help='Number of Ltime points')
-optional.add_argument('--tr', required=False, type=float, default=1.,
-                      help='Repetition time (seconds). Default = 1s')
-optional.add_argument('--Amat', required=False, type=str,
-                      help='A matrix specification (text file)')
-optional.add_argument('--Cmat', required=False, type=str,
-                      help='C matrix specification (text file)')
-optional.add_argument('--sigma', required=False, type=float,default=1.,
-                      help='Value of Sigma for SEM or for stochastic_noise_std for DCM')
-optional.add_argument('--cnr', required=False, type=float,
-                      help='Value of CNR for DCM')
-optional.add_argument('--self_conn', required=False, type=float,default=-1.,
-                      help='Value of Sigma for SEM')
-optional.add_argument('--stim', required=False, type=str,
-                      help="Stimulus. 3-column format file")
-optional.add_argument('--verbose', action='store_true', help='Verbose mode')
-required.add_argument('--outdir', required=True, type=str,
-                      help='output folder')
-optional.add_argument('--TIs', required=False, type=float, nargs='*',
-                      help='Inversion times for IR-FMRI simulations')
-optional.add_argument('--T1s', required=False, nargs='*',
-                      help='T1 values for the different layers. Must match --num_layers')
-optional.add_argument('--stochastic', action='store_true',
-                      help='Stochastic (only for DCM)')
+required.add_argument(
+    '--model',
+    required=True,
+    type=str,
+    dest='model',
+    metavar='<MODEL>',
+    help='Model to use. Either DCM or SEM',
+)
+required.add_argument(
+    '--num_rois',
+    required=True,
+    type=int,
+    help='Number of ROIs',
+)
+required.add_argument(
+    '--num_layers',
+    required=True,
+    type=int,
+    help='Number of Layers per ROI',
+)
+required.add_argument(
+    '--time_points',
+    required=True,
+    type=int,
+    help='Number of Ltime points',
+)
+optional.add_argument(
+    '--tr',
+    required=False,
+    type=float,
+    default=1.0,
+    help='Repetition time (seconds). Default = 1s',
+)
+optional.add_argument(
+    '--Amat',
+    required=False,
+    type=str,
+    help='A matrix specification (text file)',
+)
+optional.add_argument(
+    '--Cmat',
+    required=False,
+    type=str,
+    help='C matrix specification (text file)',
+)
+optional.add_argument(
+    '--sigma',
+    required=False,
+    type=float,
+    default=1.0,
+    help='Value of Sigma for SEM or for stochastic_noise_std for DCM',
+)
+optional.add_argument(
+    '--cnr',
+    required=False,
+    type=float,
+    help='Value of CNR for DCM',
+)
+optional.add_argument(
+    '--self_conn',
+    required=False,
+    type=float,
+    default=-1.0,
+    help='Value of Sigma for SEM',
+)
+optional.add_argument(
+    '--stim',
+    required=False,
+    type=str,
+    help="Stimulus. 3-column format file",
+)
+optional.add_argument(
+    '--verbose',
+    action='store_true',
+    help='Verbose mode',
+)
+required.add_argument(
+    '--outdir',
+    required=True,
+    type=str,
+    help='output folder',
+)
+optional.add_argument(
+    '--TIs',
+    required=False,
+    type=float,
+    nargs='*',
+    help='Inversion times for IR-FMRI simulations',
+)
+optional.add_argument(
+    '--T1s',
+    required=False,
+    nargs='*',
+    help='T1 values for the different layers. Must match --num_layers',
+)
+optional.add_argument(
+    '--stochastic', action='store_true', help='Stochastic (only for DCM)'
+)
 
 # Config file
-optional.add('--config', required=False, is_config_file=True,
-             help='configuration file')
+optional.add('--config', required=False, is_config_file=True, help='configuration file')
 
 args = p.parse_args()
 
-# Begin
-
-from dcsem import models, utils
-import numpy as np
-import os, warnings
 
 # plotting function
 def quickplot(ts, image_file):
     import matplotlib.pyplot as plt
+
     plt.figure()
     plt.plot(ts)
     plt.savefig(image_file)
@@ -76,22 +144,30 @@ if args.model == 'SEM':
         model = models.SEM(num_rois=args.num_rois)
 elif args.model == 'DCM':
     if args.num_layers > 1:
-        model = models.MultiLayerDCM(num_rois=args.num_rois, num_layers=args.num_layers, stochastic=args.stochastic)
+        model = models.MultiLayerDCM(
+            num_rois=args.num_rois,
+            num_layers=args.num_layers,
+            stochastic=args.stochastic,
+        )
         model.state_noise_std = args.sigma
         # model = models.TwoLayerDCM(num_rois=args.num_rois)
     else:
         model = models.DCM(num_rois=args.num_rois, stochastic=args.stochastic)
         model.state_noise_std = args.sigma
 else:
-    raise(Exception(f'Unknown model {args.model}'))
+    raise (Exception(f'Unknown model {args.model}'))
 
 # A matrix
 if args.Amat:
-    A = utils.parse_matrix_file(args.Amat, args.num_rois, args.num_layers, args.self_conn)
+    A = utils.parse_matrix_file(
+        args.Amat, args.num_rois, args.num_layers, args.self_conn
+    )
 else:
     if args.self_conn:
-        A = utils.create_A_matrix(args.num_rois, args.num_layers, self_connections=args.self_conn)
-        model.set_params({'A':A})
+        A = utils.create_A_matrix(
+            args.num_rois, args.num_layers, self_connections=args.self_conn
+        )
+        model.set_params({'A': A})
 
 # C matrix (in case of DCM)
 if args.Cmat and args.model == 'DCM':
@@ -106,20 +182,20 @@ if args.verbose:
     print('begin simulation')
 tvec = np.linspace(0, args.time_points * args.tr, args.time_points)
 
-sim_args = {'tvec' : tvec}
+sim_args = {'tvec': tvec}
 u = None
 # stimulus:
 if args.stim:
     u = utils.stim_boxcar(args.stim)
-    sim_args ['u'] = u
-sim_args ['CNR'] = args.cnr
+    sim_args['u'] = u
+sim_args['CNR'] = args.cnr
 
 # Do simulations
 bold, state_tc = model.simulate(**sim_args)
 
 # collect results
 state_tc = model.state_tc_to_dict(state_tc)
-Results = {'BOLD' : bold, 'State_tc' : state_tc}
+Results = {'BOLD': bold, 'State_tc': state_tc}
 
 # If TIs are provided, simulate the IR-BOLD signals
 if args.TIs:
@@ -130,7 +206,7 @@ if args.TIs:
     if args.T1s:
         T1s = args.T1s
         if len(T1s) != args.num_layers:
-            raise(Exception('Number of T1s does not match number of layers'))
+            raise (Exception('Number of T1s does not match number of layers'))
         else:
             model.T1s = T1s
 
@@ -145,33 +221,36 @@ if args.verbose:
 outdir = os.path.expanduser(args.outdir)
 os.makedirs(outdir, exist_ok=True)
 
-fig = utils.plot_signals(model, signal = bold, tvec=tvec)
-fig.savefig( outdir+'/bold_split_roi.png')
+fig = utils.plot_signals(model, signal=bold, tvec=tvec)
+fig.savefig(outdir + '/bold_split_roi.png')
 
 import pandas as pd
+
 for name in Results['State_tc']:
     D = Results['State_tc'][name]
-    pd.DataFrame(D).to_csv(outdir+f'/state_tc_{name}.csv', index=False)
+    pd.DataFrame(D).to_csv(outdir + f'/state_tc_{name}.csv', index=False)
 
 if args.TIs:
     for ti in TIs:
         name = f'IR-BOLD_TI{int(ti)}'
         signal = Results[name]
-        np.savetxt(outdir+f'/{name}.txt', signal)
-        quickplot(signal, outdir+f'/{name}.png')
+        np.savetxt(outdir + f'/{name}.txt', signal)
+        quickplot(signal, outdir + f'/{name}.png')
 
-    fig = utils.plot_signals(model, signal = IR_signals, tvec=tvec, labels=[f'TI={ti}' for ti in TIs])
-    fig.savefig( outdir+'/ir-bold_split_roi.png')
+    fig = utils.plot_signals(
+        model, signal=IR_signals, tvec=tvec, labels=[f'TI={ti}' for ti in TIs]
+    )
+    fig.savefig(outdir + '/ir-bold_split_roi.png')
 
 
-np.savetxt(outdir+"/bold.txt", bold)
-quickplot(bold, outdir+'/bold.png')
+np.savetxt(outdir + "/bold.txt", bold)
+quickplot(bold, outdir + '/bold.png')
 
 
 # save more information
-np.savetxt(outdir+'/Amat.txt', model.p.A)
+np.savetxt(outdir + '/Amat.txt', model.p.A)
 if model.model == 'DCM':
-    np.savetxt(outdir+'/Cmat.txt', model.p.C)
+    np.savetxt(outdir + '/Cmat.txt', model.p.C)
 
 
 info = {}
@@ -180,6 +259,6 @@ info['num_rois'] = model.num_rois
 info['num_layers'] = model.num_layers
 
 import json
-with open(outdir+'/info.json', "w") as outfile:
-    json.dump(info, outfile)
 
+with open(outdir + '/info.json', "w") as outfile:
+    json.dump(info, outfile)
