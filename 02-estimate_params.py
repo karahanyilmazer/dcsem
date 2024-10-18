@@ -104,7 +104,9 @@ if __name__ == '__main__':
     num_rois = 2
     num_layers = 1
 
-    # Ground truth values for the parameters
+    # ==================================================================================
+    # Set the ground truth parameter values
+    # ==================================================================================
     true_params = {
         'alpha': 0.5,
         'kappa': 1.5,
@@ -112,8 +114,9 @@ if __name__ == '__main__':
         'A_L0': 0.2,
         'C_L0': 1.0,
     }
-
-    # Initial guesses and bounds for the optimization
+    # ==================================================================================
+    # Set the initial guesses and bounds for the parameter optimization
+    # ==================================================================================
     initial_values = {
         'alpha': 0.5,
         'kappa': 1.5,
@@ -128,12 +131,12 @@ if __name__ == '__main__':
         'A_L0': (0, 1),
         'C_L0': (0, 1),
     }
-
-    # Parameter names to simulate
+    # ==================================================================================
+    # Choose the parameters to simulate and estimate
+    # ==================================================================================
     params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-
-    # Parameter names to estimate
     params_to_est = ['alpha', 'kappa', 'gamma', 'A_L0']
+    # ==================================================================================
 
     # Filter the parameters to simulate and estimate
     true_params = {k: true_params[k] for k in params_to_sim}
