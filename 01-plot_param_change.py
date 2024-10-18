@@ -97,26 +97,29 @@ def plot_param_change(figsize=(10, 12)):
 
 
 # %%
-# Input
-time = np.arange(100)  # Time vector (seconds)
-u = utils.stim_boxcar([[0, 30, 1]])  # Stimulus function (onset, duration, amplitude)
+if __name__ == '__main__':
+    # Input
+    time = np.arange(100)  # Time vector (seconds)
+    u = utils.stim_boxcar(
+        [[0, 30, 1]]
+    )  # Stimulus function (onset, duration, amplitude)
 
-# Connectivity parameters
-num_rois = 2
-num_layers = 1
+    # Connectivity parameters
+    num_rois = 2
+    num_layers = 1
 
-# Parameters to vary
-params = {
-    'kappa': np.linspace(1, 2, 9),
-    'gamma': np.linspace(0, 1, 9),
-    'alpha': np.linspace(0.1, 1, 9),
-    'A_L0': np.linspace(0, 1, 9),
-    'C_L0': np.linspace(0, 1, 9),
-}
+    # Parameters to vary
+    params = {
+        'kappa': np.linspace(1, 2, 9),
+        'gamma': np.linspace(0, 1, 9),
+        'alpha': np.linspace(0.1, 1, 9),
+        'A_L0': np.linspace(0, 1, 9),
+        'C_L0': np.linspace(0, 1, 9),
+    }
 
-# Run simulations for each parameter set
-bold_tcs = {param: simulate_dcm(param, values) for param, values in params.items()}
+    # Run simulations for each parameter set
+    bold_tcs = {param: simulate_dcm(param, values) for param, values in params.items()}
 
-plot_param_change()
+    plot_param_change()
 
 # %%
