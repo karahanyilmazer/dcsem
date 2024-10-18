@@ -70,6 +70,11 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     return estimated_params, opt.hess_inv.todense()
 
 
+def add_noise(bold_true, snr):
+    sigma = np.max(bold_true) / snr
+    return bold_true + np.random.normal(0, sigma, bold_true.shape)
+
+
 # Plot observed and estimated BOLD signals
 def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois):
     _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
@@ -152,9 +157,7 @@ if __name__ == '__main__':
     )
 
     # Add noise to the observed data
-    snr = 30
-    sigma = np.max(bold_true) / snr
-    bold_noisy = bold_true + np.random.normal(0, sigma, bold_true.shape)
+    bold_noisy = add_noise(bold_true, snr=30)
 
     # Estimate parameters
     estimated_params, hess_inv = estimate_parameters(
