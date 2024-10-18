@@ -150,13 +150,14 @@ if __name__ == '__main__':
     # Plot results
     plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois)
 
-    print(f'True parameters:\t{true_params}')
-    print(f'Estimated parameters:\t{estimated_params}')
+    print('\tTrue\tEstimated')
+    for param in param_names:
+        print(f'{param}:\t{true_params[param]:.2f}\t{estimated_params[param]:.6f}')
 
-    print('Hessian inverse:')
+    print('\nHessian inverse:')
     print(hess_inv)
 
-    print('Variances of the estimated parameters:')
+    print('\nVariances of the estimated parameters:')
     print(np.diag(hess_inv))
 
 # %%
