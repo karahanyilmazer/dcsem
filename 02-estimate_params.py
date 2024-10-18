@@ -12,7 +12,7 @@ plt.rcParams['font.family'] = 'Times New Roman'
 
 # %%
 # Simulate observed data with specified parameters
-def simulate_observed_data(params, **kwargs):
+def simulate_bold(params, **kwargs):
     dcm = models.DCM(
         kwargs['num_rois'],
         params={'A': kwargs['A'], 'C': kwargs['C'], **params},
@@ -22,14 +22,10 @@ def simulate_observed_data(params, **kwargs):
 
 # Objective function to minimize, generalized for any parameters
 def objective(params, param_names, time, u, A, C, bold_signal, num_rois):
+
     # Map the parameter values to their names
     params = dict(zip(param_names, params))
-    # Run DCM simulation with the provided parameters
-    dcm = models.DCM(
-        num_rois,
-        params={'A': A, 'C': C, **params},
-    )
-    bold_simulated = dcm.simulate(time, u)[0]
+    bold_simulated = simulate_bold(params, time=time, u=u, A=A, C=C, num_rois=num_rois)
 
     # Compute the sum of squared errors
     return np.sum((bold_simulated - bold_signal) ** 2)
@@ -115,7 +111,7 @@ if __name__ == '__main__':
     bounds = [bounds[k] for k in param_names]
 
     # Simulate observed data
-    bold_true = simulate_observed_data(
+    bold_true = simulate_bold(
         true_params,
         time=time,
         u=u,
@@ -143,7 +139,7 @@ if __name__ == '__main__':
     )
 
     # Simulate data using estimated parameters
-    bold_estimated = simulate_observed_data(
+    bold_estimated = simulate_bold(
         estimated_params, time=time, u=u, A=A, C=C, num_rois=num_rois
     )
 
