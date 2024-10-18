@@ -95,16 +95,22 @@ if __name__ == '__main__':
     A = utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
     C = utils.create_C_matrix(num_rois, num_layers, ['R0, L0 = 1.0'])
 
-    # Parameters for estimation
-    true_params = {'alpha': 0.5}
-    true_params = {'kappa': 0.5}
-    true_params = {'gamma': 0.5}
-    # true_params = {'alpha': 0.5, 'gamma': 0.5}
-    # true_params = {'alpha': 0.5, 'kappa': 0.5, 'gamma': 0.5}
+    # Ground truth values for the parameters
+    true_params = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
 
-    param_names = true_params.keys()  # Names of parameters to estimate
-    initial_values = [0.1] * len(true_params)  # Initial guesses for parameters
-    bounds = [(0.1, 1.0)] * len(true_params)  # Bounds for each parameter
+    # Initial guesses and bounds for the optimization
+    initial_values = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
+    bounds = {'alpha': (0.1, 1.0), 'kappa': (1.0, 2.0), 'gamma': (0.0, 1.0)}
+
+    # Parameter names to simulate and estimate
+    param_names = ['alpha', 'kappa', 'gamma', 'A']
+    param_names = ['alpha', 'kappa', 'gamma']
+    # param_names = ['alpha', 'kappa']
+
+    # Get a subset of the parameter dictionaries
+    true_params = {k: true_params[k] for k in param_names}
+    initial_values = [initial_values[k] for k in param_names]
+    bounds = [bounds[k] for k in param_names]
 
     # Simulate observed data
     bold_observed = simulate_observed_data(
