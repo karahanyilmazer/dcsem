@@ -93,6 +93,12 @@ if __name__ == '__main__':
     A = utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
     C = utils.create_C_matrix(num_rois, num_layers, ['R0, L0 = 1.0'])
 
+    # Parameter names to simulate
+    params_to_sim = ['alpha', 'kappa', 'gamma']
+
+    # Parameter names to estimate
+    params_to_est = ['alpha', 'kappa']
+
     # Ground truth values for the parameters
     true_params = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
 
@@ -100,15 +106,10 @@ if __name__ == '__main__':
     initial_values = {'alpha': 0.5, 'kappa': 1.5, 'gamma': 0.5}
     bounds = {'alpha': (0.1, 1.0), 'kappa': (1.0, 2.0), 'gamma': (0.0, 1.0)}
 
-    # Parameter names to simulate and estimate
-    param_names = ['alpha', 'kappa', 'gamma', 'A']
-    param_names = ['alpha', 'kappa', 'gamma']
-    # param_names = ['alpha', 'kappa']
-
-    # Get a subset of the parameter dictionaries
-    true_params = {k: true_params[k] for k in param_names}
-    initial_values = [initial_values[k] for k in param_names]
-    bounds = [bounds[k] for k in param_names]
+    # Filter the parameters to simulate and estimate
+    true_params = {k: true_params[k] for k in params_to_sim}
+    initial_values = [initial_values[k] for k in params_to_est]
+    bounds = [bounds[k] for k in params_to_est]
 
     # Simulate observed data
     bold_true = simulate_bold(
@@ -129,7 +130,7 @@ if __name__ == '__main__':
     estimated_params, hess_inv = estimate_parameters(
         initial_values,
         bounds,
-        param_names,
+        params_to_est,
         time=time,
         u=u,
         A=A,
@@ -147,7 +148,7 @@ if __name__ == '__main__':
     plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois)
 
     print('\tTrue\tEstimated')
-    for param in param_names:
+    for param in params_to_est:
         print(f'{param}:\t{true_params[param]:.2f}\t{estimated_params[param]:.6f}')
 
     print('\nHessian inverse:')
