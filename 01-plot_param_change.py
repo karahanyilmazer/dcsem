@@ -72,6 +72,30 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     legend.get_title().set_color(base_color)
 
 
+def plot_param_change(figsize=(10, 12)):
+    # Create the plot
+    _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
+
+    # Get the default color cycle (tab10 colormap has 10 distinct colors)
+    cmap = plt.get_cmap('tab10')
+
+    # Plot for each parameter with the corresponding color from the cycle
+    for i, (param, values) in enumerate(params.items()):
+        base_color = cmap(i)  # Get the base color from the colormap
+        plot_bold(axs, bold_tcs[param], param, values, i, base_color)
+
+    # Set titles and labels
+    for i in range(num_rois):
+        axs[0, i].set_title(f'ROI {i}')
+        axs[len(params) - 1, i].set_xlabel('Time (s)')
+
+    for i in range(len(params)):
+        axs[i, 0].set_ylabel('BOLD Signal')
+
+    plt.tight_layout(rect=[0, 0, 0.95, 1])
+    plt.show()
+
+
 # %%
 # Input
 time = np.arange(100)  # Time vector (seconds)
@@ -80,7 +104,6 @@ u = utils.stim_boxcar([[0, 30, 1]])  # Stimulus function (onset, duration, ampli
 # Connectivity parameters
 num_rois = 2
 num_layers = 1
-connections = ['R0, L0 -> R1, L0 = 0.2']  # ROI0 -> ROI1 connection
 
 # Parameters to vary
 params = {
@@ -94,28 +117,6 @@ params = {
 # Run simulations for each parameter set
 bold_tcs = {param: simulate_dcm(param, values) for param, values in params.items()}
 
-# %%
-# Create the plot
-fig, axs = plt.subplots(len(params), num_rois, figsize=(10, 12))
-
-# Get the default color cycle (tab10 colormap has 10 distinct colors)
-cmap = plt.get_cmap('tab10')
-
-# Plot for each parameter with the corresponding color from the cycle
-for i, (param, values) in enumerate(params.items()):
-    base_color = cmap(i)  # Get the base color from the colormap
-    plot_bold(axs, bold_tcs[param], param, values, i, base_color)
-
-# Set titles and labels
-for i in range(num_rois):
-    axs[0, i].set_title(f'ROI {i}')
-    axs[len(params) - 1, i].set_xlabel('Time (s)')
-
-for i in range(len(params)):
-    axs[i, 0].set_ylabel('BOLD Signal')
-
-plt.tight_layout(rect=[0, 0, 0.95, 1])
-plt.show()
-
+plot_param_change()
 
 # %%
