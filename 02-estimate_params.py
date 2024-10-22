@@ -281,72 +281,58 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     plt.show()
 
 
-# %%
-if __name__ == '__main__':
-    # Set up the time vector and stimulus function
-    time = np.arange(100)
-    u = utils.stim_boxcar([[0, 30, 1]])
+def run_simulation(
+    time,
+    u,
+    num_rois,
+    num_layers,
+    true_params,
+    initial_values,
+    bounds,
+    params_to_sim,
+    params_to_est,
+    snr,
+):
+    """
+    Runs a simulation, estimates parameters, and displays the results.
 
-    # Connectivity parameters
-    num_rois = 2
-    num_layers = 1
+    Args:
+        time (np.array): Time points for the simulation.
+        u (np.array): External input to the system.
+        num_rois (int): Number of regions of interest.
+        num_layers (int): Number of layers in the system.
+        true_params (dict): True parameter values for the simulation.
+        initial_values (list): Initial guesses for parameter estimation.
+        bounds (list): Parameter bounds for estimation.
+        params_to_sim (list): Parameters used for simulation.
+        params_to_est (list): Parameters to estimate.
+        snr (float): Signal-to-noise ratio for adding noise.
 
-    # ==================================================================================
-    # Set the ground truth parameter values
-    # ==================================================================================
-    true_params = {
-        'alpha': 0.5,
-        'kappa': 1.5,
-        'gamma': 0.5,
-        'A_L0': 0.2,
-        'C_L0': 1.0,
-    }
-    # ==================================================================================
-    # Set the initial guesses and bounds for the parameter optimization
-    # ==================================================================================
-    initial_values = {
-        'alpha': 0.5,
-        'kappa': 1.5,
-        'gamma': 0.5,
-        'A_L0': 0,
-        'C_L0': 0.3,
-    }
-    bounds = {
-        'alpha': (0.1, 1.0),
-        'kappa': (1.0, 2.0),
-        'gamma': (0.0, 1.0),
-        'A_L0': (0, 1),
-        'C_L0': (0, 1),
-    }
-    # ==================================================================================
-    # Choose the parameters to simulate and estimate
-    # ==================================================================================
-    params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-    params_to_est = ['alpha', 'kappa', 'gamma', 'A_L0']
-    params_to_est = ['alpha', 'kappa']
-    # params_to_est = ['alpha', 'gamma']
-    # ==================================================================================
-
+    Returns:
+        tuple: A tuple containing:
+            - hessian (np.array): Hessian matrix from the estimation.
+            - covariance (np.array): Covariance matrix from the estimation.
+    """
     # Filter the parameters to simulate and estimate
-    true_params = {k: true_params[k] for k in params_to_sim}
-    initial_values = [initial_values[k] for k in params_to_est]
-    bounds = [bounds[k] for k in params_to_est]
+    true_params_filtered = {k: true_params[k] for k in params_to_sim}
+    initial_values_filtered = [initial_values[k] for k in params_to_est]
+    bounds_filtered = [bounds[k] for k in params_to_est]
 
     # Simulate observed data
     bold_true = simulate_bold(
-        true_params,
+        true_params_filtered,
         time=time,
         u=u,
         num_rois=num_rois,
     )
 
     # Add noise to the observed data
-    bold_noisy = add_noise(bold_true, snr=0.1)
+    bold_noisy = add_noise(bold_true, snr=snr)
 
     # Estimate parameters
     estimated_params, hessian, covariance = estimate_parameters(
-        initial_values,
-        bounds,
+        initial_values_filtered,
+        bounds_filtered,
         params_to_est,
         time=time,
         u=u,
@@ -360,6 +346,7 @@ if __name__ == '__main__':
     # Plot results
     plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
+    # Print results
     print('\tTrue\tEstimated')
     for param in params_to_est:
         print(f'{param}:\t{true_params[param]:.2f}\t{estimated_params[param]:.6f}')
@@ -372,5 +359,72 @@ if __name__ == '__main__':
 
     print('\nVariances of the estimated parameters:')
     print(np.diag(covariance))
+
+    return hessian, covariance
+
+
+# %%
+if __name__ == '__main__':
+    # ==================================================================================
+    # Specify the parameters for the simulation
+    # ==================================================================================
+
+    # Set up the time vector and stimulus function
+    time = np.arange(100)
+    u = utils.stim_boxcar([[0, 30, 1]])
+
+    # Model parameters
+    num_rois = 2
+    num_layers = 1
+
+    # Ground truth parameter values
+    true_params = {
+        'alpha': 0.5,
+        'kappa': 1.5,
+        'gamma': 0.5,
+        'A_L0': 0.2,
+        'C_L0': 1.0,
+    }
+
+    # Initial guesses for the parameters
+    initial_values = {
+        'alpha': 0.5,
+        'kappa': 1.5,
+        'gamma': 0.5,
+        'A_L0': 0.0,
+        'C_L0': 0.3,
+    }
+
+    # Bounds for the parameters
+    bounds = {
+        'alpha': (0.1, 1.0),
+        'kappa': (1.0, 2.0),
+        'gamma': (0.0, 1.0),
+        'A_L0': (0.0, 1.0),
+        'C_L0': (0.0, 1.0),
+    }
+
+    # Parameters to use in the simulation and estimation
+    params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
+    params_to_est = ['alpha', 'kappa']
+
+    # Signal-to-noise ratio
+    snr = 0.1
+
+    # ==================================================================================
+    # Run the simulation and estimation
+    # ==================================================================================
+    hess, cov = run_simulation(
+        time=time,
+        u=u,
+        num_rois=num_rois,
+        num_layers=num_layers,
+        true_params=true_params,
+        initial_values=initial_values,
+        bounds=bounds,
+        params_to_sim=params_to_sim,
+        params_to_est=params_to_est,
+        snr=snr,
+    )
 
 # %%
