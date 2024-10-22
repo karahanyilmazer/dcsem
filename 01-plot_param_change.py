@@ -55,7 +55,7 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     if param_name in ['alpha', 'gamma', 'kappa']:
         title = fr'$\{param_name}$'
     else:
-        title = 'A_L0'.split('_')
+        title = param_name.split('_')
         title = fr'${title[0]}_{{{title[1]}}}$'
 
     # Create legend and place it outside the plot to the right
