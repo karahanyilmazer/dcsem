@@ -292,6 +292,7 @@ def run_simulation(
     params_to_sim,
     params_to_est,
     snr,
+    plot=True,
 ):
     """
     Runs a simulation, estimates parameters, and displays the results.
@@ -307,6 +308,7 @@ def run_simulation(
         params_to_sim (list): Parameters used for simulation.
         params_to_est (list): Parameters to estimate.
         snr (float): Signal-to-noise ratio for adding noise.
+        plot (bool, optional): Whether to plot the results. Defaults to True.
 
     Returns:
         tuple: A tuple containing:
@@ -343,8 +345,9 @@ def run_simulation(
     # Simulate data using estimated parameters
     bold_estimated = simulate_bold(estimated_params, time=time, u=u, num_rois=num_rois)
 
-    # Plot results
-    plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
+    if plot:
+        # Plot results
+        plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
     # Print results
     print('\tTrue\tEstimated')
@@ -425,6 +428,7 @@ if __name__ == '__main__':
         params_to_sim=params_to_sim,
         params_to_est=params_to_est,
         snr=snr,
+        plot=False,
     )
 
 # %%
