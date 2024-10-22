@@ -2,6 +2,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
+from scipy.linalg import inv
 from scipy.optimize import minimize
 
 from dcsem import models, utils
@@ -107,6 +108,53 @@ def objective(param_vals, param_names, time, u, bold_signal):
     return np.sum((bold_simulated - bold_signal) ** 2)
 
 
+def grad(f, p, bounds, dp=1e-6):
+    """
+    Computes gradient of function f at p within bounds using finite diff.
+
+    Args:
+        f (callable): Function to differentiate.
+        p (np.array): Point at which gradient is computed.
+        bounds (list): Limits for each parameter in p.
+        dp (float, optional): Step size for finite difference. Defaults to 1e-6.
+
+    Returns:
+        np.array: Gradient vector at p.
+    """
+    dp = np.maximum(1e-10, abs(p * dp))
+    g = []
+    for i in range(len(p)):
+        pi = np.zeros(len(p))
+        pi[i] = dp[i]
+
+        u = p + pi
+        if u[i] > bounds[i][1]:
+            u[i] = bounds[i][1]
+
+        l = p - pi
+        if l[i] < bounds[i][0]:
+            l[i] = bounds[i][0]
+
+        g.append((f(u) - f(l)) / (u[i] - l[i]))
+    return np.stack(g, axis=0)
+
+
+def calc_hessian(f, p, bounds, dp=1e-6):
+    """
+    Calculates the Hessian of f at point p within bounds.
+
+    Args:
+        f (callable): Function to differentiate twice.
+        p (np.array): Point at which Hessian is computed.
+        bounds (list): Limits for each parameter in p.
+        dp (float, optional): Step size for finite diff. Defaults to 1e-6.
+
+    Returns:
+        np.array: Hessian matrix at p.
+    """
+    g = lambda p_: grad(f, p_, bounds, dp)
+    return grad(g, p, bounds, dp)
+
 
 def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     """
@@ -139,7 +187,6 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
             kwargs['time'],
             kwargs['u'],
             kwargs['bold_signal'],
-            kwargs['num_rois'],
         ),
         bounds=bounds,
         method='L-BFGS-B',
@@ -148,7 +195,34 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     # Map the optimized parameter values back to their names
     estimated_params = dict(zip(param_names, opt.x.tolist()))
 
-    return estimated_params, opt.hess_inv.todense()
+    # Define the objective function as a function of the parameters only
+    def f(p):
+        return objective(
+            p,
+            param_names,
+            kwargs['time'],
+            kwargs['u'],
+            kwargs['bold_signal'],
+        )
+
+    # Compute the Hessian using finite differences
+    hessian = calc_hessian(f, opt.x, bounds, dp=1e-6)
+
+    # Compute residuals and estimate the variance of the noise
+    residuals = kwargs['bold_signal'] - simulate_bold(
+        estimated_params,
+        time=kwargs['time'],
+        u=kwargs['u'],
+        num_rois=kwargs['num_rois'],
+    )
+    n = residuals.size  # Total number of observations
+    p = len(opt.x)  # Number of parameters
+    sigma2 = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
+
+    # Compute the covariance matrix as the scaled inverse Hessian
+    covariance_matrix = sigma2 * inv(hessian)
+
+    return estimated_params, hessian, covariance_matrix
 
 
 def add_noise(bold_true, snr):
@@ -249,6 +323,8 @@ if __name__ == '__main__':
     # ==================================================================================
     params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
     params_to_est = ['alpha', 'kappa', 'gamma', 'A_L0']
+    params_to_est = ['alpha', 'kappa']
+    # params_to_est = ['alpha', 'gamma']
     # ==================================================================================
 
     # Filter the parameters to simulate and estimate
@@ -265,10 +341,10 @@ if __name__ == '__main__':
     )
 
     # Add noise to the observed data
-    bold_noisy = add_noise(bold_true, snr=30)
+    bold_noisy = add_noise(bold_true, snr=0.1)
 
     # Estimate parameters
-    estimated_params, hess_inv = estimate_parameters(
+    estimated_params, hessian, covariance = estimate_parameters(
         initial_values,
         bounds,
         params_to_est,
@@ -282,16 +358,19 @@ if __name__ == '__main__':
     bold_estimated = simulate_bold(estimated_params, time=time, u=u, num_rois=num_rois)
 
     # Plot results
-    plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois)
+    plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
     print('\tTrue\tEstimated')
     for param in params_to_est:
         print(f'{param}:\t{true_params[param]:.2f}\t{estimated_params[param]:.6f}')
 
-    print('\nHessian inverse:')
-    print(hess_inv)
+    print('\nHessian:')
+    print(hessian)
+
+    print('\nCovariance matrix:')
+    print(covariance)
 
     print('\nVariances of the estimated parameters:')
-    print(np.diag(hess_inv))
+    print(np.diag(covariance))
 
 # %%
