@@ -62,7 +62,6 @@ def simulate_bold(params, **kwargs):
         **kwargs: Additional keyword arguments, including:
             - time (ndarray): Time points for the simulation.
             - u (ndarray): External stimulus function.
-            - num_rois (int): Number of regions of interest (ROIs).
 
     Returns:
         ndarray: Simulated BOLD signal for each region of interest, typically
@@ -79,8 +78,7 @@ def simulate_bold(params, **kwargs):
     return dcm.simulate(kwargs['time'], kwargs['u'])[0]
 
 
-# Objective function to minimize, generalized for any parameters
-def objective(param_vals, param_names, time, u, bold_signal, num_rois):
+def objective(param_vals, param_names, time, u, bold_signal):
     """
     Objective function to minimize the difference between simulated and observed BOLD
     signals.
@@ -102,6 +100,7 @@ def objective(param_vals, param_names, time, u, bold_signal, num_rois):
     params = dict(zip(param_names, param_vals))
     A = get_one_layer_A(params.get('A_L0', 0.2))
     C = get_one_layer_C(params.get('C_L0', 1.0))
+    num_rois = bold_signal.shape[1]
     bold_simulated = simulate_bold(params, time=time, u=u, A=A, C=C, num_rois=num_rois)
 
     # Compute the sum of squared errors
@@ -171,8 +170,7 @@ def add_noise(bold_true, snr):
     return bold_true + np.random.normal(0, sigma, bold_true.shape)
 
 
-# Plot observed and estimated BOLD signals
-def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois):
+def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     """
     Plot the observed, true, and estimated BOLD signals for each region of
     interest (ROI).
@@ -186,6 +184,7 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated, num_rois):
         bold_estimated (ndarray): The estimated BOLD signal, also a 2D array
                                   with the same shape as bold_true.
     """
+    num_rois = bold_true.shape[1]
     _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
     for i in range(num_rois):
         axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
