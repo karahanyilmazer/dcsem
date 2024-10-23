@@ -422,27 +422,38 @@ if __name__ == '__main__':
     # Run the simulation and estimation
     for snr_db in snr_range:
         print(f'Signal-to-noise ratio: {snr_db} dB')
-        for sim_i in iterator:
+        non_nan_found = False
 
-            # Random initialization of the parameters
-            initial_values = initialize_parameters(bounds, params_to_est)
+        while not non_nan_found:
+            for sim_i in iterator:
+                # Random initialization of the parameters
+                initial_values = initialize_parameters(bounds, params_to_est)
 
-            hess, cov = run_simulation(
-                time=time,
-                u=u,
-                num_rois=num_rois,
-                num_layers=num_layers,
-                true_params=true_params,
-                initial_values=initial_values,
-                params_to_est=params_to_est,
-                snr=snr_db,
-                bounds=None,
-                plot=True,
-                verbose=True,
-            )
-            # Collect standard deviations and initial guesses of estimated parameters
-            tmp_stds[sim_i, :] = np.sqrt(np.diag(cov))
-            tmp_init[sim_i, :] = initial_values
+                hess, cov = run_simulation(
+                    time=time,
+                    u=u,
+                    num_rois=num_rois,
+                    num_layers=num_layers,
+                    true_params=true_params,
+                    initial_values=initial_values,
+                    params_to_est=params_to_est,
+                    snr=snr_db,
+                    bounds=None,
+                    plot=True,
+                    verbose=True,
+                )
+
+                # Collect standard deviations and initial guesses of estimated parameters
+                tmp_stds[sim_i, :] = np.sqrt(np.diag(cov))
+                tmp_init[sim_i, :] = initial_values
+
+            # Check if all simulations resulted in NaN
+            if np.isnan(tmp_stds).all():
+                print(f"All simulations failed at SNR {snr_db} dB, retrying...")
+                tmp_stds = np.zeros((n_sims, len(params_to_est)))
+                tmp_init = np.zeros((n_sims, len(params_to_est)))
+            else:
+                non_nan_found = True
 
         # Get the best estimation results
         best_run_idx = np.nanargmin(np.sum(tmp_stds, axis=1))
