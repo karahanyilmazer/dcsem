@@ -278,7 +278,6 @@ def run_simulation(
     num_layers,
     true_params,
     initial_values,
-    params_to_sim,
     params_to_est,
     snr,
     bounds=None,
@@ -295,7 +294,6 @@ def run_simulation(
         num_layers (int): Number of layers in the system.
         true_params (dict): True parameter values for the simulation.
         initial_values (list): Initial guesses for parameter estimation.
-        params_to_sim (list): Parameters used for simulation.
         params_to_est (list): Parameters to estimate.
         snr (float): Signal-to-noise ratio for adding noise.
         bounds (list, optional): Parameter bounds for estimation. Defaults to None.
@@ -414,7 +412,6 @@ if __name__ == '__main__':
         num_layers=num_layers,
         true_params=true_params,
         initial_values=initial_values,
-        params_to_sim=params_to_sim,
         params_to_est=params_to_est,
         bounds=None,
         snr=snr,
