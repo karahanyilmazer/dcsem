@@ -67,6 +67,20 @@ def initialize_parameters(bounds, params_to_sim):
     return initial_values
 
 
+def filter_params(params, keys):
+    """
+    Filter a dictionary to only include the specified keys.
+
+    Args:
+        params (dict): A dictionary of parameters.
+        keys (list): A list of keys to keep.
+
+    Returns:
+        dict: A dictionary containing only the specified keys.
+    """
+    return {k: params[k] for k in keys}
+
+
 def simulate_bold(params, **kwargs):
     """
     Simulate the BOLD signal using a DCM model with the given parameters.
@@ -291,13 +305,12 @@ def run_simulation(
             - hessian (np.array): Hessian matrix from the estimation.
             - covariance (np.array): Covariance matrix from the estimation.
     """
-    # Filter the parameters to simulate and estimate
-    true_params_filtered = {k: true_params[k] for k in params_to_sim}
-    bounds_filtered = [bounds[k] for k in params_to_est]
+    if bounds:
+        bounds = [(bounds[param]) for param in params_to_est]
 
     # Simulate observed data
     bold_true = simulate_bold(
-        true_params_filtered,
+        true_params,
         time=time,
         u=u,
         num_rois=num_rois,
@@ -309,7 +322,7 @@ def run_simulation(
     # Estimate parameters
     estimated_params, hessian, covariance = estimate_parameters(
         initial_values,
-        bounds_filtered,
+        bounds,
         params_to_est,
         time=time,
         u=u,
@@ -355,6 +368,11 @@ if __name__ == '__main__':
     num_rois = 2
     num_layers = 1
 
+    # Parameters to use in the simulation and estimation
+    params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
+    # params_to_est = ['alpha', 'kappa']
+    params_to_est = ['alpha']
+
     # Ground truth parameter values
     true_params = {
         'alpha': 0.5,
@@ -363,21 +381,17 @@ if __name__ == '__main__':
         'A_L0': 0.2,
         'C_L0': 1.0,
     }
-
+    true_params = filter_params(true_params, params_to_sim)
 
     # Bounds for the parameters
     bounds = {
-        'alpha': (0.1, 1.0),
+        'alpha': (0.0, 1.0),
         'kappa': (1.0, 2.0),
         'gamma': (0.0, 1.0),
         'A_L0': (0.0, 1.0),
         'C_L0': (0.0, 1.0),
     }
-
-    # Parameters to use in the simulation and estimation
-    params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-    params_to_est = ['alpha', 'kappa']
-
+    bounds = filter_params(bounds, params_to_est)
     # Signal-to-noise ratio
     snr = 0.1
 
