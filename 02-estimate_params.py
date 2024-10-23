@@ -94,7 +94,8 @@ def objective(param_vals, param_names, time, u, bold_signal):
                                a 2D array (time points x ROIs).
 
     Returns:
-        float: The sum of squared errors between the simulated and real BOLD signals.
+        loss (float): The sum of squared errors between the simulated and real BOLD
+                      signals.
     """
 
     # Map the parameter values to their names
@@ -104,8 +105,10 @@ def objective(param_vals, param_names, time, u, bold_signal):
     num_rois = bold_signal.shape[1]
     bold_simulated = simulate_bold(params, time=time, u=u, A=A, C=C, num_rois=num_rois)
 
+    loss = np.mean((bold_simulated - bold_signal) ** 2)
+
     # Compute the sum of squared errors
-    return np.sum((bold_simulated - bold_signal) ** 2)
+    return loss
 
 
 def grad(f, p, bounds, dp=1e-6):
