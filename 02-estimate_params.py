@@ -144,7 +144,7 @@ def objective(param_vals, param_names, time, u, bold_signal):
     return loss
 
 
-def estimate_parameters(initial_values, bounds, param_names, **kwargs):
+def estimate_parameters(initial_values, param_names, bounds=None, **kwargs):
     """
     Estimate parameters by minimizing the objective function using the L-BFGS-B method.
 
@@ -278,10 +278,10 @@ def run_simulation(
     num_layers,
     true_params,
     initial_values,
-    bounds,
     params_to_sim,
     params_to_est,
     snr,
+    bounds=None,
     plot=True,
 ):
     """
@@ -294,10 +294,10 @@ def run_simulation(
         num_layers (int): Number of layers in the system.
         true_params (dict): True parameter values for the simulation.
         initial_values (list): Initial guesses for parameter estimation.
-        bounds (list): Parameter bounds for estimation.
         params_to_sim (list): Parameters used for simulation.
         params_to_est (list): Parameters to estimate.
         snr (float): Signal-to-noise ratio for adding noise.
+        bounds (list, optional): Parameter bounds for estimation. Defaults to None.
         plot (bool, optional): Whether to plot the results. Defaults to True.
 
     Returns:
@@ -322,8 +322,8 @@ def run_simulation(
     # Estimate parameters
     estimated_params, hessian, covariance = estimate_parameters(
         initial_values,
-        bounds,
         params_to_est,
+        bounds,
         time=time,
         u=u,
         bold_signal=bold_noisy,
@@ -408,11 +408,11 @@ if __name__ == '__main__':
         num_layers=num_layers,
         true_params=true_params,
         initial_values=initial_values,
-        bounds=bounds,
         params_to_sim=params_to_sim,
         params_to_est=params_to_est,
+        bounds=None,
         snr=snr,
         plot=False,
-    )
+            )
 
 # %%
