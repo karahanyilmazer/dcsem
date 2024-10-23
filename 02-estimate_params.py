@@ -352,8 +352,11 @@ def run_simulation(
         print('\nCovariance matrix:')
         print(covariance)
 
-    print('\nVariances of the estimated parameters:')
-    print(np.diag(covariance))
+        print('\nVariances of the estimated parameters:')
+        print(np.diag(covariance))
+
+        print('\nStandard deviations of the estimated parameters:')
+        print(np.sqrt(np.diag(covariance)), '\n\n')
 
     return hessian, covariance
 
