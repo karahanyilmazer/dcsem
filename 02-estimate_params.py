@@ -181,7 +181,7 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     return estimated_params, hessian, covariance_matrix
 
 
-def add_noise(bold_true, snr):
+def add_noise(bold_true, snr_db):
     """
     Add Gaussian noise to the BOLD signal.
 
@@ -196,7 +196,9 @@ def add_noise(bold_true, snr):
     Returns:
         ndarray: The noisy BOLD signal with added Gaussian noise.
     """
-    sigma = np.max(bold_true) / snr
+
+    snr_linear = 10 ** (snr_db / 10)  # Convert dB to linear scale
+    sigma = np.max(bold_true) / snr_linear
     return bold_true + np.random.normal(0, sigma, bold_true.shape)
 
 
@@ -285,7 +287,7 @@ def run_simulation(
     )
 
     # Add noise to the observed data
-    bold_noisy = add_noise(bold_true, snr=snr)
+    bold_noisy = add_noise(bold_true, snr_db=snr)
 
     # Estimate parameters
     estimated_params, hessian, covariance = estimate_parameters(
