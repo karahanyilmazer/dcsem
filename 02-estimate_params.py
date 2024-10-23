@@ -400,14 +400,14 @@ if __name__ == '__main__':
         'C_L0': (0.0, 1.0),
     }
     bounds = filter_params(bounds, params_to_est)
+
     # Signal-to-noise ratio
-    snr = 0.1
+    snr_range = np.logspace(-1, 2, 20)
+    n_sims = 3
 
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
-    snr_range = np.logspace(-1, 2, 20)
-    n_sims = 3
     tmp_stds = np.zeros((n_sims, len(params_to_est)))
     tmp_init = np.zeros((n_sims, len(params_to_est)))
     stdevs = []
