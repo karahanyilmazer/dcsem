@@ -283,6 +283,7 @@ def run_simulation(
     snr,
     bounds=None,
     plot=True,
+    verbose=True,
 ):
     """
     Runs a simulation, estimates parameters, and displays the results.
@@ -299,6 +300,7 @@ def run_simulation(
         snr (float): Signal-to-noise ratio for adding noise.
         bounds (list, optional): Parameter bounds for estimation. Defaults to None.
         plot (bool, optional): Whether to plot the results. Defaults to True.
+        verbose (bool, optional): Whether to print the results. Defaults to True.
 
     Returns:
         tuple: A tuple containing:
@@ -337,16 +339,20 @@ def run_simulation(
         # Plot results
         plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
-    # Print results
-    print('\tTrue\tEstimated')
-    for param in params_to_est:
-        print(f'{param}:\t{true_params[param]:.2f}\t{estimated_params[param]:.6f}')
+    if verbose:
+        # Print results
+        print('\tTrue\tEstimated\tInitial Guess')
+        for i, param in enumerate(params_to_est):
+            print(f'{param}:\t', end='')
+            print(f'{true_params[param]:.2f}\t', end='')
+            print(f'{estimated_params[param]:.2f}\t\t', end='')
+            print(f'{initial_values[i]:.2f}')
 
-    print('\nHessian:')
-    print(hessian)
+        print('\nHessian:')
+        print(hessian)
 
-    print('\nCovariance matrix:')
-    print(covariance)
+        print('\nCovariance matrix:')
+        print(covariance)
 
     print('\nVariances of the estimated parameters:')
     print(np.diag(covariance))
