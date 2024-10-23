@@ -5,7 +5,6 @@ import scienceplots
 from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
-from tqdm import tqdm
 
 from dcsem import models, utils
 
@@ -402,8 +401,8 @@ if __name__ == '__main__':
     bounds = filter_params(bounds, params_to_est)
 
     # Signal-to-noise ratio
-    snr_range = np.logspace(-1, 2, 20)
-    n_sims = 3
+    snr_range = np.logspace(-1, 2, 10)
+    n_sims = 5
 
     # ==================================================================================
     # Run the simulation and estimation
@@ -413,19 +412,13 @@ if __name__ == '__main__':
     stdevs = []
     initial_guesses = []
 
-    # Use tqdm for progress bar if there are more than 3 simulations
-    if n_sims >= 3:
-        iterator = tqdm(range(n_sims))
-    else:
-        iterator = range(n_sims)
-
     # Run the simulation and estimation
     for snr_db in snr_range:
         print(f'Signal-to-noise ratio: {snr_db} dB')
         non_nan_found = False
 
         while not non_nan_found:
-            for sim_i in iterator:
+            for sim_i in range(n_sims):
                 # Random initialization of the parameters
                 initial_values = initialize_parameters(bounds, params_to_est)
 
@@ -439,8 +432,8 @@ if __name__ == '__main__':
                     params_to_est=params_to_est,
                     snr=snr_db,
                     bounds=None,
-                    plot=True,
-                    verbose=True,
+                    plot=False,
+                    verbose=False,
                 )
 
                 # Collect standard deviations and initial guesses of estimated parameters
@@ -474,5 +467,6 @@ if __name__ == '__main__':
     plt.ylabel('Standard Deviation')
     plt.legend()
     plt.show()
+
 
 # %%
