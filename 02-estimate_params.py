@@ -4,6 +4,7 @@ import numpy as np
 import scienceplots
 from scipy.linalg import inv
 from scipy.optimize import minimize
+from statsmodels.tools.numdiff import approx_hess
 
 from dcsem import models, utils
 
@@ -111,54 +112,6 @@ def objective(param_vals, param_names, time, u, bold_signal):
     return loss
 
 
-def grad(f, p, bounds, dp=1e-6):
-    """
-    Computes gradient of function f at p within bounds using finite diff.
-
-    Args:
-        f (callable): Function to differentiate.
-        p (np.array): Point at which gradient is computed.
-        bounds (list): Limits for each parameter in p.
-        dp (float, optional): Step size for finite difference. Defaults to 1e-6.
-
-    Returns:
-        np.array: Gradient vector at p.
-    """
-    dp = np.maximum(1e-10, abs(p * dp))
-    g = []
-    for i in range(len(p)):
-        pi = np.zeros(len(p))
-        pi[i] = dp[i]
-
-        u = p + pi
-        if u[i] > bounds[i][1]:
-            u[i] = bounds[i][1]
-
-        l = p - pi
-        if l[i] < bounds[i][0]:
-            l[i] = bounds[i][0]
-
-        g.append((f(u) - f(l)) / (u[i] - l[i]))
-    return np.stack(g, axis=0)
-
-
-def calc_hessian(f, p, bounds, dp=1e-6):
-    """
-    Calculates the Hessian of f at point p within bounds.
-
-    Args:
-        f (callable): Function to differentiate twice.
-        p (np.array): Point at which Hessian is computed.
-        bounds (list): Limits for each parameter in p.
-        dp (float, optional): Step size for finite diff. Defaults to 1e-6.
-
-    Returns:
-        np.array: Hessian matrix at p.
-    """
-    g = lambda p_: grad(f, p_, bounds, dp)
-    return grad(g, p, bounds, dp)
-
-
 def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     """
     Estimate parameters by minimizing the objective function using the L-BFGS-B method.
@@ -208,8 +161,8 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
             kwargs['bold_signal'],
         )
 
-    # Compute the Hessian using finite differences
-    hessian = calc_hessian(f, opt.x, bounds, dp=1e-6)
+    # Compute the Hessian matrix using finite differences
+    hessian = approx_hess(opt.x, f)
 
     # Compute residuals and estimate the variance of the noise
     residuals = kwargs['bold_signal'] - simulate_bold(
@@ -220,10 +173,10 @@ def estimate_parameters(initial_values, bounds, param_names, **kwargs):
     )
     n = residuals.size  # Total number of observations
     p = len(opt.x)  # Number of parameters
-    sigma2 = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
+    sig_est = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
 
     # Compute the covariance matrix as the scaled inverse Hessian
-    covariance_matrix = sigma2 * inv(hessian)
+    covariance_matrix = sig_est * inv(hessian)
 
     return estimated_params, hessian, covariance_matrix
 
