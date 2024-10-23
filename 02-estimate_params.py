@@ -49,6 +49,24 @@ def get_one_layer_C(L0=1):
     return utils.create_C_matrix(num_rois, num_layers, connections)
 
 
+def initialize_parameters(bounds, params_to_sim):
+    """
+    Initialize parameters for the simulation and estimation.
+
+    Args:
+        bounds (dict): Bounds for the parameters.
+        params_to_sim (list): Parameters used for simulation.
+
+    Returns:
+        dict: A dictionary of initial parameter values.
+    """
+    initial_values = []
+    for param in params_to_sim:
+        initial_values.append(np.random.uniform(*bounds[param]))
+
+    return initial_values
+
+
 def simulate_bold(params, **kwargs):
     """
     Simulate the BOLD signal using a DCM model with the given parameters.
@@ -275,7 +293,6 @@ def run_simulation(
     """
     # Filter the parameters to simulate and estimate
     true_params_filtered = {k: true_params[k] for k in params_to_sim}
-    initial_values_filtered = [initial_values[k] for k in params_to_est]
     bounds_filtered = [bounds[k] for k in params_to_est]
 
     # Simulate observed data
@@ -291,7 +308,7 @@ def run_simulation(
 
     # Estimate parameters
     estimated_params, hessian, covariance = estimate_parameters(
-        initial_values_filtered,
+        initial_values,
         bounds_filtered,
         params_to_est,
         time=time,
@@ -347,14 +364,6 @@ if __name__ == '__main__':
         'C_L0': 1.0,
     }
 
-    # Initial guesses for the parameters
-    initial_values = {
-        'alpha': 0.5,
-        'kappa': 1.5,
-        'gamma': 0.5,
-        'A_L0': 0.0,
-        'C_L0': 0.3,
-    }
 
     # Bounds for the parameters
     bounds = {
@@ -375,6 +384,9 @@ if __name__ == '__main__':
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
+    # Random initialization of the parameters
+    initial_values = initialize_parameters(bounds, params_to_est)
+
     hess, cov = run_simulation(
         time=time,
         u=u,
