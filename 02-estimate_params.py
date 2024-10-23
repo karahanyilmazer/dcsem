@@ -5,6 +5,7 @@ import scienceplots
 from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
+from tqdm import tqdm
 
 from dcsem import models, utils
 
@@ -405,20 +406,62 @@ if __name__ == '__main__':
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
-    # Random initialization of the parameters
-    initial_values = initialize_parameters(bounds, params_to_est)
+    snr_range = np.logspace(-1, 2, 20)
+    n_sims = 3
+    tmp_stds = np.zeros((n_sims, len(params_to_est)))
+    tmp_init = np.zeros((n_sims, len(params_to_est)))
+    stdevs = []
+    initial_guesses = []
 
-    hess, cov = run_simulation(
-        time=time,
-        u=u,
-        num_rois=num_rois,
-        num_layers=num_layers,
-        true_params=true_params,
-        initial_values=initial_values,
-        params_to_est=params_to_est,
-        bounds=None,
-        snr=snr,
-        plot=False,
+    # Use tqdm for progress bar if there are more than 3 simulations
+    if n_sims >= 3:
+        iterator = tqdm(range(n_sims))
+    else:
+        iterator = range(n_sims)
+
+    # Run the simulation and estimation
+    for snr_db in snr_range:
+        print(f'Signal-to-noise ratio: {snr_db} dB')
+        for sim_i in iterator:
+
+            # Random initialization of the parameters
+            initial_values = initialize_parameters(bounds, params_to_est)
+
+            hess, cov = run_simulation(
+                time=time,
+                u=u,
+                num_rois=num_rois,
+                num_layers=num_layers,
+                true_params=true_params,
+                initial_values=initial_values,
+                params_to_est=params_to_est,
+                snr=snr_db,
+                bounds=None,
+                plot=True,
+                verbose=True,
             )
+            # Collect standard deviations and initial guesses of estimated parameters
+            tmp_stds[sim_i, :] = np.sqrt(np.diag(cov))
+            tmp_init[sim_i, :] = initial_values
+
+        # Get the best estimation results
+        best_run_idx = np.nanargmin(np.sum(tmp_stds, axis=1))
+
+        stdevs.append(tmp_stds[best_run_idx])
+        initial_guesses.append(tmp_init[best_run_idx])
+
+        tmp_stds = np.zeros((n_sims, len(params_to_est)))
+        tmp_init = np.zeros((n_sims, len(params_to_est)))
+
+    # Plot the results
+    stdevs = np.array(stdevs)
+    plt.figure(figsize=(6, 4))
+    for i, param in enumerate(params_to_est):
+        plt.plot(snr_range, stdevs[:, i], '-x', label=param)
+    plt.xscale('log')
+    plt.xlabel('Signal-to-Noise Ratio (dB)')
+    plt.ylabel('Standard Deviation')
+    plt.legend()
+    plt.show()
 
 # %%
