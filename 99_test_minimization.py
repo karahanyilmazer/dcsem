@@ -10,9 +10,10 @@ def f(x, c):
     return np.sin(x) + c
 
 
-def add_noise(signal, snr):
+def add_noise(signal, snr_db):
+    snr_linear = 10 ** (snr_db / 10)
     noise = np.random.normal(0, 1, len(signal))
-    noise = noise * np.std(signal) / snr
+    noise = noise * np.std(signal) / snr_linear
     return signal + noise
 
 
