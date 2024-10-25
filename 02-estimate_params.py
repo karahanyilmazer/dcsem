@@ -392,7 +392,7 @@ if __name__ == '__main__':
 
     # Bounds for the parameters
     bounds = {
-        'alpha': (0.0, 1.0),
+        'alpha': (0.1, 1.0),
         'kappa': (1.0, 2.0),
         'gamma': (0.0, 1.0),
         'A_L0': (0.0, 1.0),
