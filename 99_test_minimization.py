@@ -46,6 +46,19 @@ def plot_loss(c_values, loss_values):
     plt.show()
 
 
+def calc_std(c_est, loss, log=False):
+    hess = approx_hess(c_est, loss)
+    cov = np.linalg.inv(hess)
+    std = np.sqrt(np.diag(cov))
+
+    if log:
+        print('HESSIAN:\n', hess, '\n')
+        print('COVARIANCE:\n', cov, '\n')
+        print('STD:\n', std, '\n')
+
+    return hess, cov, std
+
+
 snr = 10
 x = np.linspace(-5, 5, 100)
 c_true = 5
@@ -64,5 +77,8 @@ loss_vals = [loss(c) for c in c_vals]
 plot_loss(c_vals, loss_vals)
 
 print(f'True parameter: c = {c_true}')
-print(f'Estimated parameters: c = {c_est}')
+print(f'Estimated parameters: c = {c_est}\n')
+
+hess, cov, std = calc_std(c_est, loss, log=True)
+
 # %%
