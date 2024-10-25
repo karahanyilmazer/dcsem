@@ -46,9 +46,20 @@ def plot_loss(c_values, loss_values):
     plt.show()
 
 
-def calc_std(c_est, loss, log=False):
+def calc_std(c_est, loss, normalize=True, log=False):
     hess = approx_hess(c_est, loss)
-    cov = np.linalg.inv(hess)
+
+    if normalize:
+        # Calculate residuals at the estimated parameter
+        residuals = signal - f(x, c_est)
+        p = len(c_est)
+        s_sq = np.sum(residuals**2) / (n_samples - p)  # Residual variance
+
+        cov = np.linalg.inv(hess) * s_sq
+
+    else:
+        cov = np.linalg.inv(hess)
+
     std = np.sqrt(np.diag(cov))
 
     if log:
