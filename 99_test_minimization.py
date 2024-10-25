@@ -7,7 +7,7 @@ from statsmodels.tools.numdiff import approx_hess
 
 # %%
 def f(x, c):
-    return np.sin(x) + c
+    return np.sin(x) * x**2 / c
 
 
 def add_noise(signal, snr_db):
@@ -71,26 +71,62 @@ def calc_std(c_est, loss, normalize=True, log=False):
     return hess, cov, std
 
 
-snr = 10
-x = np.linspace(-5, 5, 100)
-c_true = 5
-ground_truth = f(x, c_true)
-signal = add_noise(ground_truth, snr)
+def plot_snr_to_std(snr_vals, std_vals):
+    if normalize:
+        plt.axhline(0, color='black', ls='--', label='Zero Line')
+    plt.plot(snr_vals, std_vals, '-o')
+    plt.title('Standard Deviation over SNR')
+    plt.xlabel('SNR')
+    plt.ylabel('Standard Deviation')
+    plt.legend()
+    plt.show()
 
-initial_guess = np.random.rand()
 
-opt = minimize(loss, x0=initial_guess, callback=callback)
-c_est = opt.x
+def plot_snr_to_est(snr_vals, est_params):
+    plt.axhline(c_true, color='red', ls='--', label='True Value')
+    plt.plot(snr_vals, est_params, '-o')
+    plt.title('Estimated Parameter over SNR')
+    plt.xlabel('SNR')
+    plt.ylabel('Estimated Parameter')
+    plt.legend()
+    plt.show()
 
-plot_estimation(x, signal, c_est)
 
-c_vals = np.linspace(0, 10, 100)
-loss_vals = [loss(c) for c in c_vals]
-plot_loss(c_vals, loss_vals)
+n_samples = 100
+snr_vals = np.linspace(0.01, 30, 20)
+snr_vals = np.logspace(np.log10(0.001), np.log10(100), 20)
+std_vals = []
+est_params = []
+normalize = True
+plot = False
+log = False
 
-print(f'True parameter: c = {c_true}')
-print(f'Estimated parameters: c = {c_est}\n')
+for snr in snr_vals:
+    x = np.linspace(-5, 5, n_samples)
+    c_true = 5
+    ground_truth = f(x, c_true)
+    signal = add_noise(ground_truth, snr)
 
-hess, cov, std = calc_std(c_est, loss, log=True)
+    initial_guess = 1
+
+    opt = minimize(loss, x0=initial_guess, callback=callback)
+    c_est = opt.x
+    est_params.append(c_est)
+
+    if plot:
+        c_vals = np.linspace(1, 10, 100)
+        loss_vals = [loss(c) for c in c_vals]
+        plot_estimation(x, signal, c_est)
+        plot_loss(c_vals, loss_vals)
+
+    if log:
+        print(f'True parameter: c = {c_true}')
+        print(f'Estimated parameters: c = {c_est}\n')
+
+    hess, cov, std = calc_std(c_est, loss, normalize=normalize, log=log)
+    std_vals.append(std)
+
+plot_snr_to_std(snr_vals, std_vals)
+plot_snr_to_est(snr_vals, est_params)
 
 # %%
