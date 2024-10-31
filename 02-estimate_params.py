@@ -473,8 +473,8 @@ if __name__ == '__main__':
                 tmp_errs[sim_i, :] = err
 
             # Check if all simulations resulted in NaN
-            if np.isnan(tmp_stds).all():
-                print(f"All simulations failed at SNR {snr_db} dB, retrying...")
+            if (np.isnan(tmp_stds).all()) or (np.isnan(np.sum(tmp_stds, axis=1)).all()):
+                print(f'All simulations failed at SNR {snr_db} dB, retrying...')
                 tmp_init = np.zeros((n_sims, len(params_to_est)))
                 tmp_stds = np.zeros((n_sims, len(params_to_est)))
                 tmp_errs = np.zeros((n_sims, len(params_to_est)))
