@@ -49,8 +49,6 @@ def plot_loss(params_range, optimum):
             loss_grid[i, j] = loss([param_grid1[i, j], param_grid2[i, j]])
 
     fig = plt.figure(figsize=(12, 6))
-    print(loss(optimum), 'HEREEEEEEE')
-    print(optimum)
 
     if len(params_range) == 2:
         # 3D Surface Plot
@@ -113,10 +111,14 @@ def calc_std(est_params, loss, normalize=True, log=False):
     return hess, cov, std
 
 
-def plot_snr_to_std(snr_vals, std_vals):
+def plot_snr_to_std(snr_vals, std_vals, true_vals):
     plt.figure()
     if normalize:
         plt.axhline(0, color='black', ls='--', label='Zero Line')
+    else:
+        # hess = approx_hess(true_vals, loss)
+        # std_inf = np.sqrt(np.diag(hess)) / 2
+        pass
     plt.plot(snr_vals, std_vals, '-o')
     plt.title('Standard Deviation over SNR')
     plt.xlabel('SNR')
@@ -125,7 +127,7 @@ def plot_snr_to_std(snr_vals, std_vals):
     plt.show()
 
 
-def plot_snr_to_est(snr_vals, est_params, true_vals):
+def plot_snr_to_err(snr_vals, est_params, true_vals):
     est_params = np.array(est_params_history)
     true_vals = np.array(true_vals)
 
@@ -139,6 +141,7 @@ def plot_snr_to_est(snr_vals, est_params, true_vals):
     plt.show()
 
 
+# %%
 plt.close('all')
 n_samples = 100
 n_simulations = 20
@@ -147,14 +150,14 @@ snr_vals = np.logspace(np.log10(min_snr), np.log10(max_snr), n_simulations)
 snr_vals = np.linspace(min_snr, max_snr, n_simulations)
 std_vals = []
 est_params_history = []
-normalize = False
+normalize = True
 plot = False
 log = False
 
 initial_guess = [1, 1]
-initial_guess = [100, 100]
 a_true = 5
 b_true = 10
+true_vals = np.array([a_true, b_true])
 x = np.linspace(-5, 5, n_samples)
 ground_truth = f(x, a_true, b_true)
 
@@ -180,7 +183,7 @@ for snr in snr_vals:
     hess, cov, std = calc_std(est_params, loss, normalize=normalize, log=log)
     std_vals.append(std)
 
-plot_snr_to_std(snr_vals, std_vals)
-plot_snr_to_est(snr_vals, est_params_history, true_vals=[a_true, b_true])
+plot_snr_to_std(snr_vals, std_vals, true_vals)
+plot_snr_to_err(snr_vals, est_params_history, true_vals)
 
 # %%
