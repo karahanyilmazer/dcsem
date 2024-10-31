@@ -173,6 +173,8 @@ def estimate_parameters(
                                        optimized values.
             - hessian (ndarray): Numerically approximated Hessian matrix using finite
                                  differences.
+            - cov_mat (ndarray): Covariance matrix of the estimated parameters.
+            - std (ndarray): Standard deviations of the estimated parameters.
     """
     # Perform the minimization
     opt = minimize(
@@ -217,13 +219,14 @@ def estimate_parameters(
         sig_est = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
 
         # Compute the covariance matrix as the scaled inverse Hessian
-        covariance_matrix = inv(hessian) * sig_est
+        cov_mat = inv(hessian) * sig_est
 
     else:
-        covariance_matrix = inv(hessian)
+        cov_mat = inv(hessian)
 
+    std = np.sqrt(np.diag(cov_mat))
 
-    return estimated_params, hessian, covariance_matrix
+    return estimated_params, hessian, cov_mat, std
 
 
 def add_noise(bold_true, snr_db):
@@ -319,6 +322,8 @@ def run_simulation(
         tuple: A tuple containing:
             - hessian (np.array): Hessian matrix from the estimation.
             - covariance (np.array): Covariance matrix from the estimation.
+            - std (np.array): Standard deviations of the estimated parameters.
+            - err (np.array): Error between the true and estimated parameters.
     """
     if bounds:
         bounds = [(bounds[param]) for param in params_to_est]
@@ -335,7 +340,7 @@ def run_simulation(
     bold_noisy = add_noise(bold_true, snr_db=snr)
 
     # Estimate parameters
-    estimated_params, hessian, covariance = estimate_parameters(
+    est_params, hessian, covariance, std = estimate_parameters(
         initial_values,
         params_to_est,
         bounds,
@@ -346,8 +351,13 @@ def run_simulation(
         num_rois=num_rois,
     )
 
+    # Compute the error between the true and estimated parameters
+    true_vals = np.array(list(filter_params(true_params, params_to_est).values()))
+    est_vals = np.array(list(est_params.values()))
+    err = true_vals - est_vals
+
     # Simulate data using estimated parameters
-    bold_estimated = simulate_bold(estimated_params, time=time, u=u, num_rois=num_rois)
+    bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=num_rois)
 
     if plot:
         # Plot results
@@ -359,7 +369,7 @@ def run_simulation(
         for i, param in enumerate(params_to_est):
             print(f'{param}:\t', end='')
             print(f'{true_params[param]:.2f}\t', end='')
-            print(f'{estimated_params[param]:.2f}\t\t', end='')
+            print(f'{est_params[param]:.2f}\t\t', end='')
             print(f'{initial_values[i]:.2f}')
 
         print('\nHessian:')
@@ -372,9 +382,9 @@ def run_simulation(
         print(np.diag(covariance))
 
         print('\nStandard deviations of the estimated parameters:')
-        print(np.sqrt(np.diag(covariance)), '\n\n')
+        print(std, '\n\n')
 
-    return hessian, covariance
+    return hessian, covariance, std, err
 
 
 # %%
@@ -417,16 +427,20 @@ if __name__ == '__main__':
     bounds = filter_params(bounds, params_to_est)
 
     # Signal-to-noise ratio
-    snr_range = np.logspace(-1, 2, 10)
-    n_sims = 5
+    n_sims, n_snrs = 3, 20
+    min_snr, max_snr = 0.0001, 30
+    snr_range = np.logspace(np.log10(min_snr), np.log10(max_snr), n_snrs)
+    snr_range = np.linspace(min_snr, max_snr, n_snrs)
 
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
-    tmp_stds = np.zeros((n_sims, len(params_to_est)))
     tmp_init = np.zeros((n_sims, len(params_to_est)))
-    stdevs = []
-    initial_guesses = []
+    tmp_stds = np.zeros((n_sims, len(params_to_est)))
+    tmp_errs = np.zeros((n_sims, len(params_to_est)))
+    init_list = []
+    stds_list = []
+    errs_list = []
 
     # Run the simulation and estimation
     for snr_db in snr_range:
@@ -438,7 +452,7 @@ if __name__ == '__main__':
                 # Random initialization of the parameters
                 initial_values = initialize_parameters(bounds, params_to_est)
 
-                hess, cov = run_simulation(
+                hess, cov, std, err = run_simulation(
                     time=time,
                     u=u,
                     num_rois=num_rois,
@@ -447,41 +461,62 @@ if __name__ == '__main__':
                     initial_values=initial_values,
                     params_to_est=params_to_est,
                     snr=snr_db,
+                    bounds=bounds,
                     normalize=True,
                     plot=False,
                     verbose=False,
                 )
 
-                # Collect standard deviations and initial guesses of estimated parameters
-                tmp_stds[sim_i, :] = np.sqrt(np.diag(cov))
+                # Collect initial guesses, standard deviations, and errors
                 tmp_init[sim_i, :] = initial_values
+                tmp_stds[sim_i, :] = std
+                tmp_errs[sim_i, :] = err
 
             # Check if all simulations resulted in NaN
             if np.isnan(tmp_stds).all():
                 print(f"All simulations failed at SNR {snr_db} dB, retrying...")
-                tmp_stds = np.zeros((n_sims, len(params_to_est)))
                 tmp_init = np.zeros((n_sims, len(params_to_est)))
+                tmp_stds = np.zeros((n_sims, len(params_to_est)))
+                tmp_errs = np.zeros((n_sims, len(params_to_est)))
             else:
                 non_nan_found = True
 
         # Get the best estimation results
         best_run_idx = np.nanargmin(np.sum(tmp_stds, axis=1))
 
-        stdevs.append(tmp_stds[best_run_idx])
-        initial_guesses.append(tmp_init[best_run_idx])
+        init_list.append(tmp_init[best_run_idx])
+        stds_list.append(tmp_stds[best_run_idx])
+        errs_list.append(tmp_errs[best_run_idx])
 
-        tmp_stds = np.zeros((n_sims, len(params_to_est)))
         tmp_init = np.zeros((n_sims, len(params_to_est)))
+        tmp_stds = np.zeros((n_sims, len(params_to_est)))
+        tmp_errs = np.zeros((n_sims, len(params_to_est)))
 
     # Plot the results
-    stdevs = np.array(stdevs)
-    plt.figure(figsize=(6, 4))
+    stds_arr = np.array(stds_list)
+    errs_arr = np.array(errs_list)
+    fig, axs = plt.subplots(1, 2, figsize=(9, 5))
+
+    axs[0].axhline(0, color='k', ls='--')
+    axs[1].axhline(0, color='k', ls='--')
+
     for i, param in enumerate(params_to_est):
-        plt.plot(snr_range, stdevs[:, i], '-x', label=param)
-    plt.xscale('log')
-    plt.xlabel('Signal-to-Noise Ratio (dB)')
-    plt.ylabel('Standard Deviation')
-    plt.legend()
+        axs[0].plot(snr_range, stds_arr[:, i], '-x', label=param)
+        axs[1].plot(snr_range, errs_arr[:, i], '-x', label=param)
+
+    axs[0].set_xlabel('Signal-to-Noise Ratio (dB)')
+    axs[0].set_ylabel('Standard Deviation')
+    axs[0].legend()
+
+    axs[1].set_xlabel('Signal-to-Noise Ratio (dB)')
+    axs[1].set_ylabel('Estimation Error')
+    axs[1].legend()
+
+    tmp_names = params_to_est.copy()
+    tmp_names.sort()
+    fig.suptitle(f'Parameter Estimation Results ({', '.join(tmp_names)})')
+    plt.tight_layout()
+    plt.savefig(f'img/{'_'.join(tmp_names)}_estimation.png')
     plt.show()
 
 
