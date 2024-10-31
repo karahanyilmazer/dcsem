@@ -144,16 +144,24 @@ def objective(param_vals, param_names, time, u, bold_signal):
     return loss
 
 
-def estimate_parameters(initial_values, param_names, bounds=None, **kwargs):
+def estimate_parameters(
+    initial_values,
+    param_names,
+    bounds=None,
+    normalize=True,
+    **kwargs,
+):
     """
     Estimate parameters by minimizing the objective function using the L-BFGS-B method.
 
     Args:
         initial_values (list or ndarray): Initial guesses for the parameter values to
                                           be optimized.
+        param_names (list of str): Names of the parameters to be estimated.
         bounds (list of tuples): Bounds for each parameter, where each tuple contains
                                  the lower and upper bounds.
-        param_names (list of str): Names of the parameters to be estimated.
+        normalize (bool): Whether to normalize the Hessian matrix with estimated sigma.
+                          Defaults to True.
         **kwargs: Additional keyword arguments containing the following:
             - time (ndarray): Time points for the BOLD signal.
             - u (ndarray): Stimulus function.
@@ -196,19 +204,24 @@ def estimate_parameters(initial_values, param_names, bounds=None, **kwargs):
     # Compute the Hessian matrix using finite differences
     hessian = approx_hess(opt.x, f)
 
-    # Compute residuals and estimate the variance of the noise
-    residuals = kwargs['bold_signal'] - simulate_bold(
-        estimated_params,
-        time=kwargs['time'],
-        u=kwargs['u'],
-        num_rois=kwargs['num_rois'],
-    )
-    n = residuals.size  # Total number of observations
-    p = len(opt.x)  # Number of parameters
-    sig_est = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
+    if normalize:
+        # Compute residuals and estimate the variance of the noise
+        residuals = kwargs['bold_signal'] - simulate_bold(
+            estimated_params,
+            time=kwargs['time'],
+            u=kwargs['u'],
+            num_rois=kwargs['num_rois'],
+        )
+        n = residuals.size  # Total number of observations
+        p = len(opt.x)  # Number of parameters
+        sig_est = np.sum(residuals**2) / (n - p)  # Estimated variance of the residuals
 
-    # Compute the covariance matrix as the scaled inverse Hessian
-    covariance_matrix = sig_est * inv(hessian)
+        # Compute the covariance matrix as the scaled inverse Hessian
+        covariance_matrix = inv(hessian) * sig_est
+
+    else:
+        covariance_matrix = inv(hessian)
+
 
     return estimated_params, hessian, covariance_matrix
 
@@ -281,6 +294,7 @@ def run_simulation(
     params_to_est,
     snr,
     bounds=None,
+    normalize=True,
     plot=True,
     verbose=True,
 ):
@@ -297,6 +311,7 @@ def run_simulation(
         params_to_est (list): Parameters to estimate.
         snr (float): Signal-to-noise ratio for adding noise.
         bounds (list, optional): Parameter bounds for estimation. Defaults to None.
+        normalize (bool, optional): Whether to normalize the Hessian. Defaults to True.
         plot (bool, optional): Whether to plot the results. Defaults to True.
         verbose (bool, optional): Whether to print the results. Defaults to True.
 
@@ -324,6 +339,7 @@ def run_simulation(
         initial_values,
         params_to_est,
         bounds,
+        normalize,
         time=time,
         u=u,
         bold_signal=bold_noisy,
@@ -431,7 +447,7 @@ if __name__ == '__main__':
                     initial_values=initial_values,
                     params_to_est=params_to_est,
                     snr=snr_db,
-                    bounds=None,
+                    normalize=True,
                     plot=False,
                     verbose=False,
                 )
