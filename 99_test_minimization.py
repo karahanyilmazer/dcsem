@@ -111,33 +111,59 @@ def calc_std(est_params, loss, normalize=True, log=False):
     return hess, cov, std
 
 
-def plot_snr_to_std(snr_vals, std_vals, true_vals):
-    plt.figure()
+def plot_snr_to_std(snr_vals, std_vals, true_vals, ax=None):
+    if ax is None:
+        _, ax = plt.subplots(1, 1)
     if normalize:
-        plt.axhline(0, color='black', ls='--', label='Zero Line')
+        ax.axhline(0, color='black', ls='--', label='Zero Line')
     else:
         # hess = approx_hess(true_vals, loss)
         # std_inf = np.sqrt(np.diag(hess)) / 2
         pass
-    plt.plot(snr_vals, std_vals, '-o')
-    plt.title('Standard Deviation over SNR')
-    plt.xlabel('SNR')
-    plt.ylabel('Standard Deviation')
-    plt.legend()
-    plt.show()
+    ax.plot(snr_vals, std_vals, '-o')
+    ax.set_title('Standard Deviation over SNR')
+    ax.set_xlabel('SNR')
+    ax.set_ylabel('Standard Deviation')
+    ax.legend()
+    if ax is None:
+        plt.show()
 
 
-def plot_snr_to_err(snr_vals, est_params, true_vals):
+def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=None):
     est_params = np.array(est_params_history)
     true_vals = np.array(true_vals)
+    std_vals = np.array(std_vals)
 
-    plt.axhline(0, color='black', ls='--', label='Zero Line')
+    if ax is None:
+        _, ax = plt.subplots(1, 1)
+
+    ax.axhline(0, color='black', ls='--', label='Zero Line')
+
     for i in range(est_params.shape[1]):
-        plt.plot(snr_vals, true_vals[i] - est_params[:, i], '-o', label=f'Param {i}')
-    plt.title('Estimation Error over SNR')
-    plt.xlabel('SNR')
-    plt.ylabel('Estimation Error')
-    plt.legend()
+        est_err = true_vals[i] - est_params[:, i]
+        ax.plot(snr_vals, est_err, '-o', label=f'Param {i}')
+        if shade:
+            ax.fill_between(
+                snr_vals,
+                est_err - std_vals[:, i],
+                est_err + std_vals[:, i],
+                alpha=0.2,
+            )
+
+    ax.set_title('Estimation Error over SNR')
+    ax.set_xlabel('SNR')
+    ax.set_ylabel('Estimation Error')
+    ax.legend()
+
+    if ax is None:
+        plt.show()
+
+
+def plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history):
+    _, axs = plt.subplots(1, 2, figsize=(12, 5))
+    plot_snr_to_std(snr_vals, std_vals, true_vals, ax=axs[0])
+    plot_snr_to_err(snr_vals, est_params_history, std_vals, true_vals, ax=axs[1])
+    plt.tight_layout()
     plt.show()
 
 
@@ -183,7 +209,9 @@ for snr in snr_vals:
     hess, cov, std = calc_std(est_params, loss, normalize=normalize, log=log)
     std_vals.append(std)
 
-plot_snr_to_std(snr_vals, std_vals, true_vals)
-plot_snr_to_err(snr_vals, est_params_history, true_vals)
+# plot_snr_to_std(snr_vals, std_vals, true_vals)
+# plot_snr_to_err(snr_vals, est_params_history, std_vals, true_vals, shade=False)
+
+plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history)
 
 # %%
