@@ -9,12 +9,6 @@ from dcsem import models, utils
 plt.rcParams['font.family'] = 'Times New Roman'
 
 
-# Function to lighten colors progressively
-def lighten_color(color, factor):
-    white = np.array([1, 1, 1, 1])  # RGBA for white
-    return (1 - factor) * np.array(to_rgba(color)) + factor * white
-
-
 def get_one_layer_A(L0=0.2):
     connections = [f'R0, L0 -> R1, L0 = {L0}']  # ROI0 -> ROI1 connection
     return utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
@@ -43,11 +37,17 @@ def simulate_dcm(param_name, param_values):
     return bold_signals
 
 
+# Function to lighten colors progressively
+def lighten_color(color, factor):
+    white = np.array([1, 1, 1, 1])  # RGBA for white
+    return (1 - factor) * np.array(to_rgba(color)) + factor * white
+
+
 # Plotting function with color gradation
 def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     for i, (bold, value) in enumerate(zip(bold_tcs, param_values)):
         # Lighter color for each successive line
-        light_color = lighten_color(base_color, i / len(param_values))
+        light_color = lighten_color(base_color, 0.8 * (i / len(param_values)))
         axs[row, 0].plot(time, bold[:, 0], label=f'{value:.2f}', color=light_color)
         axs[row, 1].plot(time, bold[:, 1], label=f'{value:.2f}', color=light_color)
 
