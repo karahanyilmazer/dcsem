@@ -72,7 +72,7 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     legend.get_title().set_color(base_color)
 
 
-def plot_param_change(figsize=(10, 12)):
+def plot_param_change(figsize=(10, 12), save=False):
     # Create the plot
     _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
 
@@ -93,6 +93,8 @@ def plot_param_change(figsize=(10, 12)):
         axs[i, 0].set_ylabel('BOLD Signal')
 
     plt.tight_layout(rect=[0, 0, 0.95, 1])
+    if save:
+        plt.savefig('img/param_change.png', dpi=600)
     plt.show()
 
 
@@ -112,7 +114,7 @@ if __name__ == '__main__':
     params = {
         'kappa': np.linspace(1, 2, 9),
         'gamma': np.linspace(0, 1, 9),
-        'alpha': np.linspace(0.1, 1, 9),
+        'alpha': np.linspace(0.2, 1, 9),
         'A_L0': np.linspace(0, 1, 9),
         'C_L0': np.linspace(0, 1, 9),
     }
@@ -120,6 +122,6 @@ if __name__ == '__main__':
     # Run simulations for each parameter set
     bold_tcs = {param: simulate_dcm(param, values) for param, values in params.items()}
 
-    plot_param_change()
+    plot_param_change(save=True)
 
 # %%
