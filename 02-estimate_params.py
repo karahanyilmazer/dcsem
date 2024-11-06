@@ -1,4 +1,6 @@
 # %%
+from itertools import combinations
+
 import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
@@ -137,6 +139,9 @@ def objective(param_vals, param_names, time, u, bold_signal):
     C = get_one_layer_C(params.get('C_L0', 1.0))
     num_rois = bold_signal.shape[1]
     bold_simulated = simulate_bold(params, time=time, u=u, A=A, C=C, num_rois=num_rois)
+
+    # print('params:', params)
+    # print(bold_simulated.shape, bold_signal.shape)
 
     loss = np.mean((bold_simulated - bold_signal) ** 2)
 
@@ -403,8 +408,16 @@ if __name__ == '__main__':
 
     # Parameters to use in the simulation and estimation
     params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-    # params_to_est = ['alpha', 'kappa']
-    params_to_est = ['alpha']
+    params_to_est = ['A_L0', 'C_L0', 'alpha', 'kappa', 'gamma']
+
+    # Generate all combinations of the parameters
+    all_combinations = []
+    for r in range(1, len(params_to_est) + 1):
+        combinations_r = combinations(params_to_est, r)
+        all_combinations.extend(combinations_r)
+
+    # Convert each combination to a list (optional)
+    all_combinations = [list(comb) for comb in all_combinations]
 
     # Ground truth parameter values
     true_params = {
@@ -418,7 +431,7 @@ if __name__ == '__main__':
 
     # Bounds for the parameters
     bounds = {
-        'alpha': (0.1, 1.0),
+        'alpha': (0.2, 1.0),
         'kappa': (1.0, 2.0),
         'gamma': (0.0, 1.0),
         'A_L0': (0.0, 1.0),
@@ -435,89 +448,92 @@ if __name__ == '__main__':
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
-    tmp_init = np.zeros((n_sims, len(params_to_est)))
-    tmp_stds = np.zeros((n_sims, len(params_to_est)))
-    tmp_errs = np.zeros((n_sims, len(params_to_est)))
-    init_list = []
-    stds_list = []
-    errs_list = []
+    for comb in all_combinations:
+        tmp_init = np.zeros((n_sims, len(comb)))
+        tmp_stds = np.zeros((n_sims, len(comb)))
+        tmp_errs = np.zeros((n_sims, len(comb)))
+        init_list = []
+        stds_list = []
+        errs_list = []
 
-    # Run the simulation and estimation
-    for snr_db in snr_range:
-        print(f'Signal-to-noise ratio: {snr_db} dB')
-        non_nan_found = False
+        # Run the simulation and estimation
+        for snr_db in snr_range:
+            print(f'Signal-to-noise ratio: {snr_db} dB')
+            non_nan_found = False
 
-        while not non_nan_found:
-            for sim_i in range(n_sims):
-                # Random initialization of the parameters
-                initial_values = initialize_parameters(bounds, params_to_est)
+            while not non_nan_found:
+                for sim_i in range(n_sims):
+                    # Random initialization of the parameters
+                    initial_values = initialize_parameters(bounds, comb)
 
-                hess, cov, std, err = run_simulation(
-                    time=time,
-                    u=u,
-                    num_rois=num_rois,
-                    num_layers=num_layers,
-                    true_params=true_params,
-                    initial_values=initial_values,
-                    params_to_est=params_to_est,
-                    snr=snr_db,
-                    bounds=bounds,
-                    normalize=True,
-                    plot=False,
-                    verbose=False,
-                )
+                    hess, cov, std, err = run_simulation(
+                        time=time,
+                        u=u,
+                        num_rois=num_rois,
+                        num_layers=num_layers,
+                        true_params=true_params,
+                        initial_values=initial_values,
+                        params_to_est=comb,
+                        snr=snr_db,
+                        bounds=bounds,
+                        normalize=True,
+                        plot=False,
+                        verbose=False,
+                    )
 
-                # Collect initial guesses, standard deviations, and errors
-                tmp_init[sim_i, :] = initial_values
-                tmp_stds[sim_i, :] = std
-                tmp_errs[sim_i, :] = err
+                    # Collect initial guesses, standard deviations, and errors
+                    tmp_init[sim_i, :] = initial_values
+                    tmp_stds[sim_i, :] = std
+                    tmp_errs[sim_i, :] = err
 
-            # Check if all simulations resulted in NaN
-            if (np.isnan(tmp_stds).all()) or (np.isnan(np.sum(tmp_stds, axis=1)).all()):
-                print(f'All simulations failed at SNR {snr_db} dB, retrying...')
-                tmp_init = np.zeros((n_sims, len(params_to_est)))
-                tmp_stds = np.zeros((n_sims, len(params_to_est)))
-                tmp_errs = np.zeros((n_sims, len(params_to_est)))
-            else:
-                non_nan_found = True
+                # Check if all simulations resulted in NaN
+                if (np.isnan(tmp_stds).all()) or (
+                    np.isnan(np.sum(tmp_stds, axis=1)).all()
+                ):
+                    print(f'All simulations failed at SNR {snr_db} dB, retrying...')
+                    tmp_init = np.zeros((n_sims, len(comb)))
+                    tmp_stds = np.zeros((n_sims, len(comb)))
+                    tmp_errs = np.zeros((n_sims, len(comb)))
+                else:
+                    non_nan_found = True
 
-        # Get the best estimation results
-        best_run_idx = np.nanargmin(np.sum(tmp_stds, axis=1))
+            # Get the best estimation results
+            best_run_idx = np.nanargmin(np.sum(tmp_stds, axis=1))
 
-        init_list.append(tmp_init[best_run_idx])
-        stds_list.append(tmp_stds[best_run_idx])
-        errs_list.append(tmp_errs[best_run_idx])
+            init_list.append(tmp_init[best_run_idx])
+            stds_list.append(tmp_stds[best_run_idx])
+            errs_list.append(tmp_errs[best_run_idx])
 
-        tmp_init = np.zeros((n_sims, len(params_to_est)))
-        tmp_stds = np.zeros((n_sims, len(params_to_est)))
-        tmp_errs = np.zeros((n_sims, len(params_to_est)))
+            tmp_init = np.zeros((n_sims, len(comb)))
+            tmp_stds = np.zeros((n_sims, len(comb)))
+            tmp_errs = np.zeros((n_sims, len(comb)))
 
-    # Plot the results
-    stds_arr = np.array(stds_list)
-    errs_arr = np.array(errs_list)
-    fig, axs = plt.subplots(1, 2, figsize=(9, 5))
+        # Plot the results
+        stds_arr = np.array(stds_list)
+        errs_arr = np.array(errs_list)
+        fig, axs = plt.subplots(1, 2, figsize=(9, 5))
 
-    axs[0].axhline(0, color='k', ls='--')
-    axs[1].axhline(0, color='k', ls='--')
+        axs[0].axhline(0, color='k', ls='--')
+        axs[1].axhline(0, color='k', ls='--')
 
-    for i, param in enumerate(params_to_est):
-        axs[0].plot(snr_range, stds_arr[:, i], '-x', label=param)
-        axs[1].plot(snr_range, errs_arr[:, i], '-x', label=param)
+        for i, param in enumerate(comb):
+            axs[0].plot(snr_range, stds_arr[:, i], '-x', label=param)
+            axs[1].plot(snr_range, errs_arr[:, i], '-x', label=param)
 
-    axs[0].set_xlabel('Signal-to-Noise Ratio (dB)')
-    axs[0].set_ylabel('Standard Deviation')
-    axs[0].legend()
+        axs[0].set_xlabel('Signal-to-Noise Ratio (dB)')
+        axs[0].set_ylabel('Standard Deviation')
+        axs[0].legend()
 
-    axs[1].set_xlabel('Signal-to-Noise Ratio (dB)')
-    axs[1].set_ylabel('Estimation Error')
-    axs[1].legend()
+        axs[1].set_xlabel('Signal-to-Noise Ratio (dB)')
+        axs[1].set_ylabel('Estimation Error')
+        axs[1].legend()
 
-    tmp_names = params_to_est.copy()
-    tmp_names.sort()
-    fig.suptitle(f'Parameter Estimation Results ({', '.join(tmp_names)})')
-    plt.tight_layout()
-    plt.savefig(f'img/{'_'.join(tmp_names)}_estimation.png')
-    plt.show()
+        tmp_names = comb.copy()
+        tmp_names.sort()
+        fig.suptitle(f'Parameter Estimation Results ({', '.join(tmp_names)})')
+        plt.tight_layout()
+        plt.savefig(f'img/{'_'.join(tmp_names)}_estimation.png')
+        plt.show()
 
 
 # %%
