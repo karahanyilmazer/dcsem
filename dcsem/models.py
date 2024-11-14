@@ -431,10 +431,10 @@ class DCM(BaseModel):
             s, f, v, q = np.array_split(p, num_state)
             dsdt = x(t) - self.p.kappa * s - self.p.gamma * (f - 1)
             dfdt = s
-            dvdt = (1 / self.p.tau) * (f - v ** (1 / self.p.alpha))
+            dvdt = (1 / self.p.tau) * (f - np.power(v, 1 / self.p.alpha))
             dqdt = (1 / self.p.tau) * (
-                f * (1 - (1 - self.p.E0) ** (1 / f)) / self.p.E0
-                - v ** (1 / self.p.alpha - 1) * q
+                f * (1 - np.power(1 - self.p.E0, 1 / f)) / self.p.E0
+                - np.power(v, 1 / self.p.alpha - 1) * q
             )
             return np.r_[dsdt, dfdt, dvdt, dqdt]
 
