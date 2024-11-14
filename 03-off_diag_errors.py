@@ -231,7 +231,25 @@ def estimate_parameters(
 
     std = np.sqrt(np.diag(cov_mat))
 
-    return estimated_params, hessian, cov_mat, std
+    n = len(cov_mat)
+
+    if n > 1:
+        # Initialize lists to accumulate data
+        pairs = []
+        values = []
+
+        # Extract upper half elements and their indices
+        upper_half_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
+        upper_half_elements = cov_mat[upper_half_mask]
+        row_indices, col_indices = np.where(upper_half_mask)
+
+        # Store pairs and values
+        for value, row, col in zip(upper_half_elements, row_indices, col_indices):
+            pair_label = f'{param_names[row]} <--> {param_names[col]}'
+            pairs.append(pair_label)
+            values.append(value)
+
+    return estimated_params, hessian, cov_mat, std, pairs, values
 
 
 def add_noise(bold_true, snr_db):
@@ -345,7 +363,7 @@ def run_simulation(
     bold_noisy = add_noise(bold_true, snr_db=snr)
 
     # Estimate parameters
-    est_params, hessian, covariance, std = estimate_parameters(
+    est_params, hessian, covariance, std, pairs, values = estimate_parameters(
         initial_values,
         params_to_est,
         bounds,
@@ -389,7 +407,7 @@ def run_simulation(
         print('\nStandard deviations of the estimated parameters:')
         print(std, '\n\n')
 
-    return hessian, covariance, std, err
+    return hessian, covariance, std, err, pairs, values
 
 
 # %%
@@ -408,7 +426,7 @@ if __name__ == '__main__':
 
     # Parameters to use in the simulation and estimation
     params_to_sim = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-    params_to_est = ['A_L0', 'C_L0', 'alpha', 'kappa', 'gamma']
+    params_to_est = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
 
     # Generate all combinations of the parameters
     all_combinations = []
@@ -418,6 +436,9 @@ if __name__ == '__main__':
 
     # Convert each combination to a list (optional)
     all_combinations = [list(comb) for comb in all_combinations]
+
+    # Remove single parameter combinations
+    all_combinations = [comb for comb in all_combinations if len(comb) > 1]
 
     # Ground truth parameter values
     true_params = {
@@ -448,13 +469,18 @@ if __name__ == '__main__':
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
+    pair_list = []
+    all_vals = []
+
     for comb in all_combinations:
         tmp_init = np.zeros((n_sims, len(comb)))
         tmp_stds = np.zeros((n_sims, len(comb)))
         tmp_errs = np.zeros((n_sims, len(comb)))
+        tmp_vals = []
         init_list = []
         stds_list = []
         errs_list = []
+        vals_list = []
 
         # Run the simulation and estimation
         for snr_db in snr_range:
@@ -466,7 +492,7 @@ if __name__ == '__main__':
                     # Random initialization of the parameters
                     initial_values = initialize_parameters(bounds, comb)
 
-                    hess, cov, std, err = run_simulation(
+                    hess, cov, std, err, pairs, vals = run_simulation(
                         time=time,
                         u=u,
                         num_rois=num_rois,
@@ -485,6 +511,7 @@ if __name__ == '__main__':
                     tmp_init[sim_i, :] = initial_values
                     tmp_stds[sim_i, :] = std
                     tmp_errs[sim_i, :] = err
+                    tmp_vals.append(vals)
 
                 # Check if all simulations resulted in NaN
                 if (np.isnan(tmp_stds).all()) or (
@@ -503,14 +530,20 @@ if __name__ == '__main__':
             init_list.append(tmp_init[best_run_idx])
             stds_list.append(tmp_stds[best_run_idx])
             errs_list.append(tmp_errs[best_run_idx])
+            vals_list.append(tmp_vals[best_run_idx])
 
             tmp_init = np.zeros((n_sims, len(comb)))
             tmp_stds = np.zeros((n_sims, len(comb)))
             tmp_errs = np.zeros((n_sims, len(comb)))
+            tmp_vals = []
+
+        all_vals.append(vals_list)
+        pair_list.append(pairs)
 
         # Plot the results
         stds_arr = np.array(stds_list)
         errs_arr = np.array(errs_list)
+        vals_arr = np.array(vals_list)
         fig, axs = plt.subplots(1, 2, figsize=(9, 5))
 
         axs[0].axhline(0, color='k', ls='--')
@@ -532,8 +565,19 @@ if __name__ == '__main__':
         tmp_names.sort()
         fig.suptitle(f'Parameter Estimation Results ({', '.join(tmp_names)})')
         plt.tight_layout()
-        plt.savefig(f'img/{'_'.join(tmp_names)}_estimation.png')
+        plt.savefig(f'img/on_diag-{'_'.join(tmp_names)}.png')
         plt.show()
 
+    for val, pairs in zip(all_vals, pair_list):
+        tmp_val = np.array(val)
+        plt.figure(figsize=(6, 4))
+        plt.xlabel('Signal-to-Noise Ratio (dB)')
+        plt.ylabel('Covariance')
+        plt.title('Off Diagonal Covariance')
+        for i, curr_off in enumerate(tmp_val.T):
+            plt.plot(curr_off, label=pairs[i])
+            plt.legend()
+        plt.savefig(f'img/off_diag-{'_'.join(tmp_names)}.png')
+        plt.show()
 
 # %%
