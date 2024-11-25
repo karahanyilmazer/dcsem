@@ -163,6 +163,9 @@ def run_pipeline(
         bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=num_rois)
         # Plot results
         plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
+        param_range = np.linspace(0, 1, 10)
+        param_ranges = [param_range, param_range]
+        plot_loss(param_ranges, est_params, bold_noisy)
 
     if verbose:
         # Print results
@@ -212,6 +215,62 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     plt.show()
 
 
+def plot_loss(params_range, optimum, bold_noisy):
+    optimum1, optimum2 = list(optimum.values())
+    param_grid1, param_grid2 = np.meshgrid(params_range[0], params_range[1])
+    loss_grid = np.zeros_like(param_grid1)
+
+    # Compute loss values over the grid
+    for i in range(param_grid1.shape[0]):
+        for j in range(param_grid1.shape[1]):
+            loss_grid[i, j] = loss(
+                [param_grid1[i, j], param_grid2[i, j]], list(optimum.keys()), bold_noisy
+            )
+
+    fig = plt.figure(figsize=(12, 6))
+
+    if len(params_range) == 2:
+        # 3D Surface Plot
+        ax = fig.add_subplot(1, 2, 1, projection='3d')
+        ax.plot_surface(param_grid1, param_grid2, loss_grid, cmap='viridis')
+        ax.plot(
+            optimum1,
+            optimum2,
+            loss(list(optimum.values()), list(optimum.keys()), bold_noisy),
+            'ro',
+            label='Optimum',
+            markersize=10,
+        )
+        ax.axvline(optimum1, color='red', ls='--', label='Optimum')
+        ax.set_xlabel('Parameter a')
+        ax.set_ylabel('Parameter b')
+        ax.set_zlabel('MSE Loss')
+        ax.set_title('Loss Surface')
+
+        # 2D Contour Plot
+        ax = fig.add_subplot(1, 2, 2)
+        contour = ax.contourf(
+            param_grid1, param_grid2, loss_grid, levels=50, cmap='viridis'
+        )
+        ax.plot(optimum1, optimum2, 'ro', label='Optimum', markersize=10)
+        fig.colorbar(contour, ax=ax)
+        ax.set_xlabel('Parameter a')
+        ax.set_ylabel('Parameter b')
+        ax.set_title('Loss Contour')
+
+        plt.tight_layout()
+        plt.show()
+
+    else:
+        plt.plot(params_range)
+        plt.axvline(optimum, color='red', ls='--', label='Optimum')
+        plt.title('Loss Function Landscape')
+        plt.xlabel('Parameter a')
+        plt.ylabel('MSE Loss')
+        plt.legend()
+        plt.show()
+
+
 def plot_estimation(snr_range, estimated_vals, params_to_est, true_params):
     plt.figure(figsize=(10, 6))
 
@@ -248,7 +307,7 @@ num_layers = 1
 
 # Parameters to set and estimate
 params_to_set = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-params_to_est = ['A_L0']
+params_to_est = ['A_L0', 'C_L0']
 
 # Ground truth parameter values
 true_params = {
@@ -271,12 +330,12 @@ bounds = filter_params(bounds, params_to_set)
 # Initial values for the parameters to estimate
 initial_values = initialize_parameters(bounds, params_to_est)
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
-
+# ======================================================================================
 # %%
-# Run the estimation pipeline
-estimated_vals = {key: [] for key in params_to_est}
 snr_range = np.linspace(0.001, 50, 20)
+estimated_vals = {key: [] for key in params_to_est}
 
+# Run the estimation pipeline
 for snr in tqdm(snr_range):
     hess, cov, std, err, est = run_pipeline(
         true_params,
@@ -289,6 +348,7 @@ for snr in tqdm(snr_range):
         verbose=False,
     )
 
+    # Store the estimated values
     for param in params_to_est:
         estimated_vals[param].append(est[param])
 
