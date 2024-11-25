@@ -279,12 +279,12 @@ def plot_estimation(snr_range, estimated_vals, params_to_est, true_params):
         plt.axhline(true_params[param], c='k', ls='--')
 
         if '_' in param:
-            label = f'${param}$'
+            label = '$' + param.replace("_", "_{") + '}$'
         else:
-            label = '{param}'
+            label = param
         plt.text(
             snr_range[-1] - 1,
-            true_params[param] + 0.01,
+            true_params[param] - 0.005,
             label,
             horizontalalignment='right',
             fontsize=10,
