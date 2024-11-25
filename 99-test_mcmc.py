@@ -1,11 +1,11 @@
 # %%
 from typing import Callable, Tuple
 
-import corner
 import emcee
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy.stats import norm
+from corner import corner
+from IPython.display import Math, display
 
 
 # %%
@@ -138,13 +138,13 @@ def log_probability(slope, x, y, intercept):
 
 # %%
 # Generate synthetic data
-true_slope = 2.5
-true_intercept = 1.0
+m_true = 2.5
+c_true = 1.0
 x = np.linspace(0, 10, 50)  # Independent variable
 noise = np.random.normal(0, 1, size=len(x))  # Add noise
-y = true_slope * x + true_intercept + noise  # Dependent variable
+y = m_true * x + c_true + noise  # Dependent variable
 
-plt.plot(x, true_slope * x + true_intercept, ls='--', c='black', label='Ground Truth')
+plt.plot(x, m_true * x + c_true, ls='--', c='black', label='Ground Truth')
 plt.scatter(x, y, s=10, c='tomato', label='Observed')
 plt.legend()
 plt.xlabel('x')
@@ -162,24 +162,24 @@ bounds = np.array([[0.0, 10.0]])  # Bounds for mu
 step_size = 0.1  # Step size for `mcmc`
 
 # Initialize walkers around a guess
-initial_guess = [true_slope + 1.1 * np.random.randn(n_dim) for _ in range(n_walkers)]
+initial_guess = [m_true + 1.1 * np.random.randn(n_dim) for _ in range(n_walkers)]
 
 # Run MCMC using emcee
 sampler = emcee.EnsembleSampler(
     n_walkers,
     n_dim,
     log_probability,
-    args=(x, y, true_intercept),
+    args=(x, y, c_true),
 )
 sampler.run_mcmc(initial_guess, n_burn + n_samples, progress=True)
 samples_emcee = sampler.get_chain(discard=n_burn, flat=True)
 
-initial_guess = [4.5]  # Slightly off from true value
+initial_guess = [2.5]  # Slightly off from true value
 
 # Run basic MCMC
 samples_mcmc, probs_mcmc = mcmc(
     posterior=log_probability,
-    args=(x, y, true_intercept),
+    args=(x, y, c_true),
     p0=initial_guess,
     bounds=bounds,
     step_size=step_size,
@@ -192,7 +192,7 @@ samples_mcmc, probs_mcmc = mcmc(
 # Run iterative MCMC with adaptive covariance
 samples_iterative_mcmc, probs_iterative_mcmc = iterative_mcmc(
     posterior=log_probability,
-    args=(x, y, true_intercept),
+    args=(x, y, c_true),
     p0=initial_guess,
     n_samples=n_samples,
     bounds=bounds,
@@ -212,20 +212,45 @@ std_iterative_mcmc = np.std(samples_iterative_mcmc, axis=0)
 mean_emcee = np.mean(samples_emcee, axis=0)
 std_emcee = np.std(samples_emcee, axis=0)
 
-print(f"MCMC Results:\tMean: {mean_mcmc:.2f}, Std: {std_mcmc:.2f}")
-print(f"iMCMC Results:\tMean: {mean_iterative_mcmc:.2f}, Std: {std_iterative_mcmc:.2f}")
-print(f"emcee Results:\tMean: {mean_emcee[0]:.2f}, Std: {std_emcee[0]:.2f}")
+print(f'MCMC Results:\tMean: {mean_mcmc:.2f}, Std: {std_mcmc:.2f}')
+print(f'iMCMC Results:\tMean: {mean_iterative_mcmc:.2f}, Std: {std_iterative_mcmc:.2f}')
+print(f'emcee Results:\tMean: {mean_emcee[0]:.2f}, Std: {std_emcee[0]:.2f}')
 
-# %%
 plt.figure(figsize=(12, 6))
-plt.hist(samples_mcmc, bins=30, alpha=0.5, label="MCMC", density=True)
-plt.hist(samples_iterative_mcmc, bins=30, alpha=0.5, label="iMCMC", density=True)
-plt.hist(samples_emcee, bins=30, alpha=0.5, label="emcee", density=True)
-plt.axvline(true_slope, color="r", linestyle="--", label="True mu")
-plt.xlabel("mu")
-plt.ylabel("Density")
-plt.title("Comparison of MCMC Results")
+plt.hist(samples_mcmc, bins=30, alpha=0.5, label='MCMC', density=True)
+plt.hist(samples_iterative_mcmc, bins=30, alpha=0.5, label='iMCMC', density=True)
+plt.hist(samples_emcee, bins=30, alpha=0.5, label='emcee', density=True)
+plt.axvline(m_true, color='r', linestyle='--', label='True mu')
+plt.xlabel('mu')
+plt.ylabel('Density')
+plt.title('Comparison of MCMC Results')
 plt.legend()
 plt.show()
+# %%
+fig = corner(samples_emcee, labels=['Slope'], truths=[m_true])
+plt.show()
+
+# %%
+inds = np.random.randint(len(samples_emcee), size=100)
+for ind in inds:
+    sample = samples_emcee[ind]
+    m_pred = sample
+    plt.plot(x, x * sample + c_true, 'C4', alpha=0.1)
+# plt.errorbar(x, y, yerr=yerr, fmt='.k', capsize=0)
+plt.scatter(x, y, color='k', s=5, label='observed')
+plt.plot(x, m_true * x + c_true, 'k', label='truth')
+plt.legend()
+plt.xlim(0, 10)
+plt.xlabel('x')
+plt.ylabel('y')
+plt.show()
+
+# %%
+labels = ['m']
+for i in range(n_dim):
+    mcmc_est = np.percentile(samples_emcee[:, i], [16, 50, 84])
+    q = np.diff(mcmc_est)
+    txt = rf"\mathrm{{{labels[i]}}} = {mcmc_est[1]:.3f}_{{-{q[0]:.3f}}}^{{{q[1]:.3f}}}"
+    display(Math(txt))
 
 # %%
