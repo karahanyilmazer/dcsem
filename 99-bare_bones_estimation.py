@@ -247,8 +247,7 @@ print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
 
 # %%
 # Run the estimation pipeline
-a_list = []
-c_list = []
+estimated_vals = {key: [] for key in params_to_est}
 snr_range = np.linspace(0.001, 50, 20)
 
 for snr in tqdm(snr_range):
@@ -263,30 +262,27 @@ for snr in tqdm(snr_range):
         verbose=False,
     )
 
-    a_list.append(est['A_L0'])
-    c_list.append(est['C_L0'])
+    for param in params_to_est:
+        estimated_vals[param].append(est[param])
 
 # %%
 plt.figure(figsize=(10, 6))
-plt.plot(snr_range, a_list, label='A_L0')
-plt.plot(snr_range, c_list, label='C_L0')
-plt.axhline(true_params['A_L0'], c='k', ls='--')
-plt.axhline(true_params['C_L0'], c='k', ls='--')
 
-plt.text(
-    snr_range[-1] - 1,
-    true_params['A_L0'] + 0.01,
-    '$A_{L0}$',
-    horizontalalignment='right',
-    fontsize=10,
-)
-plt.text(
-    snr_range[-1] - 1,
-    true_params['C_L0'] + 0.01,
-    '$C_{L0}$',
-    horizontalalignment='right',
-    fontsize=10,
-)
+for param in params_to_est:
+    plt.plot(snr_range, estimated_vals[param], label=param)
+    plt.axhline(true_params[param], c='k', ls='--')
+
+    if '_' in param:
+        label = f'${param}$'
+    else:
+        label = '{param}'
+    plt.text(
+        snr_range[-1] - 1,
+        true_params[param] + 0.01,
+        label,
+        horizontalalignment='right',
+        fontsize=10,
+    )
 
 plt.xlim(snr_range[0], snr_range[-1])
 plt.xlabel('SNR')
