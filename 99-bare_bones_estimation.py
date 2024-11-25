@@ -212,7 +212,34 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     plt.show()
 
 
+def plot_estimation(snr_range, estimated_vals, params_to_est, true_params):
+    plt.figure(figsize=(10, 6))
+
+    for param in params_to_est:
+        plt.plot(snr_range, estimated_vals[param], label=param)
+        plt.axhline(true_params[param], c='k', ls='--')
+
+        if '_' in param:
+            label = f'${param}$'
+        else:
+            label = '{param}'
+        plt.text(
+            snr_range[-1] - 1,
+            true_params[param] + 0.01,
+            label,
+            horizontalalignment='right',
+            fontsize=10,
+        )
+
+    plt.xlim(snr_range[0], snr_range[-1])
+    plt.xlabel('SNR')
+    plt.ylabel('Estimated Parameter')
+    plt.legend()
+    plt.show()
+
+
 # %%
+# ======================================================================================
 # DCM parameters
 time = np.arange(100)
 u = utils.stim_boxcar([[0, 30, 1]])
@@ -265,28 +292,6 @@ for snr in tqdm(snr_range):
     for param in params_to_est:
         estimated_vals[param].append(est[param])
 
-plt.figure(figsize=(10, 6))
-
-for param in params_to_est:
-    plt.plot(snr_range, estimated_vals[param], label=param)
-    plt.axhline(true_params[param], c='k', ls='--')
-
-    if '_' in param:
-        label = f'${param}$'
-    else:
-        label = '{param}'
-    plt.text(
-        snr_range[-1] - 1,
-        true_params[param] + 0.01,
-        label,
-        horizontalalignment='right',
-        fontsize=10,
-    )
-
-plt.xlim(snr_range[0], snr_range[-1])
-plt.xlabel('SNR')
-plt.ylabel('Estimated Parameter')
-plt.legend()
-plt.show()
+plot_estimation(snr_range, estimated_vals, params_to_est, true_params)
 
 # %%
