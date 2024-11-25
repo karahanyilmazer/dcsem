@@ -24,18 +24,6 @@ def get_one_layer_C(L0=1):
     return utils.create_C_matrix(num_rois, num_layers, connections)
 
 
-def initialize_parameters(bounds, params_to_sim):
-    initial_values = []
-    for param in params_to_sim:
-        initial_values.append(np.random.uniform(*bounds[param]))
-
-    return initial_values
-
-
-def filter_params(params, keys):
-    return {k: params[k] for k in keys}
-
-
 def simulate_bold(params, **kwargs):
     dcm = models.DCM(
         kwargs['num_rois'],
@@ -54,7 +42,19 @@ def add_noise(bold_true, snr_db):
     return bold_true + np.random.normal(0, sigma, bold_true.shape)
 
 
-def objective(param_vals, param_names, bold_observed):
+def filter_params(params, keys):
+    return {k: params[k] for k in keys}
+
+
+def initialize_parameters(bounds, params_to_sim):
+    initial_values = []
+    for param in params_to_sim:
+        initial_values.append(np.random.uniform(*bounds[param]))
+
+    return initial_values
+
+
+def loss(param_vals, param_names, bold_observed):
     # Map the parameter values to their names
     params = dict(zip(param_names, param_vals))
 
@@ -76,7 +76,7 @@ def estimate_parameters(
 ):
     # Perform the minimization
     opt = minimize(
-        objective,
+        loss,
         x0=initial_values,
         args=(
             param_names,
@@ -90,7 +90,7 @@ def estimate_parameters(
     estimated_params = dict(zip(param_names, opt.x.tolist()))
 
     # Compute the Hessian matrix using finite differences
-    hessian = approx_hess(opt.x, objective, args=(param_names, kwargs['bold_signal']))
+    hessian = approx_hess(opt.x, loss, args=(param_names, kwargs['bold_signal']))
 
     if normalize:
         # Compute residuals and estimate the variance of the noise
@@ -113,30 +113,6 @@ def estimate_parameters(
     std = np.sqrt(np.diag(cov_mat))
 
     return estimated_params, hessian, cov_mat, std
-
-
-def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
-    num_rois = bold_true.shape[1]
-    _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
-    for i in range(num_rois):
-        axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
-        axs[i].plot(time, bold_true[:, i], label='Ground Truth', lw=2)
-        axs[i].plot(
-            time,
-            bold_estimated[:, i],
-            label='Estimated',
-            ls='--',
-            lw=2,
-            c='tomato',
-        )
-        axs[i].set_title(f'ROI {i}')
-        axs[i].set_xlabel('Time (s)')
-        axs[i].legend()
-
-    axs[0].set_ylabel('BOLD Signal')
-
-    plt.tight_layout()
-    plt.show()
 
 
 def run_pipeline(
@@ -212,6 +188,30 @@ def run_pipeline(
     return hessian, covariance, std, err, est_params
 
 
+def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
+    num_rois = bold_true.shape[1]
+    _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
+    for i in range(num_rois):
+        axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
+        axs[i].plot(time, bold_true[:, i], label='Ground Truth', lw=2)
+        axs[i].plot(
+            time,
+            bold_estimated[:, i],
+            label='Estimated',
+            ls='--',
+            lw=2,
+            c='tomato',
+        )
+        axs[i].set_title(f'ROI {i}')
+        axs[i].set_xlabel('Time (s)')
+        axs[i].legend()
+
+    axs[0].set_ylabel('BOLD Signal')
+
+    plt.tight_layout()
+    plt.show()
+
+
 # %%
 # DCM parameters
 time = np.arange(100)
@@ -221,7 +221,7 @@ num_layers = 1
 
 # Parameters to set and estimate
 params_to_set = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-params_to_est = ['C_L0', 'A_L0']
+params_to_est = ['A_L0']
 
 # Ground truth parameter values
 true_params = {
@@ -265,7 +265,6 @@ for snr in tqdm(snr_range):
     for param in params_to_est:
         estimated_vals[param].append(est[param])
 
-# %%
 plt.figure(figsize=(10, 6))
 
 for param in params_to_est:
