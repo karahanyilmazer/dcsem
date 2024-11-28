@@ -67,10 +67,13 @@ def filter_params(params, keys):
     return {k: params[k] for k in keys}
 
 
-def initialize_parameters(bounds, params_to_sim):
+def initialize_parameters(bounds, params_to_sim, random=False):
     initial_values = []
     for param in params_to_sim:
-        initial_values.append(np.random.uniform(*bounds[param]))
+        if random:
+            initial_values.append(np.random.uniform(*bounds[param]))
+        else:
+            initial_values.append(np.mean(bounds[param]))
 
     return initial_values
 
