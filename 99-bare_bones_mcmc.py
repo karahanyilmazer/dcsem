@@ -160,13 +160,21 @@ print('Estimating:\t\t', filter_params(true_params, params_to_est))
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
 # ======================================================================================
 # %%
-step_size = 0.001  # Step size for MCMC
-n_samples = 300  # Sampling steps
-n_burn = 100  # Burn-in steps
-
-bold_true = simulate_bold(true_params, time=time, u=u, num_rois=NUM_ROIS)
+# Initialize the BOLD signals
+bold_true = simulate_bold(
+    filter_params(true_params, params_to_set),
+    time=time,
+    u=u,
+    num_rois=NUM_ROIS,
+)
 bold_obsv = bold_true
-# bold_obsv = add_noise(bold_true, snr_db=snr_range[-1])
+# bold_obsv = add_noise(bold_true, snr_db=30)
+
+# %%
+# MCMC parameters
+step_size = 0.005  # Step size
+n_samples = 5000  # Sampling steps
+n_burn = 1000  # Burn-in steps
 
 samples_mcmc, probs_mcmc = mcmc(
     posterior=log_probability,
@@ -179,14 +187,13 @@ samples_mcmc, probs_mcmc = mcmc(
     skips=1,
 )
 samples_mcmc = samples_mcmc.reshape(-1, 1)
+mean_mcmc = np.mean(samples_mcmc, axis=0)[0]
 
-mean_mcmc = np.mean(samples_mcmc, axis=0)
-std_mcmc = np.std(samples_mcmc, axis=0)
-
-print(f'MCMC Results:\tMean: {mean_mcmc[0]:.2f}, Std: {std_mcmc[0]:.2f}')
+print('True parameters:\t', filter_params(true_params, params_to_est))
+print('Estimated parameters:\t', dict(zip(params_to_est, mean_mcmc)))
 
 # %%
-plt.figure(figsize=(12, 6))
+plt.figure()
 plt.hist(samples_mcmc, bins=30, alpha=0.5, label='MCMC', density=True)
 plt.axvline(
     true_params[params_to_est[0]],
@@ -231,12 +238,5 @@ plt.ylabel('Amplitude')
 plt.xlim(0, 100)
 plt.legend()
 plt.show()
-
-# %%
-for i in range(len(params_to_est)):
-    mcmc_est = np.percentile(samples_mcmc[:, i], [16, 50, 84])
-    q = np.diff(mcmc_est)
-    txt = rf"\mathrm{{{params_to_est[i]}}} = {mcmc_est[1]:.3f}_{{-{q[0]:.3f}}}^{{{q[1]:.3f}}}"
-    display(Math(txt))
 
 # %%
