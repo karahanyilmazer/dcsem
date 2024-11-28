@@ -3,7 +3,6 @@ from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import Math, display
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
@@ -140,21 +139,21 @@ time = np.arange(100)
 u = stim_boxcar([[0, 30, 1]])  # Input stimulus
 
 # Parameters to set and estimate
-params_to_set = ['A_w01', 'A_w10']
-params_to_est = ['A_w01']
+params_to_set = ['w01', 'w10']
+params_to_est = ['w01']
 
 # Ground truth parameter values
 true_params = {
-    'A_w01': 0.7,
-    'A_w10': 0.7,
+    'w01': 0.7,
+    'w10': 0.2,
 }
 bounds = {
-    'A_w01': (0.0, 1.0),
-    'A_w10': (0.0, 1.0),
+    'w01': (0.0, 1.0),
+    'w10': (0.0, 1.0),
 }
 
 # Initial values for the parameters to estimate
-initial_values = initialize_parameters(bounds, params_to_est)
+initial_values = initialize_parameters(bounds, params_to_est, random=False)
 
 print('Estimating:\t\t', filter_params(true_params, params_to_est))
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
