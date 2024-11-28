@@ -7,7 +7,7 @@ from IPython.display import Math, display
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, simulate_bold
+from utils import filter_params, initialize_parameters, simulate_bold
 
 plt.rcParams['font.family'] = 'Times New Roman'
 
@@ -155,10 +155,12 @@ bounds = {
 
 # Initial values for the parameters to estimate
 initial_values = initialize_parameters(bounds, params_to_est)
+
+print('Estimating:\t\t', filter_params(true_params, params_to_est))
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
 # ======================================================================================
 # %%
-step_size = 0.001  # Step size for `mcmc`
+step_size = 0.001  # Step size for MCMC
 n_samples = 300  # Sampling steps
 n_burn = 100  # Burn-in steps
 
