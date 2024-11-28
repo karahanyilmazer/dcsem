@@ -3,7 +3,6 @@ from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from corner import corner
 from IPython.display import Math, display
 from tqdm import tqdm
 
@@ -223,11 +222,9 @@ initial_values = initialize_parameters(bounds, params_to_est)
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
 # ======================================================================================
 # %%
-snr_range = np.linspace(0.001, 50, 20)
-estimated_vals = {key: [] for key in params_to_est}
-step_size = 0.1  # Step size for `mcmc`
-n_samples = 10000  # Sampling steps
-n_burn = 1000  # Burn-in steps
+step_size = 0.001  # Step size for `mcmc`
+n_samples = 300  # Sampling steps
+n_burn = 100  # Burn-in steps
 
 bold_true = simulate_bold(true_params, time=time, u=u, num_rois=NUM_ROIS)
 bold_obsv = bold_true
@@ -263,19 +260,26 @@ plt.xlabel(params_to_est[0])
 plt.ylabel('Density')
 plt.legend()
 plt.show()
+
 # %%
-fig = corner(
-    samples_mcmc,
-    labels=[params_to_est[0]],
-    truths=[true_params[params_to_est[0]]],
+plt.figure()
+plt.plot(samples_mcmc)
+plt.axhline(
+    true_params[params_to_est[0]],
+    color='tomato',
+    linestyle='--',
+    label='True Value',
 )
+plt.xlabel('Step')
+plt.ylabel('Parameter Value')
+plt.legend()
 plt.show()
 
 # %%
+plt.figure()
 inds = np.random.randint(len(samples_mcmc), size=100)
 for ind in inds:
     sample = samples_mcmc[ind]
-    sample = np.atleast_2d(sample)
     params = dict(zip(params_to_est, sample))
     plt.plot(
         time,
@@ -283,13 +287,11 @@ for ind in inds:
         'C4',
         alpha=0.1,
     )
-# plt.errorbar(x, y, yerr=yerr, fmt='.k', capsize=0)
-plt.plot(time, bold_obsv[:, 0], color='k', label='observed')
-# plt.plot(time, bold_true[:, 0], color='k', label='truth')
-plt.legend()
-plt.xlim(0, 100)
+plt.plot(time, bold_obsv[:, 0], color='k', label='Observed')
 plt.xlabel('Time')
 plt.ylabel('Amplitude')
+plt.xlim(0, 100)
+plt.legend()
 plt.show()
 
 # %%
