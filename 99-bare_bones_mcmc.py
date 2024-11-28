@@ -7,32 +7,54 @@ from corner import corner
 from IPython.display import Math, display
 from tqdm import tqdm
 
-from dcsem import models, utils
+from dcsem import models
+from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
 
 plt.rcParams['font.family'] = 'Times New Roman'
 
 
 # %%
-def get_one_layer_A(L0=0.2):
-    connections = [f'R0, L0 -> R1, L0 = {L0}']  # ROI0 -> ROI1 connection
-    return utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+def get_one_layer_A(w01=0.4, w10=0.4, self_connections=-1):
+    connections = []
+    connections.append(f'R0, L0 -> R1, L0 = {w01}')  # ROI0 -> ROI1 connection
+    connections.append(f'R1, L0 -> R0, L0 = {w10}')  # ROI1 -> ROI0 connection
+    return create_A_matrix(
+        num_rois=2,
+        num_layers=1,
+        paired_connections=connections,
+        self_connections=self_connections,
+    )
 
 
-def get_one_layer_C(L0=1):
-    connections = [f'R0, L0 = {L0}']  # Input --> ROI0 connection
-    return utils.create_C_matrix(num_rois, num_layers, connections)
+def get_one_layer_C(i0=1, i1=0):
+    connections = []
+    connections.append(f'R0, L0 = {i0}')  # Input --> ROI0 connection
+    connections.append(f'R1, L0 = {i1}')  # Input --> ROI1 connection
+    return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
-def simulate_bold(params, **kwargs):
+def simulate_bold(params, num_rois, time, u):
+    # Define input arguments for defining A and C matrices
+    A_param_names = ['w01', 'w10', 'self_connections']
+    C_param_names = ['i0', 'i1']
+
+    # Extract relevant parameters for A and C matrices from params
+    A_kwargs = {k: params[k] for k in A_param_names if k in params}
+    C_kwargs = {k: params[k] for k in C_param_names if k in params}
+
+    # Create A and C matrices using extracted parameters
+    A = get_one_layer_A(**A_kwargs)
+    C = get_one_layer_C(**C_kwargs)
+
     dcm = models.DCM(
-        kwargs['num_rois'],
+        num_rois,
         params={
-            'A': get_one_layer_A(params.get('A_L0', 0.2)),
-            'C': get_one_layer_C(params.get('C_L0', 1.0)),
+            'A': A,
+            'C': C,
             **params,
         },
     )
-    return dcm.simulate(kwargs['time'], kwargs['u'])[0]
+    return dcm.simulate(time, u)[0]
 
 
 def add_noise(bold_true, snr_db):
@@ -117,7 +139,7 @@ def mcmc(
     )
 
 
-def log_probability(param_vals, param_names, bounds, bold_observed):
+def log_probability(param_vals, param_names, bounds, bold_observed, num_rois):
 
     params = dict(zip(param_names, param_vals))
 
@@ -173,33 +195,25 @@ def plot_mcmc_results(params_to_est, samples, true_params):
 
 # %%
 # ======================================================================================
-# DCM parameters
+# Bilinear neural model parameters
+NUM_LAYERS = 1
+NUM_ROIS = 2
 time = np.arange(100)
-u = utils.stim_boxcar([[0, 30, 1]])
-num_rois = 2
-num_layers = 1
+u = stim_boxcar([[0, 30, 1]])  # Input stimulus
 
 # Parameters to set and estimate
-params_to_set = ['alpha', 'kappa', 'gamma', 'A_L0', 'C_L0']
-params_to_est = ['alpha']
+params_to_set = ['A_w01', 'A_w10']
+params_to_est = ['A_w01']
 
 # Ground truth parameter values
 true_params = {
-    'alpha': 0.6,
-    'kappa': 1.5,
-    'gamma': 0.5,
-    'A_L0': 0.8,
-    'C_L0': 0.7,
+    'A_w01': 0.7,
+    'A_w10': 0.7,
 }
-true_params = filter_params(true_params, params_to_set)
 bounds = {
-    'alpha': (0.2, 1.0),
-    'kappa': (1.0, 2.0),
-    'gamma': (0.0, 1.0),
-    'A_L0': (0.0, 1.0),
-    'C_L0': (0.0, 1.0),
+    'A_w01': (0.0, 1.0),
+    'A_w10': (0.0, 1.0),
 }
-bounds = filter_params(bounds, params_to_est)
 
 # Initial values for the parameters to estimate
 initial_values = initialize_parameters(bounds, params_to_est)
@@ -212,12 +226,13 @@ step_size = 0.1  # Step size for `mcmc`
 n_samples = 10000  # Sampling steps
 n_burn = 1000  # Burn-in steps
 
-bold_true = simulate_bold(true_params, time=time, u=u, num_rois=num_rois)
-bold_obsv = add_noise(bold_true, snr_db=snr_range[-1])
+bold_true = simulate_bold(true_params, time=time, u=u, num_rois=NUM_ROIS)
+bold_obsv = bold_true
+# bold_obsv = add_noise(bold_true, snr_db=snr_range[-1])
 
 samples_mcmc, probs_mcmc = mcmc(
     posterior=log_probability,
-    args=(params_to_est, bounds, bold_obsv),
+    args=(params_to_est, bounds, bold_obsv, NUM_ROIS),
     p0=initial_values,
     bounds=np.array(list(bounds.values())),
     step_size=step_size,
@@ -230,7 +245,7 @@ samples_mcmc = samples_mcmc.reshape(-1, 1)
 mean_mcmc = np.mean(samples_mcmc, axis=0)
 std_mcmc = np.std(samples_mcmc, axis=0)
 
-print(f'MCMC Results:\tMean: {mean_mcmc:.2f}, Std: {std_mcmc:.2f}')
+print(f'MCMC Results:\tMean: {mean_mcmc[0]:.2f}, Std: {std_mcmc[0]:.2f}')
 
 # %%
 plt.figure(figsize=(12, 6))
@@ -261,7 +276,7 @@ for ind in inds:
     params = dict(zip(params_to_est, sample))
     plt.plot(
         time,
-        simulate_bold(params, time=time, u=u, num_rois=num_rois)[:, 0],
+        simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)[:, 0],
         'C4',
         alpha=0.1,
     )
