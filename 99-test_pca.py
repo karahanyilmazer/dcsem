@@ -1,4 +1,7 @@
 # %%
+import os
+import pickle
+
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import Markdown, display
@@ -201,5 +204,45 @@ plt.show()
 
 print(f'PCA Reconstruction Error: {recon_error_pca}')
 print(f'ICA Reconstruction Error: {recon_error_ica}')
+
+# %%
+display(Markdown('## Save the Fitted Models'))
+
+# Create a models folder if it doesn't exist
+os.makedirs('models', exist_ok=True)
+
+# Dump the PCA and ICA objects
+with open('models/pca.pkl', 'wb') as f:
+    pickle.dump(pca, f)
+
+with open('models/ica.pkl', 'wb') as f:
+    pickle.dump(ica, f)
+
+
+# %%
+def calc_comps(param_vals, param_names, method='PCA'):
+    # Initialize the BOLD signals
+    bold_true = simulate_bold(
+        dict(zip(param_names, param_vals)),
+        time=time,
+        u=u,
+        num_rois=NUM_ROIS,
+    )
+    bold_obsv = bold_true
+    tmp_bold = np.concatenate([bold_obsv[:, 0], bold_obsv[:, 1]]).reshape(1, -1)
+    tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1)
+
+    if method == 'PCA':
+        pca = pickle.load(open('models/pca.pkl', 'rb'))
+        components = pca.transform(tmp_bold_c)
+    elif method == 'ICA':
+        ica = pickle.load(open('models/ica.pkl', 'rb'))
+        components = ica.transform(tmp_bold_c)
+
+    return components
+
+
+initial_values = initialize_parameters(bounds, params_to_set, random=True)
+comps = calc_comps(initial_values, params_to_set, method='PCA')
 
 # %%
