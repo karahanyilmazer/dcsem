@@ -40,26 +40,40 @@ bounds = {
 
 # ======================================================================================
 # %%
-def calc_comps(param_names, method, param_vals):
-    # Ensure param_names is a list, even for a single key
-    if isinstance(param_names, str):
-        param_names = [param_names]
+def calc_comps(method, **kwargs):
+    # Define the allowed parameters
+    allowed_keys = ['w01', 'w10', 'i0', 'i1']
 
-    # If param_vals is not iterable (e.g., scalar), map directly
-    if not isinstance(param_vals, (list, np.ndarray)):
-        param_vals = [param_vals]  # Convert scalar to a list for consistent mapping
+    # Find invalid keys
+    invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
 
-    # Handle single key and single value case
-    if len(param_names) == 1:
-        param_dict = {param_names[0]: np.array(param_vals)}
+    # Assert that all keys are allowed
+    assert (
+        not invalid_keys
+    ), f'Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}.'
+    # Filter all arguments that are not None
+    params = {}
+    for key, val in kwargs.items():
+        if key == 'method':
+            continue
+        if val is not None:
+            # Convert the values to a numpy array
+            if not isinstance(val, (list, np.ndarray)):
+                val = [val]
+            if not isinstance(val, np.ndarray):
+                val = np.array(val)
 
-    else:
-        # Handle multi-key case
-        param_dict = dict(zip(param_names, param_vals))
+            params[key] = val
+
+    # Assert that all values have the same length
+    lengths = [len(v) for v in params.values()]
+    assert all(
+        length == lengths[0] for length in lengths
+    ), 'All values must have the same length!'
 
     # Initialize the BOLD signals
     bold_true = simulate_bold_multi(
-        param_dict,
+        params,
         time=time,
         u=u,
         num_rois=NUM_ROIS,
@@ -78,20 +92,22 @@ def calc_comps(param_names, method, param_vals):
     return components
 
 
-initial_values = initialize_parameters(bounds, params_to_set, random=True)
-comps = calc_comps(['w01'], 'PCA', np.array([0.5]))
+# Test the function
+comps = calc_comps('PCA', w01=[0.5, 1.0], w10=[1.0, 0.7])
+print(comps)
 
 # %%
 priors = {
-    'param_vals': uniform(
-        loc=bounds['w01'][0], scale=bounds['w01'][1] - bounds['w01'][0]
-    ),
+    'w01': uniform(loc=bounds['w01'][0], scale=bounds['w01'][1] - bounds['w01'][0]),
+    'w10': uniform(loc=bounds['w10'][0], scale=bounds['w10'][1] - bounds['w10'][0]),
+    'i0': uniform(loc=bounds['i0'][0], scale=bounds['i0'][1] - bounds['i0'][0]),
+    'i1': uniform(loc=bounds['i1'][0], scale=bounds['i1'][1] - bounds['i1'][0]),
 }
 
 tr = change_model.Trainer(
     forward_model=calc_comps,
     priors=priors,
-    kwargs={'method': 'PCA', 'param_names': ['w01']},
+    kwargs={'method': 'PCA'},
     measurement_names=['PC1', 'PC2', 'PC3', 'PC4'],
 )
 mdl = tr.train(n_samples=5000, verbose=True)
