@@ -9,6 +9,8 @@ import numpy as np
 from bench import acquisition, change_model, diffusion_models, model_inversion
 from IPython.display import Markdown, display
 from scipy.stats import uniform
+from seaborn import heatmap
+from sklearn.metrics import confusion_matrix
 
 from dcsem.utils import stim_boxcar
 from utils import initialize_parameters, simulate_bold_multi
@@ -80,7 +82,6 @@ initial_values = initialize_parameters(bounds, params_to_set, random=True)
 comps = calc_comps(['w01'], 'PCA', np.array([0.5]))
 
 # %%
-
 priors = {
     'param_vals': uniform(
         loc=bounds['w01'][0], scale=bounds['w01'][1] - bounds['w01'][0]
@@ -91,9 +92,45 @@ tr = change_model.Trainer(
     forward_model=calc_comps,
     priors=priors,
     kwargs={'method': 'PCA', 'param_names': ['w01']},
-    # param_prior_dists=priors_bench,
-    # summary_names=summary_measures.summary_names(acq, shm_deg),
+    measurement_names=['PC1', 'PC2', 'PC3', 'PC4'],
 )
-mdl = tr.train(n_samples=100, verbose=True)
+mdl = tr.train(n_samples=5000, verbose=True)
+
+# %%
+n_test_samples = 2000
+noise_level = 0.02
+effect_size = 0.1
+n_repeats = 50
+
+true_change, data, data2, sn = tr.generate_test_samples(
+    n_samples=n_test_samples,
+    n_repeats=n_repeats,
+    effect_size=effect_size,
+    noise_std=noise_level,
+)
+
+probs, infered_change_bench, amount, _ = mdl.infer(data, data2 - data, sn)
+print('Accuracy:', np.mean(infered_change_bench == true_change))
+# %%
+conf_mat = confusion_matrix(true_change, infered_change_bench, normalize='true')
+
+fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+heatmap(
+    conf_mat,
+    annot=True,
+    fmt='.2f',
+    # cmap='coolwarm',
+    cbar=False,
+    square=True,
+    xticklabels=mdl.model_names,
+    yticklabels=mdl.model_names,
+    ax=ax,
+)
+ax.set_xlabel('Predicted')
+ax.set_ylabel('True')
+plt.title('BENCH')
+plt.savefig('results/confusion_matrix_bench.png')
+plt.show()
+
 
 # %%
