@@ -124,3 +124,47 @@ ax.set_ylabel('PC2')
 ax.legend()
 plt.show()
 
+# %%
+n_samples = 1000
+param_vals = []
+summs = []
+
+for sample_i in tqdm(range(n_samples)):
+    # Randomly initialize the parameters
+    params = initialize_parameters(bounds, params_to_set, random=True)
+    params = dict(zip(params_to_set, params))
+
+    # Get the summary measures
+    summ = get_summary_measures('PCA', time, u, NUM_ROIS, **params)[0]
+
+    # Store the results
+    param_vals.append(params)
+    summs.append(summ)
+
+# %%
+# Get the first two PCs
+summs = np.array(summs)
+pc1 = summs[:, 0]
+pc2 = summs[:, 1]
+
+fig, axs = plt.subplots(2, 2, figsize=(10, 10))
+axs = axs.ravel()
+
+for i, param in enumerate(params_to_set):
+    # Extract the parameter values
+    param_values = np.array([p[param] for p in param_vals])
+
+    # Scatter plot, coloring by the current parameter
+    scatter = axs[i].scatter(pc1, pc2, c=param_values, cmap='viridis', s=10)
+    axs[i].set_title(f'Color by {param}')
+    axs[i].set_xlabel('PC1')
+    axs[i].set_ylabel('PC2')
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=axs[i])
+    cbar.set_label(f'{param} value')
+
+plt.tight_layout()
+plt.show()
+
+# %%
