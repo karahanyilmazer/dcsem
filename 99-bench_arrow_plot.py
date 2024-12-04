@@ -1,6 +1,8 @@
 # %%
 # !%load_ext autoreload
 # !%autoreload 2
+import re
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -64,19 +66,27 @@ summ_i1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 # ======================================================================================
 # %%
+def add_underscore(param):
+    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
+    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
+    return r"${" + latex_param + r"}$"
+
+
+param_labels = {param: add_underscore(param) for param in params_to_set}
+
 # Plot the BOLD signals
 fig, axs = plt.subplots(2, 1, figsize=(10, 6))
 axs[0].plot(time, bold_base[:, 0], label='Base')
-axs[0].plot(time, bold_w01[:, 0], label='Increased W01')
-axs[0].plot(time, bold_w10[:, 0], label='Increased W10')
-axs[0].plot(time, bold_i0[:, 0], label='Increased I0')
-axs[0].plot(time, bold_i1[:, 0], label='Increased I1')
+axs[0].plot(time, bold_w01[:, 0], label=f'Increased {param_labels["w01"]}')
+axs[0].plot(time, bold_w10[:, 0], label=f'Increased {param_labels["w10"]}')
+axs[0].plot(time, bold_i0[:, 0], label=f'Increased {param_labels["i0"]}')
+axs[0].plot(time, bold_i1[:, 0], label=f'Increased {param_labels["i1"]}')
 
 axs[1].plot(time, bold_base[:, 1], label='Base')
-axs[1].plot(time, bold_w01[:, 1], label='Increased W01')
-axs[1].plot(time, bold_w10[:, 1], label='Increased W10')
-axs[1].plot(time, bold_i0[:, 1], label='Increased I0')
-axs[1].plot(time, bold_i1[:, 1], label='Increased I1')
+axs[1].plot(time, bold_w01[:, 1], label=f'Increased {param_labels["w01"]}')
+axs[1].plot(time, bold_w10[:, 1], label=f'Increased {param_labels["w10"]}')
+axs[1].plot(time, bold_i0[:, 1], label=f'Increased {param_labels["i0"]}')
+axs[1].plot(time, bold_i1[:, 1], label=f'Increased {param_labels["i1"]}')
 
 axs[0].set_title('DCM Simulation')
 axs[0].set_ylabel('BOLD Signal')
@@ -103,26 +113,46 @@ bold_i1_comb = np.r_[bold_i1[:, 0], bold_i1[:, 1]]
 
 fig, axs = plt.subplots(1, figsize=(10, 3))
 axs.plot(bold_base_comb, label='Base')
-axs.plot(bold_w01_comb, label='Increased W01')
-axs.plot(bold_w10_comb, label='Increased W10')
-axs.plot(bold_i0_comb, label='Increased I0')
-axs.plot(bold_i1_comb, label='Increased I1')
+axs.plot(bold_w01_comb, label=f'Increased {param_labels["w01"]}')
+axs.plot(bold_w10_comb, label=f'Increased {param_labels["w10"]}')
+axs.plot(bold_i0_comb, label=f'Increased {param_labels["i0"]}')
+axs.plot(bold_i1_comb, label=f'Increased {param_labels["i1"]}')
 
 plt.legend()
 plt.show()
 
 # %%
-comp1, comp2 = 3, 4
+comp1, comp2 = 1, 2
 arrowprops = {}
 default_arrowprops = dict(arrowstyle='<-', color='black')
 default_arrowprops.update(arrowprops)
 
 fig, ax = plt.subplots(figsize=(5, 5))
 ax.plot(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1], 'o', label='Base')
-ax.plot(summ_w01[0, comp1 - 1], summ_w01[0, comp2 - 1], 'o', label='Increased W01')
-ax.plot(summ_w10[0, comp1 - 1], summ_w10[0, comp2 - 1], 'o', label='Increased W10')
-ax.plot(summ_i0[0, comp1 - 1], summ_i0[0, comp2 - 1], 'o', label='Increased I0')
-ax.plot(summ_i1[0, comp1 - 1], summ_i1[0, comp2 - 1], 'o', label='Increased I1')
+ax.plot(
+    summ_w01[0, comp1 - 1],
+    summ_w01[0, comp2 - 1],
+    'o',
+    label=f'Increased {param_labels["w01"]}',
+)
+ax.plot(
+    summ_w10[0, comp1 - 1],
+    summ_w10[0, comp2 - 1],
+    'o',
+    label=f'Increased {param_labels["w10"]}',
+)
+ax.plot(
+    summ_i0[0, comp1 - 1],
+    summ_i0[0, comp2 - 1],
+    'o',
+    label=f'Increased {param_labels["i0"]}',
+)
+ax.plot(
+    summ_i1[0, comp1 - 1],
+    summ_i1[0, comp2 - 1],
+    'o',
+    label=f'Increased {param_labels["i1"]}',
+)
 
 ax.annotate(
     '',
@@ -175,14 +205,20 @@ for sample_i in tqdm(range(n_samples)):
     # Store the results
     param_vals.append(params)
     summs_pca.append(summ_pca)
-    summs_ica.append(summ_pca)
-
 # %%
-# Get the first two PCs
-summs_pca = np.array(summs_pca)
-pc1 = summs_pca[:, 0]
-pc2 = summs_pca[:, 1]
+method = 'PCA'
+comp_to_plot1, comp_to_plot2 = 1, 2
 
+if method == 'PCA':
+    summs_arr = np.array(summs_pca)
+    labels = [f'PC{comp_to_plot1}', f'PC{comp_to_plot2}']
+elif method == 'ICA':
+    summs_arr = np.array(summs_ica)
+    labels = [f'PC{comp_to_plot1}', f'PC{comp_to_plot2}']
+
+# Get the first two components
+comp1 = summs_arr[:, comp_to_plot1 - 1]
+comp2 = summs_arr[:, comp_to_plot2 - 1]
 
 fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 axs = axs.ravel()
@@ -192,62 +228,36 @@ for i, param in enumerate(params_to_set):
     param_values = np.array([p[param] for p in param_vals])
 
     # Scatter plot, coloring by the current parameter
-    scatter = axs[i].scatter(pc1, pc2, c=param_values, cmap='viridis', s=10)
-    axs[i].set_title(f'Color by {param}')
-    axs[i].set_xlabel('PC1')
-    axs[i].set_ylabel('PC2')
+    scatter = axs[i].scatter(comp1, comp2, c=param_values, s=10)
+    axs[i].set_title(f'Effect of {param_labels[param]}')
+    axs[i].set_xlabel(labels[0])
+    axs[i].set_ylabel(labels[1])
 
     # Add colorbar
     cbar = plt.colorbar(scatter, ax=axs[i])
-    cbar.set_label(f'{param} value')
+    cbar.set_label(f'{param_labels[param]} value')
 
-plt.tight_layout()
-plt.savefig(f'img/change_by_param-pc{comp1}_{comp2}.png')
-plt.show()
-
-# %%
-# Get the first two ICs
-summs_ica = np.array(summs_ica)
-ic1 = summs_ica[:, 0]
-ic2 = summs_ica[:, 1]
-
-fig, axs = plt.subplots(2, 2, figsize=(10, 8))
-axs = axs.ravel()
-
-for i, param in enumerate(params_to_set):
-    # Extract the parameter values
-    param_values = np.array([p[param] for p in param_vals])
-
-    # Scatter plot, coloring by the current parameter
-    scatter = axs[i].scatter(pc1, pc2, c=param_values, s=10)
-    axs[i].set_title(f'{param} Changes')
-    axs[i].set_xlabel('IC1')
-    axs[i].set_ylabel('IC2')
-
-    # Add colorbar
-    cbar = plt.colorbar(scatter, ax=axs[i])
-    # cbar.set_label(f'{param} value')
-
+# Remove unnecessary labels
 axs[0].set_xlabel('')
 axs[1].set_xlabel('')
 axs[1].set_ylabel('')
 axs[3].set_ylabel('')
 
 plt.tight_layout()
-plt.savefig(f'img/change_by_param-ic{comp1}_{comp2}.png')
+plt.savefig(f'img/bench/change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png')
 plt.show()
 
 # %%
-w01_vals = [list(d.values())[0] for d in param_vals]
-w10_vals = [list(d.values())[1] for d in param_vals]
-i0_vals = [list(d.values())[2] for d in param_vals]
-i1_vals = [list(d.values())[3] for d in param_vals]
+method = 'PCA'
+param_to_plot = 'i1'
 
-df = pd.DataFrame(summs_ica, columns=['IC1', 'IC2', 'IC3', 'IC4'])
-df['w01'] = w01_vals
-df['w10'] = w10_vals
-df['i0'] = i0_vals
-df['i1'] = i1_vals
+if method == 'PCA':
+    arr = np.array(summs_pca)
+    columns = ['PC1', 'PC2', 'PC3', 'PC4']
+elif method == 'ICA':
+    arr = np.array(summs_ica)
+    columns = ['IC1', 'IC2', 'IC3', 'IC4']
+
 
 df.head()
 
