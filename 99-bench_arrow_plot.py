@@ -7,12 +7,15 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from bench import acquisition, change_model, diffusion_models, dti
-from bench import plot as bench_plot
+from IPython.display import Markdown, display
+from matplotlib import cm
+from matplotlib.colors import Normalize
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
 from utils import get_summary_measures, initialize_parameters, simulate_bold_multi
+
+plt.rcParams['font.family'] = 'Times New Roman'
 
 # %%
 # ======================================================================================
@@ -33,13 +36,12 @@ bounds = {
     'i1': (0.0, 1.0),
 }
 
-
 # Define the parameters
 params = {}
 params['w01'] = 0.5
 params['w10'] = 0.5
-params['i0'] = 1
-params['i1'] = 0
+params['i0'] = 0.5
+params['i1'] = 0.5
 bold_base = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_base = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
@@ -63,6 +65,7 @@ params['i0'] -= 0.5
 params['i1'] += 0.5
 bold_i1 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_i1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+
 
 # ======================================================================================
 # %%
@@ -187,24 +190,63 @@ plt.savefig(f'img/bench/arrow_plot-pc{comp1}and{comp2}.png')
 plt.show()
 
 # %%
+display(Markdown('## Run the simulation'))
 n_samples = 5000
+change_amount = 0.1
 param_vals = []
-summs_pca = []
 summs_ica = []
+summs_pca = []
+summs_change_ica = {key: [] for key in params_to_set}
+summs_change_pca = {key: [] for key in params_to_set}
+diffs_ica = {key: [] for key in params_to_set}
+diffs_pca = {key: [] for key in params_to_set}
 
 for sample_i in tqdm(range(n_samples)):
-    # Randomly initialize the parameters
-    params = initialize_parameters(bounds, params_to_set, random=True)
-    params = dict(zip(params_to_set, params))
+    # Initialize the parameters
+    param_vals.append(initialize_parameters(bounds, params_to_set, random=True))
 
-    # Get the summary measures
+    # Get the latest sample
+    sample = param_vals[-1]
+
+    # Create a dictionary of unchanged parameters
+    params = dict(zip(params_to_set, sample))
+
+    # Get the summary measures for unchanged parameters
     summ_pca = get_summary_measures('PCA', time, u, NUM_ROIS, **params)[0]
-    summ_ica = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
+    # summ_ica = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
 
-
-    # Store the results
-    param_vals.append(params)
     summs_pca.append(summ_pca)
+    # summs_ica.append(summ_ica)
+
+    for i, param in enumerate(params_to_set):
+        # Get the latest sample again
+        sample = param_vals[-1]
+
+        # Introduce a change in one parameter
+        sample[i] = sample[i] + change_amount
+
+        # Check if the parameter is still within bounds
+        if sample[i] > bounds[param][1]:
+            sample[i] = bounds[param][1]
+
+        # Create a new dictionary for the changed parameters
+        params = dict(zip(params_to_set, sample))
+
+        # Get the summary measures after the change
+        summ_pca_change = get_summary_measures('PCA', time, u, NUM_ROIS, **params)[0]
+        # summ_ica_change = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
+
+        # Calculate the difference between unchanged and changed summary measures
+        summ_pca_diff = summ_pca - summ_pca_change
+        # summ_ica_diff = summ_ica - summ_ica_change
+
+        # Store the results
+        summs_change_pca[param].append(summ_pca_change)
+        diffs_pca[param].append(summ_pca_diff)
+        # summs_change_ica[param].append(summ_ica_change)
+        # diffs_ica[param].append(summ_ica_diff)
+
+
 # %%
 method = 'PCA'
 comp_to_plot1, comp_to_plot2 = 1, 2
@@ -225,7 +267,7 @@ axs = axs.ravel()
 
 for i, param in enumerate(params_to_set):
     # Extract the parameter values
-    param_values = np.array([p[param] for p in param_vals])
+    param_values = np.array([p[i] for p in param_vals])
 
     # Scatter plot, coloring by the current parameter
     scatter = axs[i].scatter(comp1, comp2, c=param_values, s=10)
@@ -258,18 +300,80 @@ elif method == 'ICA':
     arr = np.array(summs_ica)
     columns = ['IC1', 'IC2', 'IC3', 'IC4']
 
+df = pd.DataFrame(arr, columns=columns)
+df['w01'] = [val[0] for val in param_vals]
+df['w10'] = [val[1] for val in param_vals]
+df['i0'] = [val[2] for val in param_vals]
+df['i1'] = [val[3] for val in param_vals]
 
 df.head()
 
-# %%
-sns.pairplot(
-    df,
-    hue='w01',
+# Normalize the param values for continuous coloring
+norm = Normalize(vmin=df[param_to_plot].min(), vmax=df[param_to_plot].max())
+sm = cm.ScalarMappable(cmap='viridis', norm=norm)
+
+# Map normalized colors for the scatter plot
+g = sns.PairGrid(df, vars=columns)
+g.map_diag(sns.histplot, color='black', alpha=0.5)
+g.map_offdiag(
+    sns.scatterplot,
+    hue=df[param_to_plot],
     palette='viridis',
-    vars=['IC1', 'IC2', 'IC3', 'IC4'],
-    diag_kind='kde',  # hist
-    diag_kws=dict(hue=None, color='black', alpha=0.5),
+    edgecolor=None,
+    s=15,
 )
+
+# Add a colorbar for the continuous colormap
+g.figure.suptitle(
+    f'Effect of {param_labels[param_to_plot]} on {method} Summary Measures', y=1
+)
+g.figure.subplots_adjust(top=0.95)
+
+cbar = g.figure.colorbar(
+    sm, ax=g.axes, location='bottom', shrink=0.8, aspect=50, pad=0.08
+)
+cbar.set_label(f'{param_labels[param_to_plot]} Value')
+
+plt.savefig(f'img/bench/change_by_param_{param_to_plot}-{method}_pairplot.png')
+plt.show()
+
+# %%
+method = 'PCA'
+
+if method == 'PCA':
+    data = summs_change_pca
+    columns = ['PC1', 'PC2', 'PC3', 'PC4']
+elif method == 'ICA':
+    data = summs_change_ica
+    columns = ['IC1', 'IC2', 'IC3', 'IC4']
+
+dfs = []
+for param, values in data.items():
+    df = pd.DataFrame(values, columns=columns)
+    df['Parameter'] = param_labels[param]  # Add a column for parameter type
+    dfs.append(df)
+
+# Combine all DataFrames into one
+combined_df = pd.concat(dfs, ignore_index=True)
+combined_df.head()
+
+# Create a PairGrid
+g = sns.PairGrid(
+    combined_df,
+    hue='Parameter',
+    vars=columns,
+    palette='muted',
+)
+
+# Map plots
+g.map_diag(sns.histplot, alpha=0.5)
+g.map_offdiag(sns.scatterplot, edgecolor=None, s=10)
+
+# Add legend and title
+g.add_legend()
+g.figure.suptitle(f'Effect of Parameter Changes on {method} Summary Measures', y=1.02)
+
+plt.savefig(f'img/bench/bench_param_change-{method}_pairplot.png')
 plt.show()
 
 # %%
