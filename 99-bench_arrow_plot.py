@@ -3,6 +3,8 @@
 # !%autoreload 2
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import seaborn as sns
 from bench import acquisition, change_model, diffusion_models, dti
 from bench import plot as bench_plot
 from tqdm import tqdm
@@ -235,6 +237,29 @@ plt.tight_layout()
 plt.savefig(f'img/change_by_param-ic{comp1}_{comp2}.png')
 plt.show()
 
+# %%
+w01_vals = [list(d.values())[0] for d in param_vals]
+w10_vals = [list(d.values())[1] for d in param_vals]
+i0_vals = [list(d.values())[2] for d in param_vals]
+i1_vals = [list(d.values())[3] for d in param_vals]
+
+df = pd.DataFrame(summs_ica, columns=['IC1', 'IC2', 'IC3', 'IC4'])
+df['w01'] = w01_vals
+df['w10'] = w10_vals
+df['i0'] = i0_vals
+df['i1'] = i1_vals
+
+df.head()
+
+# %%
+sns.pairplot(
+    df,
+    hue='w01',
+    palette='viridis',
+    vars=['IC1', 'IC2', 'IC3', 'IC4'],
+    diag_kind='kde',  # hist
+    diag_kws=dict(hue=None, color='black', alpha=0.5),
+)
 plt.show()
 
 # %%
