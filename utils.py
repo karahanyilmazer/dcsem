@@ -1,3 +1,5 @@
+import pickle
+
 import numpy as np
 
 from dcsem.models import DCM
@@ -143,3 +145,56 @@ def initialize_parameters(bounds, params_to_sim, random=False):
             initial_values.append(np.mean(bounds[param]))
 
     return initial_values
+
+
+def get_summary_measures(method, time, u, num_rois, **kwargs):
+    # Define the allowed parameters
+    allowed_keys = ['w01', 'w10', 'i0', 'i1']
+
+    # Find invalid keys
+    invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
+
+    # Assert that all keys are allowed
+    assert (
+        not invalid_keys
+    ), f'Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}.'
+    # Filter all arguments that are not None
+    params = {}
+    for key, val in kwargs.items():
+        if key == 'method':
+            continue
+        if val is not None:
+            # Convert the values to a numpy array
+            if not isinstance(val, (list, np.ndarray)):
+                val = [val]
+            if not isinstance(val, np.ndarray):
+                val = np.array(val)
+
+            params[key] = val
+
+    # Assert that all values have the same length
+    lengths = [len(v) for v in params.values()]
+    assert all(
+        length == lengths[0] for length in lengths
+    ), 'All values must have the same length!'
+
+    # Initialize the BOLD signals
+    bold_true = simulate_bold_multi(
+        params,
+        time=time,
+        u=u,
+        num_rois=num_rois,
+    )
+    bold_obsv = bold_true
+
+    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
+    tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
+
+    if method == 'PCA':
+        pca = pickle.load(open('models/pca.pkl', 'rb'))
+        components = pca.transform(tmp_bold_c)
+    elif method == 'ICA':
+        ica = pickle.load(open('models/ica.pkl', 'rb'))
+        components = ica.transform(tmp_bold_c)
+
+    return components
