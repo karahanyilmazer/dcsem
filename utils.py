@@ -26,30 +26,6 @@ def get_one_layer_C(i0=1, i1=0):
 
 
 def simulate_bold(params, num_rois, time, u):
-    # Define input arguments for defining A and C matrices
-    A_param_names = ['w01', 'w10', 'self_connections']
-    C_param_names = ['i0', 'i1']
-
-    # Extract relevant parameters for A and C matrices from params
-    A_kwargs = {k: params[k] for k in A_param_names if k in params}
-    C_kwargs = {k: params[k] for k in C_param_names if k in params}
-
-    # Create A and C matrices using extracted parameters
-    A = get_one_layer_A(**A_kwargs)
-    C = get_one_layer_C(**C_kwargs)
-
-    dcm = DCM(
-        num_rois,
-        params={
-            'A': A,
-            'C': C,
-            **params,
-        },
-    )
-    return dcm.simulate(time, u)[0]
-
-
-def simulate_bold_multi(params, num_rois, time, u):
     """
     Simulate BOLD signals for the given parameters.
 
@@ -179,7 +155,7 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     ), 'All values must have the same length!'
 
     # Initialize the BOLD signals
-    bold_true = simulate_bold_multi(
+    bold_true = simulate_bold(
         params,
         time=time,
         u=u,
