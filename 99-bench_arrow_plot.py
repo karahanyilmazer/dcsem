@@ -50,6 +50,16 @@ params['w10'] += 0.5
 bold_w10 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_w10 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
+params['w10'] -= 0.5
+params['i0'] += 0.5
+bold_i0 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_i0 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+
+params['i0'] -= 0.5
+params['i1'] += 0.5
+bold_i1 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_i1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+
 # ======================================================================================
 # %%
 # Plot the BOLD signals
@@ -57,10 +67,14 @@ fig, axs = plt.subplots(2, 1, figsize=(10, 6))
 axs[0].plot(time, bold_base[:, 0], label='Base')
 axs[0].plot(time, bold_w01[:, 0], label='Increased W01')
 axs[0].plot(time, bold_w10[:, 0], label='Increased W10')
+axs[0].plot(time, bold_i0[:, 0], label='Increased I0')
+axs[0].plot(time, bold_i1[:, 0], label='Increased I1')
 
 axs[1].plot(time, bold_base[:, 1], label='Base')
 axs[1].plot(time, bold_w01[:, 1], label='Increased W01')
 axs[1].plot(time, bold_w10[:, 1], label='Increased W10')
+axs[1].plot(time, bold_i0[:, 1], label='Increased I0')
+axs[1].plot(time, bold_i1[:, 1], label='Increased I1')
 
 axs[0].set_title('DCM Simulation')
 axs[0].set_ylabel('BOLD Signal')
@@ -70,10 +84,10 @@ axs[1].set_ylabel('BOLD Signal')
 axs[1].legend()
 
 tmp = axs[0].twinx()
-tmp.set_ylabel('Layer 1', rotation=0, labelpad=25)
+tmp.set_ylabel('ROI 1', rotation=0, labelpad=25)
 tmp.set_yticks([])
 tmp = axs[1].twinx()
-tmp.set_ylabel('Layer 2', rotation=0, labelpad=25)
+tmp.set_ylabel('ROI 2', rotation=0, labelpad=25)
 tmp.set_yticks([])
 
 plt.show()
@@ -82,11 +96,15 @@ plt.show()
 bold_base_comb = np.r_[bold_base[:, 0], bold_base[:, 1]]
 bold_w01_comb = np.r_[bold_w01[:, 0], bold_w01[:, 1]]
 bold_w10_comb = np.r_[bold_w10[:, 0], bold_w10[:, 1]]
+bold_i0_comb = np.r_[bold_i0[:, 0], bold_i0[:, 1]]
+bold_i1_comb = np.r_[bold_i1[:, 0], bold_i1[:, 1]]
 
 fig, axs = plt.subplots(1, figsize=(10, 3))
 axs.plot(bold_base_comb, label='Base')
 axs.plot(bold_w01_comb, label='Increased W01')
 axs.plot(bold_w10_comb, label='Increased W10')
+axs.plot(bold_i0_comb, label='Increased I0')
+axs.plot(bold_i1_comb, label='Increased I1')
 
 plt.legend()
 plt.show()
