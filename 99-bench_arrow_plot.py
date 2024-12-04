@@ -92,42 +92,55 @@ plt.legend()
 plt.show()
 
 # %%
+comp1, comp2 = 3, 4
 arrowprops = {}
 default_arrowprops = dict(arrowstyle='<-', color='black')
 default_arrowprops.update(arrowprops)
-names = ['Base', 'Alpha', 'Gamma']
-max_name_length = max([len(name) for name in names])
-offset_x = np.maximum(0.01 * max_name_length, 0.005)
-offset_y = 0.1
-offset = 0.005
 
 fig, ax = plt.subplots(figsize=(5, 5))
-ax.plot(summ_base[0, 0], summ_base[0, 1], 'o', label='Base')
-ax.plot(summ_w01[0, 0], summ_w01[0, 1], 'o', label='Increased W01')
-ax.plot(summ_w10[0, 0], summ_w10[0, 1], 'o', label='Increased W10')
+ax.plot(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1], 'o', label='Base')
+ax.plot(summ_w01[0, comp1 - 1], summ_w01[0, comp2 - 1], 'o', label='Increased W01')
+ax.plot(summ_w10[0, comp1 - 1], summ_w10[0, comp2 - 1], 'o', label='Increased W10')
+ax.plot(summ_i0[0, comp1 - 1], summ_i0[0, comp2 - 1], 'o', label='Increased I0')
+ax.plot(summ_i1[0, comp1 - 1], summ_i1[0, comp2 - 1], 'o', label='Increased I1')
 
 ax.annotate(
     '',
-    xy=(summ_base[0, 0], summ_base[0, 1]),
-    xytext=(summ_w01[0, 0], summ_w01[0, 1]),
+    xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
+    xytext=(summ_w01[0, comp1 - 1], summ_w01[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 ax.annotate(
     '',
-    xy=(summ_base[0, 0], summ_base[0, 1]),
-    xytext=(summ_w10[0, 0], summ_w10[0, 1]),
+    xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
+    xytext=(summ_w10[0, comp1 - 1], summ_w10[0, comp2 - 1]),
+    arrowprops=default_arrowprops,
+)
+ax.annotate(
+    '',
+    xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
+    xytext=(summ_i0[0, comp1 - 1], summ_i0[0, comp2 - 1]),
+    arrowprops=default_arrowprops,
+)
+ax.annotate(
+    '',
+    xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
+    xytext=(summ_i1[0, comp1 - 1], summ_i1[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 
-ax.set_xlabel('PC1')
-ax.set_ylabel('PC2')
+ax.set_title('BENCH Arrow Plot')
+ax.set_xlabel(f'PC{comp1}')
+ax.set_ylabel(f'PC{comp2}')
 ax.legend()
+plt.savefig(f'img/bench/arrow_plot-pc{comp1}and{comp2}.png')
 plt.show()
 
 # %%
-n_samples = 1000
+n_samples = 5000
 param_vals = []
-summs = []
+summs_pca = []
+summs_ica = []
 
 for sample_i in tqdm(range(n_samples)):
     # Randomly initialize the parameters
@@ -135,17 +148,21 @@ for sample_i in tqdm(range(n_samples)):
     params = dict(zip(params_to_set, params))
 
     # Get the summary measures
-    summ = get_summary_measures('PCA', time, u, NUM_ROIS, **params)[0]
+    summ_pca = get_summary_measures('PCA', time, u, NUM_ROIS, **params)[0]
+    summ_ica = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
+
 
     # Store the results
     param_vals.append(params)
-    summs.append(summ)
+    summs_pca.append(summ_pca)
+    summs_ica.append(summ_pca)
 
 # %%
 # Get the first two PCs
-summs = np.array(summs)
-pc1 = summs[:, 0]
-pc2 = summs[:, 1]
+summs_pca = np.array(summs_pca)
+pc1 = summs_pca[:, 0]
+pc2 = summs_pca[:, 1]
+
 
 fig, axs = plt.subplots(2, 2, figsize=(10, 10))
 axs = axs.ravel()
@@ -165,6 +182,41 @@ for i, param in enumerate(params_to_set):
     cbar.set_label(f'{param} value')
 
 plt.tight_layout()
+plt.savefig(f'img/change_by_param-pc{comp1}_{comp2}.png')
+plt.show()
+
+# %%
+# Get the first two ICs
+summs_ica = np.array(summs_ica)
+ic1 = summs_ica[:, 0]
+ic2 = summs_ica[:, 1]
+
+fig, axs = plt.subplots(2, 2, figsize=(10, 8))
+axs = axs.ravel()
+
+for i, param in enumerate(params_to_set):
+    # Extract the parameter values
+    param_values = np.array([p[param] for p in param_vals])
+
+    # Scatter plot, coloring by the current parameter
+    scatter = axs[i].scatter(pc1, pc2, c=param_values, s=10)
+    axs[i].set_title(f'{param} Changes')
+    axs[i].set_xlabel('IC1')
+    axs[i].set_ylabel('IC2')
+
+    # Add colorbar
+    cbar = plt.colorbar(scatter, ax=axs[i])
+    # cbar.set_label(f'{param} value')
+
+axs[0].set_xlabel('')
+axs[1].set_xlabel('')
+axs[1].set_ylabel('')
+axs[3].set_ylabel('')
+
+plt.tight_layout()
+plt.savefig(f'img/change_by_param-ic{comp1}_{comp2}.png')
+plt.show()
+
 plt.show()
 
 # %%
