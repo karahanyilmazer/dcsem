@@ -13,7 +13,7 @@ from matplotlib.colors import Normalize
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import get_summary_measures, initialize_parameters, simulate_bold_multi
+from utils import get_summary_measures, initialize_parameters, simulate_bold
 
 plt.rcParams['font.family'] = 'Times New Roman'
 
@@ -41,29 +41,29 @@ params = {}
 params['w01'] = 0.5
 params['w10'] = 0.5
 params['i0'] = 0.5
-params['i1'] = 0.5
-bold_base = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+params['i1'] = 0
+bold_base = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_base = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 # Increase alpha
 params['w01'] += 0.5
-bold_w01 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+bold_w01 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_w01 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 # Increase gamma
 params['w01'] -= 0.5
 params['w10'] += 0.5
-bold_w10 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+bold_w10 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_w10 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 params['w10'] -= 0.5
 params['i0'] += 0.5
-bold_i0 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+bold_i0 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_i0 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 params['i0'] -= 0.5
 params['i1'] += 0.5
-bold_i1 = simulate_bold_multi(params, time=time, u=u, num_rois=NUM_ROIS)
+bold_i1 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_i1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 
