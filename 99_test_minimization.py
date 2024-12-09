@@ -5,17 +5,13 @@ import numpy as np
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 
+from utils import add_noise
+
+
 
 # %%
 def f(x, a, b):
     return a / (1 + np.exp(-b * x))
-
-
-def add_noise(signal, snr_db):
-    snr_linear = 10 ** (snr_db / 10)
-    noise = np.random.normal(0, 1, len(signal))
-    noise = noise * np.std(signal) / snr_linear
-    return signal + noise
 
 
 def loss(params):
