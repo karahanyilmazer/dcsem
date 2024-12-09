@@ -13,9 +13,9 @@ from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
 from dcsem.utils import stim_boxcar
-from utils import simulate_bold
+from utils import set_style, simulate_bold
 
-plt.rcParams['font.family'] = 'Times New Roman'
+set_style()
 
 
 # %%

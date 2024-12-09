@@ -17,11 +17,11 @@ from utils import (
     add_underscore,
     filter_params,
     initialize_parameters,
+    set_style,
     simulate_bold,
 )
 
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
+set_style()
 
 
 # %%

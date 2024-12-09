@@ -6,17 +6,13 @@ import numpy as np
 from matplotlib.colors import to_rgba
 
 from dcsem.utils import stim_boxcar
-from utils import simulate_bold
+from utils import add_underscore, set_style, simulate_bold
 
-plt.rcParams['font.family'] = 'Times New Roman'
-
-
-def add_underscore(param):
-    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
-    return r"${" + latex_param + r"}$"
+set_style()
+plt.rcParams['legend.frameon'] = True
 
 
+# %%
 # Function to lighten colors progressively
 def lighten_color(color, factor):
     white = np.array([1, 1, 1, 1])  # RGBA for white
@@ -108,6 +104,6 @@ if __name__ == '__main__':
         for param, values in params.items()
     }
 
-    plot_param_change((13, 9), save=True)
+    plot_param_change((13, 12), save=True)
 
 # %%

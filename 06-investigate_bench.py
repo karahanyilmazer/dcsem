@@ -13,9 +13,9 @@ from matplotlib.colors import Normalize
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import get_summary_measures, initialize_parameters, simulate_bold
+from utils import get_summary_measures, initialize_parameters, set_style, simulate_bold
 
-plt.rcParams['font.family'] = 'Times New Roman'
+set_style()
 
 # %%
 # ======================================================================================

@@ -12,11 +12,9 @@ from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, simulate_bold
+from utils import initialize_parameters, set_style, simulate_bold
 
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 14
+set_style()
 
 # %%
 # ======================================================================================

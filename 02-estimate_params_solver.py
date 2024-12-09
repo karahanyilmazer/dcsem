@@ -10,19 +10,18 @@ from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 from tqdm import tqdm
+
+from dcsem.utils import stim_boxcar
 from utils import (
     add_noise,
     add_underscore,
     filter_params,
     initialize_parameters,
+    set_style,
     simulate_bold,
 )
 
-from dcsem.utils import stim_boxcar
-
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 14
+set_style()
 
 
 # %%
