@@ -8,8 +8,6 @@ from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 from tqdm import tqdm
-
-from dcsem.utils import stim_boxcar
 from utils import (
     add_noise,
     add_underscore,
@@ -18,8 +16,11 @@ from utils import (
     simulate_bold,
 )
 
+from dcsem.utils import stim_boxcar
+
 plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['font.size'] = 14
 
 
 # %%
@@ -82,25 +83,7 @@ def estimate_parameters(
 
     std = np.sqrt(np.diag(cov_mat))
 
-    n = len(cov_mat)
-
-    if n > 1:
-        # Initialize lists to accumulate data
-        pairs = []
-        values = []
-
-        # Extract upper half elements and their indices
-        upper_half_mask = np.triu(np.ones((n, n), dtype=bool), k=1)
-        upper_half_elements = cov_mat[upper_half_mask]
-        row_indices, col_indices = np.where(upper_half_mask)
-
-        # Store pairs and values
-        for value, row, col in zip(upper_half_elements, row_indices, col_indices):
-            pair_label = fr'{add_underscore(param_names[row])} $\leftrightarrow$ {add_underscore(param_names[col])}'
-            pairs.append(pair_label)
-            values.append(value)
-
-    return estimated_params, hessian, cov_mat, std, pairs, values
+    return estimated_params, hessian, cov_mat, std
 
 
 def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
@@ -166,7 +149,7 @@ def run_simulation(
         bounds = [(bounds[param]) for param in params_to_est]
 
     # Estimate parameters
-    est_params, hessian, covariance, std, pairs, values = estimate_parameters(
+    est_params, hessian, covariance, std = estimate_parameters(
         initial_values,
         params_to_est,
         bounds,
@@ -182,10 +165,9 @@ def run_simulation(
     est_vals = np.array(list(est_params.values()))
     err = true_vals - est_vals
 
-    # Simulate data using estimated parameters
-    bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=num_rois)
-
     if plot:
+        # Simulate data using estimated parameters
+        bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=num_rois)
         # Plot results
         plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
@@ -210,7 +192,7 @@ def run_simulation(
         print('\nStandard deviations of the estimated parameters:')
         print(std, '\n\n')
 
-    return hessian, covariance, std, err, pairs, values
+    return hessian, covariance, std, err
 
 
 # %%
@@ -240,12 +222,9 @@ if __name__ == '__main__':
     for r in range(1, len(params_to_est) + 1):
         combinations_r = combinations(params_to_est, r)
         all_combinations.extend(combinations_r)
-
     # Convert each combination to a list (optional)
     all_combinations = [list(comb) for comb in all_combinations]
-
-    # Remove single parameter combinations
-    all_combinations = [comb for comb in all_combinations if len(comb) > 1]
+    # all_combinations = [['a01']]
 
     # Ground truth parameter values
     true_params = {
@@ -265,11 +244,8 @@ if __name__ == '__main__':
     }
     bounds = filter_params(bounds, params_to_est)
 
-    random = True
-
     # Signal-to-noise ratio
-    n_sims = 3 if random else 1
-    n_snrs = 20
+    n_sims, n_snrs = 1, 20
     min_snr, max_snr = 0.1, 50
     snr_range = np.logspace(np.log10(min_snr), np.log10(max_snr), n_snrs)
     snr_range = np.linspace(min_snr, max_snr, n_snrs)
@@ -277,18 +253,13 @@ if __name__ == '__main__':
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
-    pair_list = []
-    all_vals = []
-
     for comb in all_combinations:
         tmp_init = np.zeros((n_sims, len(comb)))
         tmp_stds = np.zeros((n_sims, len(comb)))
         tmp_errs = np.zeros((n_sims, len(comb)))
-        tmp_vals = []
         init_list = []
         stds_list = []
         errs_list = []
-        vals_list = []
 
         # Run the simulation and estimation
         for snr_db in tqdm(snr_range):
@@ -297,9 +268,9 @@ if __name__ == '__main__':
             while not non_nan_found:
                 for sim_i in range(n_sims):
                     # Random initialization of the parameters
-                    initial_values = initialize_parameters(bounds, comb, random=random)
+                    initial_values = initialize_parameters(bounds, comb, random=False)
 
-                    hess, cov, std, err, pairs, vals = run_simulation(
+                    hess, cov, std, err = run_simulation(
                         true_params=true_params,
                         initial_values=initial_values,
                         params_to_est=comb,
@@ -314,7 +285,6 @@ if __name__ == '__main__':
                     tmp_init[sim_i, :] = initial_values
                     tmp_stds[sim_i, :] = std
                     tmp_errs[sim_i, :] = err
-                    tmp_vals.append(vals)
 
                 # Check if all simulations resulted in NaN
                 if (np.isnan(tmp_stds).all()) or (
@@ -333,20 +303,14 @@ if __name__ == '__main__':
             init_list.append(tmp_init[best_run_idx])
             stds_list.append(tmp_stds[best_run_idx])
             errs_list.append(tmp_errs[best_run_idx])
-            vals_list.append(tmp_vals[best_run_idx])
 
             tmp_init = np.zeros((n_sims, len(comb)))
             tmp_stds = np.zeros((n_sims, len(comb)))
             tmp_errs = np.zeros((n_sims, len(comb)))
-            tmp_vals = []
-
-        all_vals.append(vals_list)
-        pair_list.append(pairs)
 
         # Plot the results
         stds_arr = np.array(stds_list)
         errs_arr = np.array(errs_list)
-        vals_arr = np.array(vals_list)
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
         axs[0].axhline(0, color='k', ls='--')
@@ -378,29 +342,13 @@ if __name__ == '__main__':
 
         tmp_names = comb.copy()
         tmp_names.sort()
+
         fig.suptitle(
             f'Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})'
         )
         plt.tight_layout()
-        plt.savefig(
-            f'img/presentation/estimation/random-{random}/on_diag-{'_'.join(tmp_names)}.png'
-        )
+        plt.savefig(f'img/presentation/estimation/{'_'.join(tmp_names)}_estimation.png')
         plt.show()
 
-    for val, pairs, comb in zip(all_vals, pair_list, all_combinations):
-        tmp_val = np.array(val)
-        tmp_names = comb.copy()
-        tmp_names.sort()
-        plt.figure(figsize=(6, 4))
-        plt.xlabel('Signal-to-Noise Ratio (dB)')
-        plt.ylabel('Covariance')
-        plt.title('Off Diagonal Covariance')
-        for i, curr_off in enumerate(tmp_val.T):
-            plt.plot(curr_off, label=pairs[i])
-            plt.legend()
-        plt.savefig(
-            f'img/presentation/estimation/random-{random}/off_diag-{'_'.join(tmp_names)}.png'
-        )
-        plt.show()
 
 # %%
