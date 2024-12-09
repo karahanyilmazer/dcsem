@@ -1,4 +1,6 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 from itertools import combinations
 
 import matplotlib.pyplot as plt

@@ -1,5 +1,7 @@
 # %%
-#!%matplotlib inline
+# !%load_ext autoreload
+# !%autoreload 2
+# !%matplotlib inline
 import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
