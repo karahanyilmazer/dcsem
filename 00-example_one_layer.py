@@ -6,8 +6,10 @@ from dcsem import models, utils
 
 # %%
 # Input
-time = np.arange(100)  # Time vector (seconds)
-u = utils.stim_boxcar([[0, 10, 1]])  # Stimulus function (onset, duration, amplitude)
+time = np.arange(200)  # Time vector (seconds)
+# Stimulus function (onset, duration, amplitude)
+# u = utils.stim_boxcar([[0, 10, 1]])
+u = utils.stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Connectivity parameters
 num_rois = 2
@@ -28,6 +30,11 @@ dcm = models.DCM(num_rois, params={'A': A, 'C': C})
 
 # Run simulation to get BOLD signal
 bold, state_tc = dcm.simulate(time, u)
+
+# Normalize the BOLD signal
+norm = False
+if norm:
+    bold = bold / np.max(bold, axis=0)
 
 fig, axs = plt.subplots(2, 1)
 axs[0].plot(time, u(time), label='Stimulus')
