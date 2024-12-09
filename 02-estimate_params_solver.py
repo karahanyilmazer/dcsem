@@ -1,4 +1,6 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 from itertools import combinations
 
 import matplotlib.pyplot as plt
@@ -8,19 +10,19 @@ from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 from tqdm import tqdm
+
+from dcsem.utils import stim_boxcar
 from utils import (
     add_noise,
     add_underscore,
     filter_params,
+    get_param_colors,
     initialize_parameters,
+    set_style,
     simulate_bold,
 )
 
-from dcsem.utils import stim_boxcar
-
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 14
+set_style()
 
 
 # %%
@@ -210,8 +212,7 @@ if __name__ == '__main__':
     num_layers = 1
 
     # Set the colors for each parameter
-    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color'][:4]
-    param_colors = dict(zip(['a01', 'a10', 'c0', 'c1'], color_cycle))
+    param_colors = get_param_colors()
 
     # Parameters to use in the simulation and estimation
     params_to_set = ['a01', 'a10', 'c0', 'c1']

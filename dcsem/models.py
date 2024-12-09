@@ -156,7 +156,8 @@ class BaseModel(object):
                 self.p.C = np.array(table[param], dtype=np.float64)
                 self.Cnz = np.nonzero(self.p.C)
             else:
-                self.p[param] = table[param]
+                if param in self.p:
+                    self.p[param] = table[param]
 
     def get_params(self):
         return self.p

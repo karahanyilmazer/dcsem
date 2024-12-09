@@ -1,21 +1,21 @@
 # %%
-#!%matplotlib inline
+# !%load_ext autoreload
+# !%autoreload 2
+# !%matplotlib inline
 import matplotlib.pyplot as plt
 import numpy as np
+import scienceplots
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
+
+from utils import add_noise, set_style
+
+set_style()
 
 
 # %%
 def f(x, a, b):
     return a / (1 + np.exp(-b * x))
-
-
-def add_noise(signal, snr_db):
-    snr_linear = 10 ** (snr_db / 10)
-    noise = np.random.normal(0, 1, len(signal))
-    noise = noise * np.std(signal) / snr_linear
-    return signal + noise
 
 
 def loss(params):
@@ -121,7 +121,7 @@ def plot_snr_to_std(snr_vals, std_vals, true_vals, ax=None):
         # std_inf = np.sqrt(np.diag(hess)) / 2
         pass
     ax.plot(snr_vals, std_vals, '-o')
-    ax.set_title('Standard Deviation over SNR')
+    # ax.set_title('Standard Deviation over SNR')
     ax.set_xlabel('SNR')
     ax.set_ylabel('Standard Deviation')
     ax.legend()
@@ -150,7 +150,7 @@ def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=N
                 alpha=0.2,
             )
 
-    ax.set_title('Estimation Error over SNR')
+    # ax.set_title('Estimation Error over SNR')
     ax.set_xlabel('SNR')
     ax.set_ylabel('Estimation Error')
     ax.legend()
@@ -160,10 +160,12 @@ def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=N
 
 
 def plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history):
-    _, axs = plt.subplots(1, 2, figsize=(12, 5))
+    fig, axs = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle('Parameter Estimation')
     plot_snr_to_std(snr_vals, std_vals, true_vals, ax=axs[0])
     plot_snr_to_err(snr_vals, est_params_history, std_vals, true_vals, ax=axs[1])
     plt.tight_layout()
+    plt.savefig('img/presentation/min_test.png')
     plt.show()
 
 
@@ -171,7 +173,7 @@ def plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history):
 plt.close('all')
 n_samples = 100
 n_simulations = 20
-min_snr, max_snr = 0.0001, 30
+min_snr, max_snr = 0.01, 30
 snr_vals = np.logspace(np.log10(min_snr), np.log10(max_snr), n_simulations)
 snr_vals = np.linspace(min_snr, max_snr, n_simulations)
 std_vals = []

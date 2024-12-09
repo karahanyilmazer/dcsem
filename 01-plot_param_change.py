@@ -1,42 +1,18 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_rgba
-from tqdm import tqdm
 
-from dcsem import models, utils
+from dcsem.utils import stim_boxcar
+from utils import add_underscore, get_param_colors, set_style, simulate_bold
 
-plt.rcParams['font.family'] = 'Times New Roman'
-
-
-def get_one_layer_A(L0=0.2):
-    connections = [f'R0, L0 -> R1, L0 = {L0}']  # ROI0 -> ROI1 connection
-    return utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+set_style()
+plt.rcParams['legend.frameon'] = True
 
 
-def get_one_layer_C(L0=1):
-    connections = [f'R0, L0 = {L0}']  # Input --> ROI0 connection
-    return utils.create_C_matrix(num_rois, num_layers, connections)
-
-
-# Function to run simulations for different parameter types
-def simulate_dcm(param_name, param_values):
-    bold_signals = []
-    for value in tqdm(param_values, desc=f"Simulating for {param_name}"):
-        if param_name == 'A_L0':
-            A = get_one_layer_A(value)
-            C = get_one_layer_C()
-        elif param_name == 'C_L0':
-            A = get_one_layer_A()
-            C = get_one_layer_C(value)
-        else:
-            A = get_one_layer_A()
-            C = get_one_layer_C()
-        dcm = models.DCM(num_rois, params={'A': A, 'C': C, param_name: value})
-        bold_signals.append(dcm.simulate(time, u)[0])
-    return bold_signals
-
-
+# %%
 # Function to lighten colors progressively
 def lighten_color(color, factor):
     white = np.array([1, 1, 1, 1])  # RGBA for white
@@ -47,16 +23,21 @@ def lighten_color(color, factor):
 def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     for i, (bold, value) in enumerate(zip(bold_tcs, param_values)):
         # Lighter color for each successive line
-        light_color = lighten_color(base_color, 0.8 * (i / len(param_values)))
-        axs[row, 0].plot(time, bold[:, 0], label=f'{value:.2f}', color=light_color)
-        axs[row, 1].plot(time, bold[:, 1], label=f'{value:.2f}', color=light_color)
+        light_color = lighten_color(base_color, 0.9 * (i / len(param_values)))
+        axs[row, 0].plot(
+            time, bold[:, 0], label=f'{value:.2f}', lw=1.5, color=light_color
+        )
+        axs[row, 1].plot(
+            time, bold[:, 1], label=f'{value:.2f}', lw=1.5, color=light_color
+        )
 
     # Define the title of the legend
     if param_name in ['alpha', 'gamma', 'kappa']:
         title = fr'$\{param_name}$'
     else:
-        title = param_name.split('_')
-        title = fr'${title[0]}_{{{title[1]}}}$'
+        # title = param_name.split('_')
+        # title = fr'${title[0]}_{{{title[1]}}}$'
+        title = add_underscore(param_name)
 
     # Create legend and place it outside the plot to the right
     legend = axs[row, 1].legend(
@@ -77,11 +58,11 @@ def plot_param_change(figsize=(10, 12), save=False):
     _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
 
     # Get the default color cycle (tab10 colormap has 10 distinct colors)
-    cmap = plt.get_cmap('tab10')
+    param_colors = get_param_colors()
 
     # Plot for each parameter with the corresponding color from the cycle
     for i, (param, values) in enumerate(params.items()):
-        base_color = cmap(i)  # Get the base color from the colormap
+        base_color = param_colors[param]  # Get the color for the parameter
         plot_bold(axs, bold_tcs[param], param, values, i, base_color)
 
     # Set titles and labels
@@ -94,7 +75,7 @@ def plot_param_change(figsize=(10, 12), save=False):
 
     plt.tight_layout(rect=[0, 0, 0.95, 1])
     if save:
-        plt.savefig('img/param_change.png', dpi=600)
+        plt.savefig('img/presentation/param_change.png', dpi=600)
     plt.show()
 
 
@@ -102,9 +83,8 @@ def plot_param_change(figsize=(10, 12), save=False):
 if __name__ == '__main__':
     # Input
     time = np.arange(100)  # Time vector (seconds)
-    u = utils.stim_boxcar(
-        [[0, 30, 1]]
-    )  # Stimulus function (onset, duration, amplitude)
+    # Stimulus function (onset, duration, amplitude)
+    u = stim_boxcar([[0, 30, 1]])
 
     # Connectivity parameters
     num_rois = 2
@@ -112,16 +92,18 @@ if __name__ == '__main__':
 
     # Parameters to vary
     params = {
-        'kappa': np.linspace(1, 2, 9),
-        'gamma': np.linspace(0, 1, 9),
-        'alpha': np.linspace(0.2, 1, 9),
-        'A_L0': np.linspace(0, 1, 9),
-        'C_L0': np.linspace(0, 1, 9),
+        'a01': np.linspace(0, 1, 9),
+        'a10': np.linspace(0, 1, 9),
+        'c0': np.linspace(0, 1, 9),
+        'c1': np.linspace(0, 1, 9),
     }
 
     # Run simulations for each parameter set
-    bold_tcs = {param: simulate_dcm(param, values) for param, values in params.items()}
+    bold_tcs = {
+        param: simulate_bold({param: values}, 2, time, u)
+        for param, values in params.items()
+    }
 
-    plot_param_change(save=True)
+    plot_param_change((12, 9), save=True)
 
 # %%
