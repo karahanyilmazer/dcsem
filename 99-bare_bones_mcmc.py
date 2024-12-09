@@ -3,7 +3,6 @@ from typing import Callable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import Math, display
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
@@ -140,21 +139,21 @@ time = np.arange(100)
 u = stim_boxcar([[0, 30, 1]])  # Input stimulus
 
 # Parameters to set and estimate
-params_to_set = ['A_w01', 'A_w10']
-params_to_est = ['A_w01']
+params_to_set = ['w01', 'w10']
+params_to_est = ['w01']
 
 # Ground truth parameter values
 true_params = {
-    'A_w01': 0.7,
-    'A_w10': 0.7,
+    'w01': 0.7,
+    'w10': 0.2,
 }
 bounds = {
-    'A_w01': (0.0, 1.0),
-    'A_w10': (0.0, 1.0),
+    'w01': (0.0, 1.0),
+    'w10': (0.0, 1.0),
 }
 
 # Initial values for the parameters to estimate
-initial_values = initialize_parameters(bounds, params_to_est)
+initial_values = initialize_parameters(bounds, params_to_est, random=False)
 
 print('Estimating:\t\t', filter_params(true_params, params_to_est))
 print('Initial guesses:\t', dict(zip(params_to_est, initial_values)))
@@ -169,6 +168,25 @@ bold_true = simulate_bold(
 )
 bold_obsv = bold_true
 # bold_obsv = add_noise(bold_true, snr_db=30)
+
+fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+axs[0].plot(time, bold_true[:, 0], label='True')
+axs[0].plot(time, bold_obsv[:, 0], label='Observed')
+axs[0].set_title('ROI 0')
+axs[0].set_xlabel('Time')
+axs[0].set_ylabel('Amplitude')
+axs[0].set_ylim(-0.003, 0.06)
+axs[0].legend()
+
+axs[1].plot(time, bold_true[:, 1], label='True')
+axs[1].plot(time, bold_obsv[:, 1], label='Observed')
+axs[1].set_title('ROI 1')
+axs[1].set_xlabel('Time')
+axs[1].set_ylabel('Amplitude')
+axs[1].set_ylim(-0.003, 0.06)
+axs[1].legend()
+
+plt.show()
 
 # %%
 # MCMC parameters
@@ -187,7 +205,7 @@ samples_mcmc, probs_mcmc = mcmc(
     skips=1,
 )
 samples_mcmc = samples_mcmc.reshape(-1, 1)
-mean_mcmc = np.mean(samples_mcmc, axis=0)[0]
+mean_mcmc = np.mean(samples_mcmc, axis=0)
 
 print('True parameters:\t', filter_params(true_params, params_to_est))
 print('Estimated parameters:\t', dict(zip(params_to_est, mean_mcmc)))
@@ -221,22 +239,35 @@ plt.legend()
 plt.show()
 
 # %%
-plt.figure()
+fig, axs = plt.subplots(1, 2, figsize=(10, 4))
 inds = np.random.randint(len(samples_mcmc), size=100)
 for ind in inds:
     sample = samples_mcmc[ind]
     params = dict(zip(params_to_est, sample))
-    plt.plot(
+    bold_tmp = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+    axs[0].plot(
         time,
-        simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)[:, 0],
+        bold_tmp[:, 0],
         'C4',
         alpha=0.1,
     )
-plt.plot(time, bold_obsv[:, 0], color='k', label='Observed')
-plt.xlabel('Time')
-plt.ylabel('Amplitude')
-plt.xlim(0, 100)
-plt.legend()
-plt.show()
+    axs[1].plot(
+        time,
+        bold_tmp[:, 1],
+        'C4',
+        alpha=0.1,
+    )
+axs[0].plot(time, bold_obsv[:, 0], color='k', label='Observed')
+axs[1].plot(time, bold_obsv[:, 1], color='k', label='Observed')
 
+axs[0].set_xlabel('Time')
+axs[0].set_ylabel('Amplitude')
+axs[0].set_xlim(0, 100)
+axs[0].legend()
+
+axs[1].set_xlabel('Time')
+axs[1].set_xlim(0, 100)
+axs[1].legend()
+
+plt.show()
 # %%
