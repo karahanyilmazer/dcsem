@@ -115,8 +115,8 @@ mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
 n_test_samples = 2000
-noise_level = 0.02
-effect_size = 0.1
+noise_level = 0.0001
+effect_size = 0.3
 n_repeats = 50
 
 true_change, data, data2, sn = tr.generate_test_samples(
