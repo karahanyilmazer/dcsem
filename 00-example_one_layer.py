@@ -6,8 +6,10 @@ from dcsem import models, utils
 
 # %%
 # Input
-time = np.arange(100)  # Time vector (seconds)
-u = utils.stim_boxcar([[0, 10, 1]])  # Stimulus function (onset, duration, amplitude)
+time = np.arange(200)  # Time vector (seconds)
+# Stimulus function (onset, duration, amplitude)
+# u = utils.stim_boxcar([[0, 10, 1]])
+u = utils.stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Connectivity parameters
 num_rois = 2

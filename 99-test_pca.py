@@ -4,6 +4,7 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
+import scienceplots
 from IPython.display import Markdown, display
 from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
@@ -63,7 +64,7 @@ bolds_roi1 = np.array(bolds_roi1)
 bold_concat = np.concatenate([bolds_roi0, bolds_roi1], axis=1)
 bold_concat_c = bold_concat - np.mean(bold_concat, axis=1, keepdims=True)  # Mean center
 
-fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 axs[0].plot(bolds_roi0.T)
 axs[0].set_title('ROI 0')
 axs[0].set_xlabel('Time')
@@ -75,6 +76,8 @@ axs[1].set_title('ROI 1')
 axs[1].set_xlabel('Time')
 axs[1].set_ylabel('Amplitude')
 axs[1].set_ylim(-0.003, 0.07)
+
+plt.savefig('img/presentation/bold_signals.png')
 
 plt.show()
 
@@ -92,24 +95,32 @@ for n in n_vals:
     error = np.mean((bold_concat_c - bold_recon) ** 2)
     errors.append(error)
 
+plt.figure(figsize=(8, 5))
 plt.plot(n_vals, errors)
 plt.axvline(elbow_pca, color='red', linestyle='--', label='Elbow')
 plt.xlabel('Number of PCA Components')
 plt.ylabel('Reconstruction Error')
 plt.legend()
 plt.grid()
+plt.savefig('img/presentation/pca_elbow.png')
 plt.show()
 
 # %%
 pca = PCA(n_components=elbow_pca)
 bold_pca = pca.fit_transform(bold_concat_c)
 
-fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 axs[0].plot(pca.components_.T)
 axs[0].set_title('Components')
+axs[0].set_xlabel('Time')
+axs[0].set_ylabel('Amplitude')
 
 axs[1].plot(bold_pca)
 axs[1].set_title('Transformed Data')
+axs[1].set_xlabel('Sample')
+axs[1].set_ylabel('PCA Value')
+
+plt.savefig('img/presentation/pca_components.png')
 
 plt.show()
 
