@@ -103,10 +103,13 @@ def simulate_bold(params, num_rois, time, u):
     return np.array(results)
 
 
-def add_noise(bold_true, snr_db):
-    snr_linear = 10 ** (snr_db / 10)  # Convert dB to linear scale
-    sigma = np.max(bold_true) / snr_linear
-    return bold_true + np.random.normal(0, sigma, bold_true.shape)
+def add_noise(signal, snr_db):
+    signal_power = np.mean(signal**2)
+    snr = 10 ** (snr_db / 10)  # Convert dB to linear scale
+    noise_power = signal_power / snr
+    noise = np.random.normal(0, np.sqrt(noise_power), signal.shape)
+    noisy_signal = signal + noise
+    return noisy_signal
 
 
 def filter_params(params, keys):
