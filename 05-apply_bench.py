@@ -115,8 +115,8 @@ mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
 n_test_samples = 2000
-noise_level = 0.02
-effect_size = 0.1
+noise_level = 0.0001
+effect_size = 0.3
 n_repeats = 50
 
 true_change, data, data2, sn = tr.generate_test_samples(
@@ -143,8 +143,8 @@ heatmap(
     yticklabels=mdl.model_names,
     ax=ax,
 )
-ax.set_xlabel('Predicted')
-ax.set_ylabel('True')
+ax.set_xlabel('Inferred Change')
+ax.set_ylabel('Actual Change')
 plt.title('BENCH')
 plt.savefig('results/confusion_matrix_bench.png')
 plt.show()
