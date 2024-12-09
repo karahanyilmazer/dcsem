@@ -143,8 +143,8 @@ heatmap(
     yticklabels=mdl.model_names,
     ax=ax,
 )
-ax.set_xlabel('Predicted')
-ax.set_ylabel('True')
+ax.set_xlabel('Inferred Change')
+ax.set_ylabel('Actual Change')
 plt.title('BENCH')
 plt.savefig('results/confusion_matrix_bench.png')
 plt.show()
