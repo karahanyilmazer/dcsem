@@ -1,14 +1,19 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 import matplotlib.pyplot as plt
 import numpy as np
 
-from dcsem import models, utils
+from dcsem.models import DCM
+from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
+from utils import set_style
 
+set_style()
 # %%
 time = np.arange(200)  # Time vector (seconds)
 # Stimulus function (onset, duration, amplitude)
-u = utils.stim_boxcar([[0, 10, 1]])
-# u = utils.stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
+u = stim_boxcar([[0, 10, 1]])
+# u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Connectivity parameters
 num_rois = 2
@@ -16,16 +21,16 @@ num_layers = 1
 
 # ROI0, Layer0 -> ROI1, Layer0 : Magnitude = 0.2
 connections = ['R0, L0 -> R1, L0 = 0.2']
-A = utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+A = create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
 print('A:\n', A)
 
 # Input -> ROI0, Layer0 : c = 1
 input_connections = ['R0, L0 = 1.0']
-C = utils.create_C_matrix(num_rois, num_layers, input_connections)
+C = create_C_matrix(num_rois, num_layers, input_connections)
 print('C:\n', C)
 
 # Instantiate the DCM object
-dcm = models.DCM(num_rois, params={'A': A, 'C': C})
+dcm = DCM(num_rois, params={'A': A, 'C': C})
 # Run simulation to get BOLD signal
 bold, state_tc = dcm.simulate(time, u)
 
@@ -44,7 +49,7 @@ plt.savefig('img/presentation/bold_control.png', dpi=300)
 plt.show()
 # %%
 # Instantiate the DCM object
-dcm = models.DCM(num_rois, params={'A': A, 'C': C, 'alpha': 0.9, 'tau': 30})
+dcm = DCM(num_rois, params={'A': A, 'C': C, 'alpha': 0.9, 'tau': 30})
 # Run simulation to get BOLD signal
 bold, state_tc = dcm.simulate(time, u)
 

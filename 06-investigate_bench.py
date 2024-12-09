@@ -13,9 +13,16 @@ from matplotlib.colors import Normalize
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import get_summary_measures, initialize_parameters, simulate_bold
+from utils import (
+    add_underscore,
+    get_param_colors,
+    get_summary_measures,
+    initialize_parameters,
+    set_style,
+    simulate_bold,
+)
 
-plt.rcParams['font.family'] = 'Times New Roman'
+set_style()
 
 # %%
 # ======================================================================================
@@ -25,71 +32,107 @@ NUM_ROIS = 2
 time = np.arange(100)
 u = stim_boxcar([[0, 30, 1]])  # Input stimulus
 
+param_colors = get_param_colors()
+
 # Parameters to set and estimate
-params_to_set = ['w01', 'w10', 'i0', 'i1']
+params_to_set = ['a01', 'a10', 'c0', 'c1']
 
 # Ground truth parameter values
 bounds = {
-    'w01': (0.0, 1.0),
-    'w10': (0.0, 1.0),
-    'i0': (0.0, 1.0),
-    'i1': (0.0, 1.0),
+    'a01': (0.0, 1.0),
+    'a10': (0.0, 1.0),
+    'c0': (0.0, 1.0),
+    'c1': (0.0, 1.0),
 }
 
 # Define the parameters
 params = {}
-params['w01'] = 0.5
-params['w10'] = 0.5
-params['i0'] = 0.5
-params['i1'] = 0
+params['a01'] = 0.5
+params['a10'] = 0.5
+params['c0'] = 0.5
+params['c1'] = 0
 bold_base = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 summ_base = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 # Increase alpha
-params['w01'] += 0.5
-bold_w01 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_w01 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+params['a01'] += 0.5
+bold_a01 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_a01 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 # Increase gamma
-params['w01'] -= 0.5
-params['w10'] += 0.5
-bold_w10 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_w10 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+params['a01'] -= 0.5
+params['a10'] += 0.5
+bold_a10 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_a10 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
-params['w10'] -= 0.5
-params['i0'] += 0.5
-bold_i0 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_i0 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+params['a10'] -= 0.5
+params['c0'] += 0.5
+bold_c0 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_c0 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
-params['i0'] -= 0.5
-params['i1'] += 0.5
-bold_i1 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_i1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
+params['c0'] -= 0.5
+params['c1'] += 0.5
+bold_c1 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+summ_c1 = get_summary_measures('PCA', time, u, NUM_ROIS, **params)
 
 
 # ======================================================================================
 # %%
-def add_underscore(param):
-    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
-    return r"${" + latex_param + r"}$"
-
-
 param_labels = {param: add_underscore(param) for param in params_to_set}
 
 # Plot the BOLD signals
-fig, axs = plt.subplots(2, 1, figsize=(10, 6))
-axs[0].plot(time, bold_base[:, 0], label='Base')
-axs[0].plot(time, bold_w01[:, 0], label=f'Increased {param_labels["w01"]}')
-axs[0].plot(time, bold_w10[:, 0], label=f'Increased {param_labels["w10"]}')
-axs[0].plot(time, bold_i0[:, 0], label=f'Increased {param_labels["i0"]}')
-axs[0].plot(time, bold_i1[:, 0], label=f'Increased {param_labels["i1"]}')
+fig, axs = plt.subplots(2, 1, figsize=(8, 6))
+axs[0].plot(time, bold_base[:, 0], color='black', label='Base')
+axs[0].plot(
+    time,
+    bold_a01[:, 0],
+    color=param_colors['a01'],
+    label=f'Increased {param_labels["a01"]}',
+)
+axs[0].plot(
+    time,
+    bold_a10[:, 0],
+    color=param_colors['a10'],
+    label=f'Increased {param_labels["a10"]}',
+)
+axs[0].plot(
+    time,
+    bold_c0[:, 0],
+    color=param_colors['c0'],
+    label=f'Increased {param_labels["c0"]}',
+)
+axs[0].plot(
+    time,
+    bold_c1[:, 0],
+    color=param_colors['c1'],
+    label=f'Increased {param_labels["c1"]}',
+)
 
-axs[1].plot(time, bold_base[:, 1], label='Base')
-axs[1].plot(time, bold_w01[:, 1], label=f'Increased {param_labels["w01"]}')
-axs[1].plot(time, bold_w10[:, 1], label=f'Increased {param_labels["w10"]}')
-axs[1].plot(time, bold_i0[:, 1], label=f'Increased {param_labels["i0"]}')
-axs[1].plot(time, bold_i1[:, 1], label=f'Increased {param_labels["i1"]}')
+axs[1].plot(time, bold_base[:, 1], color='black', label='Base')
+axs[1].plot(
+    time,
+    bold_a01[:, 1],
+    color=param_colors['a01'],
+    label=f'Increased {param_labels["a01"]}',
+)
+axs[1].plot(
+    time,
+    bold_a10[:, 1],
+    color=param_colors['a10'],
+    label=f'Increased {param_labels["a10"]}',
+)
+axs[1].plot(
+    time,
+    bold_c0[:, 1],
+    color=param_colors['c0'],
+    label=f'Increased {param_labels["c0"]}',
+)
+axs[1].plot(
+    time,
+    bold_c1[:, 1],
+    color=param_colors['c1'],
+    label=f'Increased {param_labels["c1"]}',
+)
 
 axs[0].set_title('DCM Simulation')
 axs[0].set_ylabel('BOLD Signal')
@@ -99,27 +142,30 @@ axs[1].set_ylabel('BOLD Signal')
 axs[1].legend()
 
 tmp = axs[0].twinx()
-tmp.set_ylabel('ROI 1', rotation=0, labelpad=25)
+tmp.set_ylabel('ROI 1', rotation=0, labelpad=20)
 tmp.set_yticks([])
 tmp = axs[1].twinx()
-tmp.set_ylabel('ROI 2', rotation=0, labelpad=25)
+tmp.set_ylabel('ROI 2', rotation=0, labelpad=20)
 tmp.set_yticks([])
 
 plt.show()
 
 # %%
 bold_base_comb = np.r_[bold_base[:, 0], bold_base[:, 1]]
-bold_w01_comb = np.r_[bold_w01[:, 0], bold_w01[:, 1]]
-bold_w10_comb = np.r_[bold_w10[:, 0], bold_w10[:, 1]]
-bold_i0_comb = np.r_[bold_i0[:, 0], bold_i0[:, 1]]
-bold_i1_comb = np.r_[bold_i1[:, 0], bold_i1[:, 1]]
+bold_a01_comb = np.r_[bold_a01[:, 0], bold_a01[:, 1]]
+bold_a10_comb = np.r_[bold_a10[:, 0], bold_a10[:, 1]]
+bold_c0_comb = np.r_[bold_c0[:, 0], bold_c0[:, 1]]
+bold_c1_comb = np.r_[bold_c1[:, 0], bold_c1[:, 1]]
 
-fig, axs = plt.subplots(1, figsize=(10, 3))
-axs.plot(bold_base_comb, label='Base')
-axs.plot(bold_w01_comb, label=f'Increased {param_labels["w01"]}')
-axs.plot(bold_w10_comb, label=f'Increased {param_labels["w10"]}')
-axs.plot(bold_i0_comb, label=f'Increased {param_labels["i0"]}')
-axs.plot(bold_i1_comb, label=f'Increased {param_labels["i1"]}')
+fig, ax = plt.subplots(1, figsize=(8, 3))
+ax.plot(bold_base_comb, c='black', label='Base')
+ax.plot(bold_a01_comb, c=param_colors['a01'], label=f'Increased {param_labels["a01"]}')
+ax.plot(bold_a10_comb, c=param_colors['a10'], label=f'Increased {param_labels["a10"]}')
+ax.plot(bold_c0_comb, c=param_colors['c0'], label=f'Increased {param_labels["c0"]}')
+ax.plot(bold_c1_comb, c=param_colors['c1'], label=f'Increased {param_labels["c1"]}')
+ax.set_title('Concatenated BOLD Signals')
+ax.set_xlabel('Time')
+ax.set_ylabel('Amplitude')
 
 plt.legend()
 plt.show()
@@ -131,54 +177,58 @@ default_arrowprops = dict(arrowstyle='<-', color='black')
 default_arrowprops.update(arrowprops)
 
 fig, ax = plt.subplots(figsize=(5, 5))
-ax.plot(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1], 'o', label='Base')
+ax.plot(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1], 'o', c='black', label='Base')
 ax.plot(
-    summ_w01[0, comp1 - 1],
-    summ_w01[0, comp2 - 1],
+    summ_a01[0, comp1 - 1],
+    summ_a01[0, comp2 - 1],
     'o',
-    label=f'Increased {param_labels["w01"]}',
+    c=param_colors['a01'],
+    label=f'Increased {param_labels["a01"]}',
 )
 ax.plot(
-    summ_w10[0, comp1 - 1],
-    summ_w10[0, comp2 - 1],
+    summ_a10[0, comp1 - 1],
+    summ_a10[0, comp2 - 1],
     'o',
-    label=f'Increased {param_labels["w10"]}',
+    c=param_colors['a10'],
+    label=f'Increased {param_labels["a10"]}',
 )
 ax.plot(
-    summ_i0[0, comp1 - 1],
-    summ_i0[0, comp2 - 1],
+    summ_c0[0, comp1 - 1],
+    summ_c0[0, comp2 - 1],
     'o',
-    label=f'Increased {param_labels["i0"]}',
+    c=param_colors['c0'],
+    label=f'Increased {param_labels["c0"]}',
 )
 ax.plot(
-    summ_i1[0, comp1 - 1],
-    summ_i1[0, comp2 - 1],
+    summ_c1[0, comp1 - 1],
+    summ_c1[0, comp2 - 1],
     'o',
-    label=f'Increased {param_labels["i1"]}',
+    c=param_colors['c1'],
+    label=f'Increased {param_labels["c1"]}',
 )
 
 ax.annotate(
     '',
     xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
-    xytext=(summ_w01[0, comp1 - 1], summ_w01[0, comp2 - 1]),
+    xytext=(summ_a01[0, comp1 - 1], summ_a01[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 ax.annotate(
     '',
     xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
-    xytext=(summ_w10[0, comp1 - 1], summ_w10[0, comp2 - 1]),
+    xytext=(summ_a10[0, comp1 - 1], summ_a10[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 ax.annotate(
     '',
     xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
-    xytext=(summ_i0[0, comp1 - 1], summ_i0[0, comp2 - 1]),
+    xytext=(summ_c0[0, comp1 - 1], summ_c0[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 ax.annotate(
     '',
     xy=(summ_base[0, comp1 - 1], summ_base[0, comp2 - 1]),
-    xytext=(summ_i1[0, comp1 - 1], summ_i1[0, comp2 - 1]),
+    xytext=(summ_c1[0, comp1 - 1], summ_c1[0, comp2 - 1]),
     arrowprops=default_arrowprops,
 )
 
@@ -291,7 +341,7 @@ plt.show()
 
 # %%
 method = 'PCA'
-param_to_plot = 'i1'
+param_to_plot = 'c1'
 
 if method == 'PCA':
     arr = np.array(summs_pca)
@@ -301,10 +351,10 @@ elif method == 'ICA':
     columns = ['IC1', 'IC2', 'IC3', 'IC4']
 
 df = pd.DataFrame(arr, columns=columns)
-df['w01'] = [val[0] for val in param_vals]
-df['w10'] = [val[1] for val in param_vals]
-df['i0'] = [val[2] for val in param_vals]
-df['i1'] = [val[3] for val in param_vals]
+df['a01'] = [val[0] for val in param_vals]
+df['a10'] = [val[1] for val in param_vals]
+df['c0'] = [val[2] for val in param_vals]
+df['c1'] = [val[3] for val in param_vals]
 
 df.head()
 

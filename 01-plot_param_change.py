@@ -1,22 +1,18 @@
 # %%
-import re
-
+# !%load_ext autoreload
+# !%autoreload 2
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.colors import to_rgba
 
 from dcsem.utils import stim_boxcar
-from utils import simulate_bold
+from utils import add_underscore, get_param_colors, set_style, simulate_bold
 
-plt.rcParams['font.family'] = 'Times New Roman'
-
-
-def add_underscore(param):
-    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
-    return r"${" + latex_param + r"}$"
+set_style()
+plt.rcParams['legend.frameon'] = True
 
 
+# %%
 # Function to lighten colors progressively
 def lighten_color(color, factor):
     white = np.array([1, 1, 1, 1])  # RGBA for white
@@ -62,11 +58,11 @@ def plot_param_change(figsize=(10, 12), save=False):
     _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
 
     # Get the default color cycle (tab10 colormap has 10 distinct colors)
-    cmap = plt.get_cmap('tab10')
+    param_colors = get_param_colors()
 
     # Plot for each parameter with the corresponding color from the cycle
     for i, (param, values) in enumerate(params.items()):
-        base_color = cmap(i)  # Get the base color from the colormap
+        base_color = param_colors[param]  # Get the color for the parameter
         plot_bold(axs, bold_tcs[param], param, values, i, base_color)
 
     # Set titles and labels
@@ -108,6 +104,6 @@ if __name__ == '__main__':
         for param, values in params.items()
     }
 
-    plot_param_change((13, 9), save=True)
+    plot_param_change((12, 9), save=True)
 
 # %%

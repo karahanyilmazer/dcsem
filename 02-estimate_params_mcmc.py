@@ -1,4 +1,6 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 import corner
 import emcee
 import matplotlib.pyplot as plt

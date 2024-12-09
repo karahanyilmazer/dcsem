@@ -1,4 +1,6 @@
 # %%
+# !%load_ext autoreload
+# !%autoreload 2
 import os
 import pickle
 
@@ -10,11 +12,9 @@ from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, simulate_bold
+from utils import initialize_parameters, set_style, simulate_bold
 
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 14
+set_style()
 
 # %%
 # ======================================================================================
@@ -74,11 +74,9 @@ axs[0].set_ylim(-0.003, 0.07)
 axs[1].plot(bolds_roi1.T)
 axs[1].set_title('ROI 1')
 axs[1].set_xlabel('Time')
-axs[1].set_ylabel('Amplitude')
 axs[1].set_ylim(-0.003, 0.07)
 
 plt.savefig('img/presentation/bold_signals.png')
-
 plt.show()
 
 # %%
@@ -114,6 +112,7 @@ axs[0].plot(pca.components_.T)
 axs[0].set_title('Components')
 axs[0].set_xlabel('Time')
 axs[0].set_ylabel('Amplitude')
+axs[0].legend([f'Component {i+1}' for i in range(elbow_pca)])
 
 axs[1].plot(bold_pca)
 axs[1].set_title('Transformed Data')
@@ -121,7 +120,6 @@ axs[1].set_xlabel('Sample')
 axs[1].set_ylabel('PCA Value')
 
 plt.savefig('img/presentation/pca_components.png')
-
 plt.show()
 
 # %%
@@ -138,6 +136,7 @@ for n in n_vals:
     error = np.mean((bold_concat_c - bold_recon) ** 2)
     errors.append(error)
 
+plt.figure(figsize=(8, 5))
 plt.plot(n_vals, errors)
 plt.axvline(elbow_ica, color='red', linestyle='--', label='Elbow')
 plt.xlabel('Number of ICA Components')
@@ -166,6 +165,7 @@ ax2 = fig.add_subplot(gs[0, 1])
 ax2.plot(ica.components_.T)
 ax2.set_title('Components')
 ax2.set_xlabel('Time')
+ax2.legend([f'Component {i+1}' for i in range(elbow_ica)])
 
 # Bottom plot spanning both columns (IC Value)
 ax3 = fig.add_subplot(gs[1, :])

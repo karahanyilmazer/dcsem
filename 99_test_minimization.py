@@ -1,16 +1,16 @@
 # %%
-#!%matplotlib inline
+# !%load_ext autoreload
+# !%autoreload 2
+# !%matplotlib inline
 import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 
-from utils import add_noise
+from utils import add_noise, set_style
 
-plt.style.use(['science', 'no-latex'])
-plt.rcParams['font.family'] = 'Times New Roman'
-plt.rcParams['font.size'] = 14
+set_style()
 
 
 # %%
