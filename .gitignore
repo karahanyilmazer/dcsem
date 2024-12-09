@@ -14,3 +14,8 @@ dcsem/tests/__pycache__/test_fcs.cpython-38-pytest-6.2.5.pyc
 dcsem/auxilary/__pycache__
 results
 img
+
+bench 11-27-14-41
+*.ipynb
+*.pkl
+*.pyc
