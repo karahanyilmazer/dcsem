@@ -31,6 +31,11 @@ dcm = models.DCM(num_rois, params={'A': A, 'C': C})
 # Run simulation to get BOLD signal
 bold, state_tc = dcm.simulate(time, u)
 
+# Normalize the BOLD signal
+norm = False
+if norm:
+    bold = bold / np.max(bold, axis=0)
+
 fig, axs = plt.subplots(2, 1)
 axs[0].plot(time, u(time), label='Stimulus')
 axs[1].plot(time, bold[:, 0], label='ROI 0')
