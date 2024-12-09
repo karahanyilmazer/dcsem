@@ -1,10 +1,27 @@
 import pickle
 import re
 
+import matplotlib.pyplot as plt
 import numpy as np
+import scienceplots
 
 from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix
+
+
+def filter_params(params, keys):
+    return {k: params[k] for k in keys}
+
+
+def initialize_parameters(bounds, params_to_sim, random=False):
+    initial_values = []
+    for param in params_to_sim:
+        if random:
+            initial_values.append(np.random.uniform(*bounds[param]))
+        else:
+            initial_values.append(np.mean(bounds[param]))
+
+    return initial_values
 
 
 def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
@@ -112,25 +129,24 @@ def add_noise(signal, snr_db):
     return noisy_signal
 
 
-def filter_params(params, keys):
-    return {k: params[k] for k in keys}
-
-
 def add_underscore(param):
     # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
     latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
     return r"${" + latex_param + r"}$"
 
 
-def initialize_parameters(bounds, params_to_sim, random=False):
-    initial_values = []
-    for param in params_to_sim:
-        if random:
-            initial_values.append(np.random.uniform(*bounds[param]))
-        else:
-            initial_values.append(np.mean(bounds[param]))
+def set_style():
+    plt.style.use(['science', 'no-latex'])
+    plt.rcParams['font.family'] = 'Times New Roman'
+    plt.rcParams['figure.dpi'] = 300
 
-    return initial_values
+
+def get_param_colors():
+    set_style()
+    # Set the colors for each parameter
+    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color'][:4]
+    param_colors = dict(zip(['a01', 'a10', 'c0', 'c1'], color_cycle))
+    return param_colors
 
 
 def get_summary_measures(method, time, u, num_rois, **kwargs):
