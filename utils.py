@@ -1,4 +1,5 @@
 import pickle
+import re
 
 import numpy as np
 
@@ -6,10 +7,10 @@ from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix
 
 
-def get_one_layer_A(w01=0.4, w10=0.4, self_connections=-1):
+def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
     connections = []
-    connections.append(f'R0, L0 -> R1, L0 = {w01}')  # ROI0 -> ROI1 connection
-    connections.append(f'R1, L0 -> R0, L0 = {w10}')  # ROI1 -> ROI0 connection
+    connections.append(f'R0, L0 -> R1, L0 = {a01}')  # ROI0 -> ROI1 connection
+    connections.append(f'R1, L0 -> R0, L0 = {a10}')  # ROI1 -> ROI0 connection
     return create_A_matrix(
         num_rois=2,
         num_layers=1,
@@ -18,10 +19,10 @@ def get_one_layer_A(w01=0.4, w10=0.4, self_connections=-1):
     )
 
 
-def get_one_layer_C(i0=1, i1=0):
+def get_one_layer_C(c0=0.5, c1=0.5):
     connections = []
-    connections.append(f'R0, L0 = {i0}')  # Input --> ROI0 connection
-    connections.append(f'R1, L0 = {i1}')  # Input --> ROI1 connection
+    connections.append(f'R0, L0 = {c0}')  # Input --> ROI0 connection
+    connections.append(f'R1, L0 = {c1}')  # Input --> ROI1 connection
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
@@ -39,8 +40,8 @@ def simulate_bold(params, num_rois, time, u):
         A list of simulated BOLD signals, one for each value in the parameter arrays.
     """
     # Define input arguments for defining A and C matrices
-    A_param_names = ['w01', 'w10', 'self_connections']
-    C_param_names = ['i0', 'i1']
+    A_param_names = ['a01', 'a10', 'self_connections']
+    C_param_names = ['c0', 'c1']
 
     # Determine if any parameter is an array
     param_keys = list(params.keys())
@@ -112,6 +113,12 @@ def filter_params(params, keys):
     return {k: params[k] for k in keys}
 
 
+def add_underscore(param):
+    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
+    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
+    return r"${" + latex_param + r"}$"
+
+
 def initialize_parameters(bounds, params_to_sim, random=False):
     initial_values = []
     for param in params_to_sim:
@@ -125,7 +132,7 @@ def initialize_parameters(bounds, params_to_sim, random=False):
 
 def get_summary_measures(method, time, u, num_rois, **kwargs):
     # Define the allowed parameters
-    allowed_keys = ['w01', 'w10', 'i0', 'i1']
+    allowed_keys = ['a01', 'a10', 'c0', 'c1']
 
     # Find invalid keys
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]

@@ -9,9 +9,11 @@ from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import filter_params, initialize_parameters, simulate_bold
+from utils import initialize_parameters, simulate_bold
 
+plt.style.use(['science', 'no-latex'])
 plt.rcParams['font.family'] = 'Times New Roman'
+plt.rcParams['font.size'] = 14
 
 # %%
 # ======================================================================================
@@ -20,29 +22,32 @@ NUM_LAYERS = 1
 NUM_ROIS = 2
 time = np.arange(100)
 u = stim_boxcar([[0, 30, 1]])  # Input stimulus
+# u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Parameters to set and estimate
-params_to_set = ['w01', 'w10', 'i0', 'i1']
+params_to_set = ['a01', 'a10', 'c0', 'c1']
 
 # Ground truth parameter values
 bounds = {
-    'w01': (0.0, 1.0),
-    'w10': (0.0, 1.0),
-    'i0': (0.0, 1.0),
-    'i1': (0.0, 1.0),
+    'a01': (0.0, 1.0),
+    'a10': (0.0, 1.0),
+    'c0': (0.0, 1.0),
+    'c1': (0.0, 1.0),
 }
 
 # ======================================================================================
 # %%
 display(Markdown('## Data Generation'))
+
+n_samples = 10000
 bolds_roi0 = []
 bolds_roi1 = []
-for _ in tqdm(range(10000)):
+for _ in tqdm(range(n_samples)):
     initial_values = initialize_parameters(bounds, params_to_set, random=True)
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
-        filter_params(dict(zip(params_to_set, initial_values)), params_to_set),
+        dict(zip(params_to_set, initial_values)),
         time=time,
         u=u,
         num_rois=NUM_ROIS,

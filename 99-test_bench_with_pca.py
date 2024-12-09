@@ -6,14 +6,14 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-from bench import acquisition, change_model, diffusion_models, model_inversion
+from bench import change_model
 from IPython.display import Markdown, display
 from scipy.stats import uniform
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, simulate_bold_multi
+from utils import simulate_bold
 
 plt.rcParams['font.family'] = 'Times New Roman'
 
@@ -25,16 +25,17 @@ NUM_LAYERS = 1
 NUM_ROIS = 2
 time = np.arange(100)
 u = stim_boxcar([[0, 30, 1]])  # Input stimulus
+# u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Parameters to set and estimate
-params_to_set = ['w01', 'w10', 'i0', 'i1']
+params_to_set = ['a01', 'a10', 'c0', 'c1']
 
 # Ground truth parameter values
 bounds = {
-    'w01': (0.0, 1.0),
-    'w10': (0.0, 1.0),
-    'i0': (0.0, 1.0),
-    'i1': (0.0, 1.0),
+    'a01': (0.0, 1.0),
+    'a10': (0.0, 1.0),
+    'c0': (0.0, 1.0),
+    'c1': (0.0, 1.0),
 }
 
 
@@ -42,7 +43,7 @@ bounds = {
 # %%
 def calc_comps(method, **kwargs):
     # Define the allowed parameters
-    allowed_keys = ['w01', 'w10', 'i0', 'i1']
+    allowed_keys = ['a01', 'a10', 'c0', 'c1']
 
     # Find invalid keys
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
@@ -72,7 +73,7 @@ def calc_comps(method, **kwargs):
     ), 'All values must have the same length!'
 
     # Initialize the BOLD signals
-    bold_true = simulate_bold_multi(
+    bold_true = simulate_bold(
         params,
         time=time,
         u=u,
@@ -92,16 +93,16 @@ def calc_comps(method, **kwargs):
     return components
 
 
-# Test the function
-comps = calc_comps('PCA', w01=[0.5, 1.0], w10=[1.0, 0.7])
-print(comps)
+# Check if the function works
+comps = calc_comps('PCA', a01=[0.5, 1.0], a10=[1.0, 0.7])
+print('PCA components:\n', comps)
 
 # %%
 priors = {
-    'w01': uniform(loc=bounds['w01'][0], scale=bounds['w01'][1] - bounds['w01'][0]),
-    'w10': uniform(loc=bounds['w10'][0], scale=bounds['w10'][1] - bounds['w10'][0]),
-    'i0': uniform(loc=bounds['i0'][0], scale=bounds['i0'][1] - bounds['i0'][0]),
-    'i1': uniform(loc=bounds['i1'][0], scale=bounds['i1'][1] - bounds['i1'][0]),
+    'a01': uniform(loc=bounds['a01'][0], scale=bounds['a01'][1] - bounds['a01'][0]),
+    'a10': uniform(loc=bounds['a10'][0], scale=bounds['a10'][1] - bounds['a10'][0]),
+    'c0': uniform(loc=bounds['c0'][0], scale=bounds['c0'][1] - bounds['c0'][0]),
+    'c1': uniform(loc=bounds['c1'][0], scale=bounds['c1'][1] - bounds['c1'][0]),
 }
 
 tr = change_model.Trainer(
