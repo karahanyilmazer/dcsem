@@ -26,12 +26,15 @@ set_style()
 
 
 # %%
-def objective(param_vals, param_names, bold_observed):
+def objective(param_vals, param_names, bold_observed, remaining_params):
     # Map the parameter values to their names
     params = dict(zip(param_names, param_vals))
 
+    # Update the dictionary with the parameters that are not being estimated
+    params.update(remaining_params)
+
     # Simulate the estimated BOLD signal
-    bold_simulated = simulate_bold(params, time=time, u=u, num_rois=num_rois)
+    bold_simulated = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
 
     # Compute the mean squared error
     loss = np.mean((bold_simulated - bold_observed) ** 2)
@@ -54,6 +57,7 @@ def estimate_parameters(
         args=(
             param_names,
             kwargs['bold_signal'],
+            kwargs['remaining_params'],
         ),
         bounds=bounds,
         method='L-BFGS-B',
@@ -63,7 +67,11 @@ def estimate_parameters(
     estimated_params = dict(zip(param_names, opt.x.tolist()))
 
     # Compute the Hessian matrix using finite differences
-    hessian = approx_hess(opt.x, objective, args=(param_names, kwargs['bold_signal']))
+    hessian = approx_hess(
+        opt.x,
+        objective,
+        args=(param_names, kwargs['bold_signal'], kwargs['remaining_params']),
+    )
 
     if normalize:
         # Compute residuals and estimate the variance of the noise
@@ -140,7 +148,7 @@ def run_simulation(
         true_params,
         time=time,
         u=u,
-        num_rois=num_rois,
+        num_rois=NUM_ROIS,
     )
 
     # Add noise to the observed data
@@ -149,6 +157,9 @@ def run_simulation(
     # Filter the relevant bounds if they are provided
     if bounds:
         bounds = [(bounds[param]) for param in params_to_est]
+
+    # Filter the parameters that are not being estimated
+    remaining_params = filter_params(true_params, params_to_est, exclude=True)
 
     # Estimate parameters
     est_params, hessian, covariance, std = estimate_parameters(
@@ -159,7 +170,8 @@ def run_simulation(
         time=time,
         u=u,
         bold_signal=bold_noisy,
-        num_rois=num_rois,
+        num_rois=NUM_ROIS,
+        remaining_params=remaining_params,
     )
 
     # Compute the error between the true and estimated parameters
@@ -169,7 +181,7 @@ def run_simulation(
 
     if plot:
         # Simulate data using estimated parameters
-        bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=num_rois)
+        bold_estimated = simulate_bold(est_params, time=time, u=u, num_rois=NUM_ROIS)
         # Plot results
         plot_bold_signals(time, bold_true, bold_noisy, bold_estimated)
 
@@ -207,16 +219,17 @@ if __name__ == '__main__':
     time = np.arange(100)
     u = stim_boxcar([[0, 30, 1]])
 
-    # Model parameters
-    num_rois = 2
-    num_layers = 1
+    # Constants
+    NUM_ROIS = 2
+    NUM_LAYERS = 1
+    RANDOM = False
 
     # Set the colors for each parameter
     param_colors = get_param_colors()
 
     # Parameters to use in the simulation and estimation
     params_to_set = ['a01', 'a10', 'c0', 'c1']
-    params_to_est = ['a01', 'a10', 'c0', 'c1']
+    params_to_est = ['a01']
 
     # Generate all combinations of the parameters
     all_combinations = []
@@ -225,11 +238,10 @@ if __name__ == '__main__':
         all_combinations.extend(combinations_r)
     # Convert each combination to a list (optional)
     all_combinations = [list(comb) for comb in all_combinations]
-    # all_combinations = [['a01']]
 
     # Ground truth parameter values
     true_params = {
-        'a01': 0.4,
+        'a01': 0.6,
         'a10': 0.4,
         'c0': 0.5,
         'c1': 0.5,
@@ -246,9 +258,10 @@ if __name__ == '__main__':
     bounds = filter_params(bounds, params_to_est)
 
     # Signal-to-noise ratio
-    n_sims, n_snrs = 1, 20
+    n_sims = 3 if RANDOM else 1
+    n_snrs = 20
     min_snr, max_snr = 0.1, 50
-    snr_range = np.logspace(np.log10(min_snr), np.log10(max_snr), n_snrs)
+    # snr_range = np.logspace(np.log10(min_snr), np.log10(max_snr), n_snrs)
     snr_range = np.linspace(min_snr, max_snr, n_snrs)
 
     # ==================================================================================
@@ -269,7 +282,7 @@ if __name__ == '__main__':
             while not non_nan_found:
                 for sim_i in range(n_sims):
                     # Random initialization of the parameters
-                    initial_values = initialize_parameters(bounds, comb, random=False)
+                    initial_values = initialize_parameters(bounds, comb, random=RANDOM)
 
                     hess, cov, std, err = run_simulation(
                         true_params=true_params,
@@ -278,7 +291,7 @@ if __name__ == '__main__':
                         snr=snr_db,
                         bounds=bounds,
                         normalize=True,
-                        plot=False,
+                        plot=True,
                         verbose=False,
                     )
 

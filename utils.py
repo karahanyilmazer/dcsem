@@ -9,7 +9,9 @@ from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix
 
 
-def filter_params(params, keys):
+def filter_params(params, keys, exclude=False):
+    if exclude:
+        return {k: params[k] for k in params.keys() if k not in keys}
     return {k: params[k] for k in keys}
 
 
