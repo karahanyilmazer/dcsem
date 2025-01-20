@@ -38,6 +38,12 @@ bounds = {
     'c1': (0.0, 1.0),
 }
 
+METHOD = 'PCA'
+if METHOD == 'PCA':
+    pca = pickle.load(open('models/pca.pkl', 'rb'))
+elif METHOD == 'ICA':
+    ica = pickle.load(open('models/ica.pkl', 'rb'))
+
 
 # ======================================================================================
 # %%
@@ -84,10 +90,8 @@ def calc_comps(method, **kwargs):
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == 'PCA':
-        pca = pickle.load(open('models/pca.pkl', 'rb'))
         components = pca.transform(tmp_bold_c)
     elif method == 'ICA':
-        ica = pickle.load(open('models/ica.pkl', 'rb'))
         components = ica.transform(tmp_bold_c)
 
     return components
@@ -111,10 +115,10 @@ tr = change_model.Trainer(
     kwargs={'method': 'PCA'},
     measurement_names=['PC1', 'PC2', 'PC3', 'PC4'],
 )
-mdl = tr.train(n_samples=5000, verbose=True)
+mdl = tr.train(n_samples=2000, verbose=True)
 
 # %%
-n_test_samples = 2000
+n_test_samples = 500
 noise_level = 0.0001
 effect_size = 0.3
 n_repeats = 50
