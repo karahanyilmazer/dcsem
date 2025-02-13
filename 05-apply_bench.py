@@ -115,10 +115,10 @@ tr = change_model.Trainer(
     kwargs={'method': 'PCA'},
     measurement_names=['PC1', 'PC2', 'PC3', 'PC4'],
 )
-mdl = tr.train(n_samples=2000, verbose=True)
+mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
-n_test_samples = 500
+n_test_samples = 2000
 noise_level = 0.0001
 effect_size = 0.3
 n_repeats = 50
@@ -140,7 +140,7 @@ heatmap(
     conf_mat,
     annot=True,
     fmt='.2f',
-    # cmap='coolwarm',
+    cmap='Blues',
     cbar=False,
     square=True,
     xticklabels=mdl.model_names,
@@ -150,8 +150,18 @@ heatmap(
 ax.set_xlabel('Inferred Change')
 ax.set_ylabel('Actual Change')
 plt.title('BENCH')
-plt.savefig('results/confusion_matrix_bench.png')
+plt.tick_params(axis='x', which='minor', bottom=False, top=False)
+plt.tick_params(axis='y', which='minor', left=False, right=False)
+plt.savefig('results/confusion_matrix_bench_new.png')
 plt.show()
 
 
+# %%
+import pickle
+
+with open('models/conf_bench_new.pkl', 'wb') as f:
+    pickle.dump(conf_mat, f)
+
+with open('models/mdl.pkl', 'wb') as f:
+    pickle.dump(mdl, f)
 # %%
