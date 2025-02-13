@@ -158,8 +158,39 @@ heatmap(
 )
 ax.set_xlabel('Inferred Change')
 ax.set_ylabel('Actual Change')
-plt.title('BENCH')
+plt.title('Model Inversion')
+plt.tick_params(axis='x', which='minor', bottom=False, top=False)
+plt.tick_params(axis='y', which='minor', left=False, right=False)
 plt.savefig('results/confusion_matrix_model_inversion.png')
 plt.show()
+
+# %%
+labels = ['No Change', 'a01', 'a10', 'c0', 'c1']
+conf_mat = confusion_matrix(true_change, inferred_change, normalize='true')
+
+fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+heatmap(
+    conf_mat,
+    annot=True,
+    fmt='.2f',
+    cmap='Blues',
+    cbar=False,
+    square=True,
+    xticklabels=labels,
+    yticklabels=labels,
+    ax=ax,
+)
+ax.set_xlabel('Inferred Change')
+ax.set_ylabel('Actual Change')
+plt.title('Model Inversion')
+plt.tick_params(axis='x', which='minor', bottom=False, top=False)
+plt.tick_params(axis='y', which='minor', left=False, right=False)
+plt.savefig('results/confusion_matrix_model_inversion.png')
+plt.show()
+# %%
+import pickle
+
+with open('models/conf_inversion.pkl', 'wb') as f:
+    pickle.dump(conf_mat, f)
 
 # %%
