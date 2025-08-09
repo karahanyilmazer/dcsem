@@ -24,17 +24,17 @@ def loss(params):
 
 
 def callback(xk):
-    print(f'Parameter val: {xk}\t-->\tLoss: {loss(xk)}')
+    print(f"Parameter val: {xk}\t-->\tLoss: {loss(xk)}")
 
 
 def plot_estimation(x, signal, est_params):
     plt.figure()
-    plt.plot(x, ground_truth, c='black', label='Ground Truth')
-    plt.plot(x, signal, label='Observation')
-    plt.plot(x, f(x, *est_params), ls='--', label='Estimated')
-    plt.title('Parameter Estimation')
-    plt.xlabel('x')
-    plt.ylabel('y')
+    plt.plot(x, ground_truth, c="black", label="Ground Truth")
+    plt.plot(x, signal, label="Observation")
+    plt.plot(x, f(x, *est_params), ls="--", label="Estimated")
+    plt.title("Parameter Estimation")
+    plt.xlabel("x")
+    plt.ylabel("y")
     plt.legend()
     plt.show()
 
@@ -52,37 +52,37 @@ def plot_loss(params_range, optimum):
 
     if len(params_range) == 2:
         # 3D Surface Plot
-        ax = fig.add_subplot(1, 2, 1, projection='3d')
-        ax.plot_surface(param_grid1, param_grid2, loss_grid, cmap='viridis')
+        ax = fig.add_subplot(1, 2, 1, projection="3d")
+        ax.plot_surface(param_grid1, param_grid2, loss_grid, cmap="viridis")
         ax.plot(
-            optimum[0], optimum[1], loss(optimum), 'ro', label='Optimum', markersize=10
+            optimum[0], optimum[1], loss(optimum), "ro", label="Optimum", markersize=10
         )
-        ax.axvline(optimum[0], color='red', ls='--', label='Optimum')
-        ax.set_xlabel('Parameter a')
-        ax.set_ylabel('Parameter b')
-        ax.set_zlabel('MSE Loss')
-        ax.set_title('Loss Surface')
+        ax.axvline(optimum[0], color="red", ls="--", label="Optimum")
+        ax.set_xlabel("Parameter a")
+        ax.set_ylabel("Parameter b")
+        ax.set_zlabel("MSE Loss")
+        ax.set_title("Loss Surface")
 
         # 2D Contour Plot
         ax = fig.add_subplot(1, 2, 2)
         contour = ax.contourf(
-            param_grid1, param_grid2, loss_grid, levels=50, cmap='viridis'
+            param_grid1, param_grid2, loss_grid, levels=50, cmap="viridis"
         )
-        ax.plot(optimum[0], optimum[1], 'ro', label='Optimum', markersize=10)
+        ax.plot(optimum[0], optimum[1], "ro", label="Optimum", markersize=10)
         fig.colorbar(contour, ax=ax)
-        ax.set_xlabel('Parameter a')
-        ax.set_ylabel('Parameter b')
-        ax.set_title('Loss Contour')
+        ax.set_xlabel("Parameter a")
+        ax.set_ylabel("Parameter b")
+        ax.set_title("Loss Contour")
 
         plt.tight_layout()
         plt.show()
 
     else:
         plt.plot(params_range)
-        plt.axvline(optimum, color='red', ls='--', label='Optimum')
-        plt.title('Loss Function Landscape')
-        plt.xlabel('Parameter a')
-        plt.ylabel('MSE Loss')
+        plt.axvline(optimum, color="red", ls="--", label="Optimum")
+        plt.title("Loss Function Landscape")
+        plt.xlabel("Parameter a")
+        plt.ylabel("MSE Loss")
         plt.legend()
         plt.show()
 
@@ -104,9 +104,9 @@ def calc_std(est_params, loss, normalize=True, log=False):
     std = np.sqrt(np.diag(cov))
 
     if log:
-        print('HESSIAN:\n', hess, '\n')
-        print('COVARIANCE:\n', cov, '\n')
-        print('STD:\n', std, '\n')
+        print("HESSIAN:\n", hess, "\n")
+        print("COVARIANCE:\n", cov, "\n")
+        print("STD:\n", std, "\n")
 
     return hess, cov, std
 
@@ -115,15 +115,15 @@ def plot_snr_to_std(snr_vals, std_vals, true_vals, ax=None):
     if ax is None:
         _, ax = plt.subplots(1, 1)
     if normalize:
-        ax.axhline(0, color='black', ls='--', label='Zero Line')
+        ax.axhline(0, color="black", ls="--", label="Zero Line")
     else:
         # hess = approx_hess(true_vals, loss)
         # std_inf = np.sqrt(np.diag(hess)) / 2
         pass
-    ax.plot(snr_vals, std_vals, '-o')
+    ax.plot(snr_vals, std_vals, "-o")
     # ax.set_title('Standard Deviation over SNR')
-    ax.set_xlabel('SNR')
-    ax.set_ylabel('Standard Deviation')
+    ax.set_xlabel("SNR")
+    ax.set_ylabel("Standard Deviation")
     ax.legend()
     if ax is None:
         plt.show()
@@ -137,11 +137,11 @@ def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=N
     if ax is None:
         _, ax = plt.subplots(1, 1)
 
-    ax.axhline(0, color='black', ls='--', label='Zero Line')
+    ax.axhline(0, color="black", ls="--", label="Zero Line")
 
     for i in range(est_params.shape[1]):
         est_err = true_vals[i] - est_params[:, i]
-        ax.plot(snr_vals, est_err, '-o', label=f'Param {i}')
+        ax.plot(snr_vals, est_err, "-o", label=f"Param {i}")
         if shade:
             ax.fill_between(
                 snr_vals,
@@ -151,8 +151,8 @@ def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=N
             )
 
     # ax.set_title('Estimation Error over SNR')
-    ax.set_xlabel('SNR')
-    ax.set_ylabel('Estimation Error')
+    ax.set_xlabel("SNR")
+    ax.set_ylabel("Estimation Error")
     ax.legend()
 
     if ax is None:
@@ -161,16 +161,16 @@ def plot_snr_to_err(snr_vals, est_params, std_vals, true_vals, shade=False, ax=N
 
 def plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history):
     fig, axs = plt.subplots(1, 2, figsize=(12, 5))
-    fig.suptitle('Parameter Estimation')
+    fig.suptitle("Parameter Estimation")
     plot_snr_to_std(snr_vals, std_vals, true_vals, ax=axs[0])
     plot_snr_to_err(snr_vals, est_params_history, std_vals, true_vals, ax=axs[1])
     plt.tight_layout()
-    plt.savefig('img/presentation/min_test.png')
+    plt.savefig("img/presentation/min_test.png")
     plt.show()
 
 
 # %%
-plt.close('all')
+plt.close("all")
 n_samples = 100
 n_simulations = 20
 min_snr, max_snr = 0.01, 30
@@ -194,7 +194,7 @@ for snr in snr_vals:
     signal = add_noise(ground_truth, snr)
 
     # Esimate the parameters
-    opt = minimize(loss, x0=initial_guess, callback=callback, method='L-BFGS-B')
+    opt = minimize(loss, x0=initial_guess, callback=callback, method="L-BFGS-B")
     est_params = opt.x
     est_params_history.append(est_params)
 
@@ -205,8 +205,8 @@ for snr in snr_vals:
         plot_loss(param_ranges, est_params)
 
     if log:
-        print(f'True parameters: {a_true}, {b_true}')
-        print(f'Estimated parameters: {est_params}\n')
+        print(f"True parameters: {a_true}, {b_true}")
+        print(f"Estimated parameters: {est_params}\n")
 
     hess, cov, std = calc_std(est_params, loss, normalize=normalize, log=log)
     std_vals.append(std)

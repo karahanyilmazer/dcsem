@@ -28,8 +28,8 @@ def initialize_parameters(bounds, params_to_sim, random=False):
 
 def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
     connections = []
-    connections.append(f'R0, L0 -> R1, L0 = {a01}')  # ROI0 -> ROI1 connection
-    connections.append(f'R1, L0 -> R0, L0 = {a10}')  # ROI1 -> ROI0 connection
+    connections.append(f"R0, L0 -> R1, L0 = {a01}")  # ROI0 -> ROI1 connection
+    connections.append(f"R1, L0 -> R0, L0 = {a10}")  # ROI1 -> ROI0 connection
     return create_A_matrix(
         num_rois=2,
         num_layers=1,
@@ -40,8 +40,8 @@ def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
 
 def get_one_layer_C(c0=0.5, c1=0.5):
     connections = []
-    connections.append(f'R0, L0 = {c0}')  # Input --> ROI0 connection
-    connections.append(f'R1, L0 = {c1}')  # Input --> ROI1 connection
+    connections.append(f"R0, L0 = {c0}")  # Input --> ROI0 connection
+    connections.append(f"R1, L0 = {c1}")  # Input --> ROI1 connection
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
@@ -59,8 +59,8 @@ def simulate_bold(params, num_rois, time, u):
         A list of simulated BOLD signals, one for each value in the parameter arrays.
     """
     # Define input arguments for defining A and C matrices
-    A_param_names = ['a01', 'a10', 'self_connections']
-    C_param_names = ['c0', 'c1']
+    A_param_names = ["a01", "a10", "self_connections"]
+    C_param_names = ["c0", "c1"]
 
     # Determine if any parameter is an array
     param_keys = list(params.keys())
@@ -81,8 +81,8 @@ def simulate_bold(params, num_rois, time, u):
         dcm = DCM(
             num_rois,
             params={
-                'A': A,
-                'C': C,
+                "A": A,
+                "C": C,
                 **params,
             },
         )
@@ -111,8 +111,8 @@ def simulate_bold(params, num_rois, time, u):
         dcm = DCM(
             num_rois,
             params={
-                'A': A,
-                'C': C,
+                "A": A,
+                "C": C,
                 **single_params,
             },
         )
@@ -133,27 +133,27 @@ def add_noise(signal, snr_db):
 
 def add_underscore(param):
     # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
+    latex_param = re.sub(r"(\D)(\d+)", r"\1_{\2}", param)
     return r"${" + latex_param + r"}$"
 
 
 def set_style():
-    plt.style.use(['science', 'no-latex'])
-    plt.rcParams['font.family'] = 'Times New Roman'
-    plt.rcParams['figure.dpi'] = 300
+    plt.style.use(["science", "no-latex"])
+    plt.rcParams["font.family"] = "Times New Roman"
+    plt.rcParams["figure.dpi"] = 300
 
 
 def get_param_colors():
     set_style()
     # Set the colors for each parameter
-    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color'][:4]
-    param_colors = dict(zip(['a01', 'a10', 'c0', 'c1'], color_cycle))
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"][:4]
+    param_colors = dict(zip(["a01", "a10", "c0", "c1"], color_cycle))
     return param_colors
 
 
 def get_summary_measures(method, time, u, num_rois, **kwargs):
     # Define the allowed parameters
-    allowed_keys = ['a01', 'a10', 'c0', 'c1']
+    allowed_keys = ["a01", "a10", "c0", "c1"]
 
     # Find invalid keys
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
@@ -161,11 +161,11 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     # Assert that all keys are allowed
     assert (
         not invalid_keys
-    ), f'Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}.'
+    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
     # Filter all arguments that are not None
     params = {}
     for key, val in kwargs.items():
-        if key == 'method':
+        if key == "method":
             continue
         if val is not None:
             # Convert the values to a numpy array
@@ -180,7 +180,7 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     lengths = [len(v) for v in params.values()]
     assert all(
         length == lengths[0] for length in lengths
-    ), 'All values must have the same length!'
+    ), "All values must have the same length!"
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
@@ -194,11 +194,11 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
-    if method == 'PCA':
-        pca = pickle.load(open('models/pca.pkl', 'rb'))
+    if method == "PCA":
+        pca = pickle.load(open("models/pca.pkl", "rb"))
         components = pca.transform(tmp_bold_c)
-    elif method == 'ICA':
-        ica = pickle.load(open('models/ica.pkl', 'rb'))
+    elif method == "ICA":
+        ica = pickle.load(open("models/ica.pkl", "rb"))
         components = ica.transform(tmp_bold_c)
 
     return components

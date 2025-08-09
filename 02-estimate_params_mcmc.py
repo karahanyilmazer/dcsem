@@ -42,21 +42,21 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     num_rois = bold_true.shape[1]
     _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
     for i in range(num_rois):
-        axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
-        axs[i].plot(time, bold_true[:, i], label='Ground Truth', lw=2)
+        axs[i].plot(time, bold_noisy[:, i], label="Observed", lw=2)
+        axs[i].plot(time, bold_true[:, i], label="Ground Truth", lw=2)
         axs[i].plot(
             time,
             bold_estimated[:, i],
-            label='Estimated',
-            ls='--',
+            label="Estimated",
+            ls="--",
             lw=2,
-            c='tomato',
+            c="tomato",
         )
-        axs[i].set_title(f'ROI {i}')
-        axs[i].set_xlabel('Time (s)')
+        axs[i].set_title(f"ROI {i}")
+        axs[i].set_xlabel("Time (s)")
         axs[i].legend()
 
-    axs[0].set_ylabel('BOLD Signal')
+    axs[0].set_ylabel("BOLD Signal")
 
     plt.tight_layout()
     plt.show()
@@ -109,24 +109,24 @@ NUM_LAYERS = 1
 RANDOM = False
 
 # Parameters to use in the simulation and estimation
-params_to_set = ['a01', 'a10', 'c0', 'c1']
-params_to_est = ['a01']
+params_to_set = ["a01", "a10", "c0", "c1"]
+params_to_est = ["a01"]
 
 # Ground truth parameter values
 true_params = {
-    'a01': 0.6,
-    'a10': 0.4,
-    'c0': 0.5,
-    'c1': 0.5,
+    "a01": 0.6,
+    "a10": 0.4,
+    "c0": 0.5,
+    "c1": 0.5,
 }
 true_params = filter_params(true_params, params_to_set)
 
 # Bounds for the parameters
 bounds = {
-    'a01': (0, 1),
-    'a10': (0, 1),
-    'c0': (0, 1),
-    'c1': (0, 1),
+    "a01": (0, 1),
+    "a10": (0, 1),
+    "c0": (0, 1),
+    "c1": (0, 1),
 }
 bounds = filter_params(bounds, params_to_est)
 

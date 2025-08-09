@@ -55,21 +55,21 @@ class BaseModel(object):
         :return:
         tuple : (BOLD, State_tc)
         """
-        raise (Exception('This is not implemented in the base class'))
+        raise (Exception("This is not implemented in the base class"))
 
     ###################################################
     # Child classes must implement the below methods
     def init_free_params(self, y=None):
-        raise (Exception('This is not implemented in the base class'))
+        raise (Exception("This is not implemented in the base class"))
 
     def fn_negloglik(self, p, kwargs):
-        raise (Exception('This is not implemented in the base class'))
+        raise (Exception("This is not implemented in the base class"))
 
     def fn_neglogpr(self, p):
-        raise (Exception('This is not implemented in the base class'))
+        raise (Exception("This is not implemented in the base class"))
 
     def get_bounds(self):
-        raise (Exception('This is not implemented in the base class'))
+        raise (Exception("This is not implemented in the base class"))
 
     ####################################################
 
@@ -108,7 +108,7 @@ class BaseModel(object):
                 x = [params[name] for name in self.get_p_names()]
             return fn_negloglik(x) + fn_neglogpr(x)
 
-        results = lmfit.minimize(fn_neglogpost, params, method='nelder')
+        results = lmfit.minimize(fn_neglogpost, params, method="nelder")
         p = Parameters()
         p.x = np.array([results.params[name].value for name in self.get_p_names()])
         if results.covar is None:
@@ -122,7 +122,7 @@ class BaseModel(object):
         p.neglogpr = fn_neglogpr(p.x)
         return p
 
-    def fit(self, y, p0=None, method='MH', fixed_vars=None, kwargs=None):
+    def fit(self, y, p0=None, method="MH", fixed_vars=None, kwargs=None):
         """Main fitting method
 
         :param y: (array)
@@ -137,7 +137,7 @@ class BaseModel(object):
         fn_negloglik = lambda p: self.fn_negloglik(p, **kwargs)
         fn_neglogpr = self.fn_neglogpr
 
-        if method == 'MH':
+        if method == "MH":
             p = self.fit_MH(p0, fn_negloglik, fn_neglogpr, fixed_vars)
         else:
             p = self.fit_NL(p0, fn_negloglik, fn_neglogpr, fixed_vars)
@@ -149,10 +149,10 @@ class BaseModel(object):
         :param table: dict
         """
         for param in table:
-            if param == 'A':
+            if param == "A":
                 self.p.A = np.array(table[param], dtype=np.float64)
                 self.Anz = np.nonzero(self.p.A)
-            elif param == 'C':
+            elif param == "C":
                 self.p.C = np.array(table[param], dtype=np.float64)
                 self.Cnz = np.nonzero(self.p.C)
             else:
@@ -175,10 +175,10 @@ class BaseModel(object):
             if isinstance(param_table[param], (int, float)):
                 names.append(param)
             else:
-                if param == 'A':
-                    names.extend([f'a{ij[0]}_{ij[1]}' for ij in np.array(self.Anz).T])
-                elif param == 'C':
-                    names.extend([f'c{i[0]}' for i in np.array(self.Cnz).T])
+                if param == "A":
+                    names.extend([f"a{ij[0]}_{ij[1]}" for ij in np.array(self.Anz).T])
+                elif param == "C":
+                    names.extend([f"c{i[0]}" for i in np.array(self.Cnz).T])
         return names
 
     def get_p(self, param_table=None):
@@ -193,11 +193,11 @@ class BaseModel(object):
             if isinstance(param_table[param], (int, float)):
                 values.append(param_table[param])
             else:
-                if param == 'A':
-                    A = param_table['A']
+                if param == "A":
+                    A = param_table["A"]
                     values.extend([A[ij[0], ij[1]] for ij in np.array(self.Anz).T])
-                elif param == 'C':
-                    C = param_table['C']
+                elif param == "C":
+                    C = param_table["C"]
                     values.extend([C[i[0]] for i in np.array(self.Cnz).T])
         return np.array(values)
 
@@ -213,13 +213,13 @@ class BaseModel(object):
                 self.p[param] = p[idx]
                 idx += 1
             else:
-                if param == 'A':
+                if param == "A":
                     for ij in np.array(self.Anz).T:
-                        self.p['A'][ij[0], ij[1]] = p[idx]
+                        self.p["A"][ij[0], ij[1]] = p[idx]
                         idx += 1
-                elif param == 'C':
+                elif param == "C":
                     for i in np.array(self.Cnz).T:
-                        self.p['C'][i[0]] = p[idx]
+                        self.p["C"][i[0]] = p[idx]
                         idx += 1
 
     # p -> table
@@ -238,13 +238,13 @@ class BaseModel(object):
                 D[param] = float(p[idx])
                 idx += 1
             else:
-                if param == 'A':
+                if param == "A":
                     for ij in np.array(self.Anz).T:
-                        D['A'][ij[0], ij[1]] = float(p[idx])
+                        D["A"][ij[0], ij[1]] = float(p[idx])
                         idx += 1
-                elif param == 'C':
+                elif param == "C":
                     for i in np.array(self.Cnz).T:
-                        D['C'][i[0]] = float(p[idx])
+                        D["C"][i[0]] = float(p[idx])
                         idx += 1
         return D
 
@@ -261,13 +261,13 @@ class BaseModel(object):
             D = {}
             if state_tc[v].shape[1] == self.num_rois:
                 for roi in range(self.num_rois):
-                    name = f'R{roi}'
+                    name = f"R{roi}"
                     D[name] = state_tc[v][:, roi]
             else:
                 for layer in range(self.num_layers):
                     for roi in range(self.num_rois):
                         idx = roi + layer * self.num_rois
-                        name = f'R{roi}L{layer}'
+                        name = f"R{roi}L{layer}"
                         D[name] = state_tc[v][:, idx]
             Results[v] = D
         return Results
@@ -309,9 +309,9 @@ class BaseModel(object):
             y[k] = P[k]*x
         """
         if self.T1s is None:
-            raise (Exception('Must set the T1s'))
+            raise (Exception("Must set the T1s"))
         if self.num_rois is None:
-            raise (Exception('Must set num_rois'))
+            raise (Exception("Must set num_rois"))
 
         P = self.get_Pmat(TIs, normalise=normalise_pv)
         y = []
@@ -354,11 +354,11 @@ class DCM(BaseModel):
         self.Anz = np.nonzero(self.p.A)
         self.Cnz = np.nonzero(self.p.C)
         # State variables
-        self.state_vars = ['s', 'f', 'v', 'q', 'x']
+        self.state_vars = ["s", "f", "v", "q", "x"]
         # Define default values for T1s
         from dcsem.utils import constants
 
-        self.T1s = (constants['LowerLayerT1'] + constants['UpperLayerT1']) / 2.0
+        self.T1s = (constants["LowerLayerT1"] + constants["UpperLayerT1"]) / 2.0
         # SDE or ODE
         self.stochastic = stochastic
         self.state_noise_std = 0.05
@@ -406,7 +406,7 @@ class DCM(BaseModel):
 
     def fn_negloglik(self, p, y, tvec, u):
         if self.stochastic:
-            raise (Exception('Fitting stochastic DCMs has not yet been implemented'))
+            raise (Exception("Fitting stochastic DCMs has not yet been implemented"))
         # self.set_p(p)
         y_pred, _ = self.simulate(tvec, p=p, u=u)
         mse = np.mean((y - y_pred) ** 2)
@@ -415,9 +415,9 @@ class DCM(BaseModel):
     def fn_neglogpr(self, p):
         return 0
 
-    def fit(self, y, tvec, p0=None, u=None, method='MH', fixed_vars=None):
+    def fit(self, y, tvec, p0=None, u=None, method="MH", fixed_vars=None):
         return super().fit(
-            y, p0, method, fixed_vars, kwargs={'y': y, 'tvec': tvec, 'u': u}
+            y, p0, method, fixed_vars, kwargs={"y": y, "tvec": tvec, "u": u}
         )
 
     ####################################################
@@ -561,13 +561,13 @@ class TwoLayerDCM(DCM):
         from dcsem.utils import constants
 
         self.T1s = np.linspace(
-            constants['LowerLayerT1'], constants['UpperLayerT1'], self.num_layers
+            constants["LowerLayerT1"], constants["UpperLayerT1"], self.num_layers
         )
 
         # set user-defined params
         if params is not None:
             self.set_params(params)
-        self.state_vars.extend(['vs', 'qs'])
+        self.state_vars.extend(["vs", "qs"])
 
     def init_states(self):
         zeros = np.full(self.num_rois * self.num_layers, 0.0)
@@ -645,13 +645,13 @@ class MultiLayerDCM(DCM):
         from dcsem.utils import constants
 
         self.T1s = np.linspace(
-            constants['LowerLayerT1'], constants['UpperLayerT1'], self.num_layers
+            constants["LowerLayerT1"], constants["UpperLayerT1"], self.num_layers
         )
 
         # set user-defined params
         if params is not None:
             self.set_params(params)
-        self.state_vars.extend(['vs', 'qs'])
+        self.state_vars.extend(["vs", "qs"])
 
     def init_states(self):
         zeros = np.full(self.num_rois * self.num_layers, 0.0)
@@ -738,7 +738,7 @@ class SEM(BaseModel):
             self.set_params(params)
         # Keep track of non-zero A and C
         self.Anz = np.nonzero(self.p.A)
-        self.state_vars = ['x']
+        self.state_vars = ["x"]
 
     def simulate(self, tvec, p=None, u=None):
         """Simulate time courses
@@ -793,11 +793,11 @@ class SEM(BaseModel):
 
     def A_sigma_from_p(self, p):
         D = self.p_to_table(p)
-        A, sigma = D['A'], D['sigma']
+        A, sigma = D["A"], D["sigma"]
         return A, sigma
 
     def p_from_A_sigma(self, A, sigma):
-        return self.get_p({'A': self.p.A * 0, 'sigma': sigma})
+        return self.get_p({"A": self.p.A * 0, "sigma": sigma})
 
     #
     def get_bounds(self):
@@ -805,7 +805,7 @@ class SEM(BaseModel):
         n = self.get_p_names()
         UB = np.full(p.shape, np.infty)
         LB = np.full(p.shape, -np.infty)
-        LB[n.index('sigma')] = 0
+        LB[n.index("sigma")] = 0
         return LB, UB
 
     def fit_MH(self, p0, fn_negloglik=None, fn_neglogpr=None, fixed_vars=None):
@@ -823,8 +823,8 @@ class SEM(BaseModel):
     def fn_neglogpr(self, p):
         return 0
 
-    def fit(self, y, p0=None, method='MH', fixed_vars=None):
-        p = super().fit(y, p0, method, fixed_vars, kwargs={'y': y})
+    def fit(self, y, p0=None, method="MH", fixed_vars=None):
+        p = super().fit(y, p0, method, fixed_vars, kwargs={"y": y})
         p.A, p.sigma = self.A_sigma_from_p(p.x)
         return p
 
@@ -844,7 +844,7 @@ class MultiLayerSEM(SEM):
         from dcsem.utils import constants
 
         self.T1s = np.linspace(
-            constants['LowerLayerT1'], constants['UpperLayerT1'], self.num_layers
+            constants["LowerLayerT1"], constants["UpperLayerT1"], self.num_layers
         )
         if params is not None:
             self.set_params(params)
@@ -857,7 +857,7 @@ class MultiLayerSEM(SEM):
     def get_cov_PV(self, P, A=None, sigma=None):
         return P @ self.get_cov(A, sigma) @ P.T
 
-    def fit_IR(self, y, TIs, method='MH'):
+    def fit_IR(self, y, TIs, method="MH"):
         p0 = self.init_free_params(y)
         P = self.get_Pmat(TIs)
 
@@ -872,7 +872,7 @@ class MultiLayerSEM(SEM):
         def fn_neglogpr(p):
             return 0
 
-        if method == 'MH':
+        if method == "MH":
             p = self.fit_MH(p0, fn_negloglik, fn_neglogpr)
         else:
             p = self.fit_NL(p0, fn_negloglik, fn_neglogpr)

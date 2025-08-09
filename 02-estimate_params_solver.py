@@ -56,11 +56,11 @@ def estimate_parameters(
         x0=initial_values,
         args=(
             param_names,
-            kwargs['bold_signal'],
-            kwargs['remaining_params'],
+            kwargs["bold_signal"],
+            kwargs["remaining_params"],
         ),
         bounds=bounds,
-        method='L-BFGS-B',
+        method="L-BFGS-B",
     )
 
     # Map the optimized parameter values back to their names
@@ -70,16 +70,16 @@ def estimate_parameters(
     hessian = approx_hess(
         opt.x,
         objective,
-        args=(param_names, kwargs['bold_signal'], kwargs['remaining_params']),
+        args=(param_names, kwargs["bold_signal"], kwargs["remaining_params"]),
     )
 
     if normalize:
         # Compute residuals and estimate the variance of the noise
-        residuals = kwargs['bold_signal'] - simulate_bold(
+        residuals = kwargs["bold_signal"] - simulate_bold(
             estimated_params,
-            time=kwargs['time'],
-            u=kwargs['u'],
-            num_rois=kwargs['num_rois'],
+            time=kwargs["time"],
+            u=kwargs["u"],
+            num_rois=kwargs["num_rois"],
         )
         n = residuals.size  # Total number of observations
         p = len(opt.x)  # Number of parameters
@@ -113,21 +113,21 @@ def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
     num_rois = bold_true.shape[1]
     _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
     for i in range(num_rois):
-        axs[i].plot(time, bold_noisy[:, i], label='Observed', lw=2)
-        axs[i].plot(time, bold_true[:, i], label='Ground Truth', lw=2)
+        axs[i].plot(time, bold_noisy[:, i], label="Observed", lw=2)
+        axs[i].plot(time, bold_true[:, i], label="Ground Truth", lw=2)
         axs[i].plot(
             time,
             bold_estimated[:, i],
-            label='Estimated',
-            ls='--',
+            label="Estimated",
+            ls="--",
             lw=2,
-            c='tomato',
+            c="tomato",
         )
-        axs[i].set_title(f'ROI {i}')
-        axs[i].set_xlabel('Time (s)')
+        axs[i].set_title(f"ROI {i}")
+        axs[i].set_xlabel("Time (s)")
         axs[i].legend()
 
-    axs[0].set_ylabel('BOLD Signal')
+    axs[0].set_ylabel("BOLD Signal")
 
     plt.tight_layout()
     plt.show()
@@ -187,30 +187,30 @@ def run_simulation(
 
     if verbose:
         # Print results
-        print('\tTrue\tEstimated\tInitial Guess')
+        print("\tTrue\tEstimated\tInitial Guess")
         for i, param in enumerate(params_to_est):
-            print(f'{param}:\t', end='')
-            print(f'{true_params[param]:.2f}\t', end='')
-            print(f'{est_params[param]:.2f}\t\t', end='')
-            print(f'{initial_values[i]:.2f}')
+            print(f"{param}:\t", end="")
+            print(f"{true_params[param]:.2f}\t", end="")
+            print(f"{est_params[param]:.2f}\t\t", end="")
+            print(f"{initial_values[i]:.2f}")
 
-        print('\nHessian:')
+        print("\nHessian:")
         print(hessian)
 
-        print('\nCovariance matrix:')
+        print("\nCovariance matrix:")
         print(covariance)
 
-        print('\nVariances of the estimated parameters:')
+        print("\nVariances of the estimated parameters:")
         print(np.diag(covariance))
 
-        print('\nStandard deviations of the estimated parameters:')
-        print(std, '\n\n')
+        print("\nStandard deviations of the estimated parameters:")
+        print(std, "\n\n")
 
     return hessian, covariance, std, err
 
 
 # %%
-if __name__ == '__main__':
+if __name__ == "__main__":
     # ==================================================================================
     # Specify the parameters for the simulation
     # ==================================================================================
@@ -228,8 +228,8 @@ if __name__ == '__main__':
     param_colors = get_param_colors()
 
     # Parameters to use in the simulation and estimation
-    params_to_set = ['a01', 'a10', 'c0', 'c1']
-    params_to_est = ['a01']
+    params_to_set = ["a01", "a10", "c0", "c1"]
+    params_to_est = ["a01"]
 
     # Generate all combinations of the parameters
     all_combinations = []
@@ -241,19 +241,19 @@ if __name__ == '__main__':
 
     # Ground truth parameter values
     true_params = {
-        'a01': 0.6,
-        'a10': 0.4,
-        'c0': 0.5,
-        'c1': 0.5,
+        "a01": 0.6,
+        "a10": 0.4,
+        "c0": 0.5,
+        "c1": 0.5,
     }
     true_params = filter_params(true_params, params_to_set)
 
     # Bounds for the parameters
     bounds = {
-        'a01': (0, 1),
-        'a10': (0, 1),
-        'c0': (0, 1),
-        'c1': (0, 1),
+        "a01": (0, 1),
+        "a10": (0, 1),
+        "c0": (0, 1),
+        "c1": (0, 1),
     }
     bounds = filter_params(bounds, params_to_est)
 
@@ -304,7 +304,7 @@ if __name__ == '__main__':
                 if (np.isnan(tmp_stds).all()) or (
                     np.isnan(np.sum(tmp_stds, axis=1)).all()
                 ):
-                    print(f'All simulations failed at SNR {snr_db} dB, retrying...')
+                    print(f"All simulations failed at SNR {snr_db} dB, retrying...")
                     tmp_init = np.zeros((n_sims, len(comb)))
                     tmp_stds = np.zeros((n_sims, len(comb)))
                     tmp_errs = np.zeros((n_sims, len(comb)))
@@ -327,41 +327,41 @@ if __name__ == '__main__':
         errs_arr = np.array(errs_list)
         fig, axs = plt.subplots(1, 2, figsize=(12, 5))
 
-        axs[0].axhline(0, color='k', ls='--')
-        axs[1].axhline(0, color='k', ls='--')
+        axs[0].axhline(0, color="k", ls="--")
+        axs[1].axhline(0, color="k", ls="--")
 
         for i, param in enumerate(comb):
             axs[0].plot(
                 snr_range,
                 stds_arr[:, i],
-                '-x',
+                "-x",
                 color=param_colors[param],
                 label=add_underscore(param),
             )
             axs[1].plot(
                 snr_range,
                 errs_arr[:, i],
-                '-x',
+                "-x",
                 color=param_colors[param],
                 label=add_underscore(param),
             )
 
-        axs[0].set_xlabel('Signal-to-Noise Ratio (dB)')
-        axs[0].set_ylabel('Standard Deviation')
+        axs[0].set_xlabel("Signal-to-Noise Ratio (dB)")
+        axs[0].set_ylabel("Standard Deviation")
         axs[0].legend()
 
-        axs[1].set_xlabel('Signal-to-Noise Ratio (dB)')
-        axs[1].set_ylabel('Estimation Error')
+        axs[1].set_xlabel("Signal-to-Noise Ratio (dB)")
+        axs[1].set_ylabel("Estimation Error")
         axs[1].legend()
 
         tmp_names = comb.copy()
         tmp_names.sort()
 
         fig.suptitle(
-            f'Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})'
+            f"Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})"
         )
         plt.tight_layout()
-        plt.savefig(f'img/presentation/estimation/{'_'.join(tmp_names)}_estimation.png')
+        plt.savefig(f"img/presentation/estimation/{'_'.join(tmp_names)}_estimation.png")
         plt.show()
 
 
