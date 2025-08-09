@@ -1,6 +1,12 @@
 # %%
 # !%load_ext autoreload
 # !%autoreload 2
+"""
+MCMC Parameter Estimation for DCM Models
+
+This script demonstrates Bayesian parameter estimation for Dynamic Causal Models
+using Markov Chain Monte Carlo (MCMC) methods with the emcee package.
+"""
 import corner
 import emcee
 import matplotlib.pyplot as plt
@@ -11,10 +17,59 @@ from statsmodels.tools.numdiff import approx_hess
 
 from dcsem import models, utils
 
-plt.rcParams["font.family"] = "Times New Roman"
+plt.rcParams["font.family"] = "Helvetica"
 
 
 # %%
+# Configuration and Parameters
+# =============================================================================
+
+# Model parameters
+NUM_ROIS = 2
+NUM_LAYERS = 1
+
+# Simulation parameters
+TIME_POINTS = 100
+STIMULUS_CONFIG = [[0, 30, 1]]  # [onset, duration, amplitude]
+SNR_DB = 100  # Signal-to-noise ratio in dB
+
+# Parameters to use in the simulation and estimation
+PARAMS_TO_SIM = ["alpha", "kappa", "gamma", "A_L0", "C_L0"]
+PARAMS_TO_EST = ["alpha"]
+
+# Ground truth parameter values
+TRUE_PARAMS = {
+    "alpha": 0.2,
+    "kappa": 1.5,
+    "gamma": 0.5,
+    "A_L0": 0.8,
+    "C_L0": 0.7,
+}
+
+# Parameter bounds
+PARAM_BOUNDS = {
+    "alpha": (0.2, 1.0),
+    "kappa": (1.0, 2.0),
+    "gamma": (0.0, 1.0),
+    "A_L0": (0.0, 1.0),
+    "C_L0": (0.0, 1.0),
+}
+
+# MCMC parameters
+N_WALKERS = 32  # Number of walkers (chains)
+N_BURN = 500  # Burn-in samples to discard
+N_SAMPLES = 1000  # Samples to keep
+
+print("Configuration loaded:")
+print(f"  - Model: {NUM_ROIS} ROIs, {NUM_LAYERS} layers")
+print(f"  - Parameters to estimate: {PARAMS_TO_EST}")
+print(f"  - MCMC: {N_WALKERS} walkers, {N_BURN} burn-in, {N_SAMPLES} samples")
+
+# %%
+# Utility Functions for Matrix Generation
+# =============================================================================
+
+
 def get_one_layer_A(L0=0.2):
     """
     Generate the connectivity matrix (A matrix) for one layer, representing
@@ -31,7 +86,7 @@ def get_one_layer_A(L0=0.2):
                  with the strength of connections specified.
     """
     connections = [f"R0, L0 -> R1, L0 = {L0}"]  # ROI0 -> ROI1 connection
-    return utils.create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
+    return utils.create_A_matrix(NUM_ROIS, NUM_LAYERS, connections, self_connections=-1)
 
 
 def get_one_layer_C(L0=1):
@@ -48,7 +103,12 @@ def get_one_layer_C(L0=1):
                  inputs to different regions or layers is specified.
     """
     connections = [f"R0, L0 = {L0}"]  # Input --> ROI0 connection
-    return utils.create_C_matrix(num_rois, num_layers, connections)
+    return utils.create_C_matrix(NUM_ROIS, NUM_LAYERS, connections)
+
+
+# %%
+# Parameter Handling Functions
+# =============================================================================
 
 
 def initialize_parameters(bounds, params_to_sim):
@@ -83,35 +143,43 @@ def filter_params(params, keys):
     return {k: params[k] for k in keys}
 
 
-def simulate_bold(params, **kwargs):
+# %%
+# Simulation Functions
+# =============================================================================
+
+
+def simulate_bold(params, time, u, num_rois, **kwargs):
     """
     Simulate the BOLD signal using a DCM model with the given parameters.
 
     Args:
         params (dict): A dictionary of parameters for the simulation, including:
-            - 'A_L0' (float): Connectivity parameter for layer 0 of region of
-                              interest 0 (optional, default=0.2).
-            - 'C_L0' (float): Input parameter for layer 0 of region of interest
-                              0 (optional, default=1.0).
-            Other model-specific parameters may also be included in this dict.
-
-        **kwargs: Additional keyword arguments, including:
-            - time (ndarray): Time points for the simulation.
-            - u (ndarray): External stimulus function.
+            - 'A_L0' (float): Connectivity parameter for layer 0 (optional, default=0.2).
+            - 'C_L0' (float): Input parameter for layer 0 (optional, default=1.0).
+            Other model-specific parameters may also be included.
+        time (ndarray): Time points for the simulation.
+        u (ndarray): External stimulus function.
+        num_rois (int): Number of regions of interest.
+        **kwargs: Additional keyword arguments.
 
     Returns:
         ndarray: Simulated BOLD signal for each region of interest, typically
                  a 2D array (time points x ROIs).
     """
     dcm = models.DCM(
-        kwargs["num_rois"],
+        num_rois,
         params={
             "A": get_one_layer_A(params.get("A_L0", 0.2)),
             "C": get_one_layer_C(params.get("C_L0", 1.0)),
             **params,
         },
     )
-    return dcm.simulate(kwargs["time"], kwargs["u"])[0]
+    return dcm.simulate(time, u)[0]
+
+
+# %%
+# Optimization Functions
+# =============================================================================
 
 
 def objective(param_vals, param_names, time, u, bold_signal):
@@ -234,6 +302,11 @@ def estimate_parameters(
     return estimated_params, hessian, cov_mat, std
 
 
+# %%
+# Noise and Visualization Functions
+# =============================================================================
+
+
 def add_noise(bold_true, snr_db):
     """
     Add Gaussian noise to the BOLD signal.
@@ -242,16 +315,28 @@ def add_noise(bold_true, snr_db):
         bold_true (ndarray): The true BOLD signal, typically a 2D array where each
                              column represents the BOLD signal for a different region
                              of interest (ROI).
-        snr (float): Signal-to-noise ratio. Higher values correspond to lower noise
-                     levels.
-
+        snr_db (float): Signal-to-noise ratio in decibels. Higher values correspond
+                       to lower noise levels.
 
     Returns:
         ndarray: The noisy BOLD signal with added Gaussian noise.
+
+    Raises:
+        ValueError: If snr_db is negative or bold_true is empty.
     """
+    if not isinstance(bold_true, np.ndarray):
+        raise TypeError("bold_true must be a numpy array")
+    if bold_true.size == 0:
+        raise ValueError("bold_true cannot be empty")
+    if snr_db < 0:
+        raise ValueError("SNR in dB cannot be negative")
 
     snr_linear = 10 ** (snr_db / 10)  # Convert dB to linear scale
-    sigma = np.max(bold_true) / snr_linear
+    signal_max = np.max(np.abs(bold_true))
+    if signal_max == 0:
+        raise ValueError("Signal cannot be all zeros")
+
+    sigma = signal_max / snr_linear
     return bold_true + np.random.normal(0, sigma, bold_true.shape)
 
 
@@ -392,36 +477,50 @@ def run_simulation(
     return hessian, covariance, std, err
 
 
-def log_probability(param, bold_signal, est_name, all_params, bounds):
+# %%
+# MCMC Functions
+# =============================================================================
+
+
+def log_probability(
+    params, bold_signal, param_names, all_params, bounds, time, u, num_rois
+):
     """
     Log-probability function for MCMC.
 
     Args:
-        param (list): Parameter values to evaluate.
+        params (list): Parameter values to evaluate.
         bold_signal (ndarray): Observed noisy BOLD signal.
-        est_name (list): Names of parameters to estimate.
+        param_names (list): Names of parameters to estimate.
         all_params (dict): All parameters, including fixed ones.
         bounds (list of tuples): Bounds for each parameter.
+        time (ndarray): Time points for simulation.
+        u (callable): Stimulus function.
+        num_rois (int): Number of regions of interest.
 
     Returns:
         float: Log-probability value.
     """
     # Check if parameters are within bounds
-    for p, v, (low, high) in zip(est_name, param, bounds):
-        if not (low <= v <= high):
+    for param_name, param_val, (low, high) in zip(param_names, params, bounds):
+        if not (low <= param_val <= high):
             return -np.inf  # Outside bounds → log-probability is -∞
 
     # Update parameter dictionary
-    for p, v in zip(est_name, param):
-        all_params[p] = v
+    updated_params = all_params.copy()
+    for param_name, param_val in zip(param_names, params):
+        updated_params[param_name] = param_val
 
     # Simulate BOLD signal
-    bold_simulated = simulate_bold(
-        all_params,
-        time=time,
-        u=u,
-        num_rois=num_rois,
-    )
+    try:
+        bold_simulated = simulate_bold(
+            updated_params,
+            time=time,
+            u=u,
+            num_rois=num_rois,
+        )
+    except Exception:
+        return -np.inf  # Return -inf if simulation fails
 
     # Compute likelihood (negative squared error)
     residuals = bold_simulated - bold_signal
@@ -430,88 +529,194 @@ def log_probability(param, bold_signal, est_name, all_params, bounds):
     return likelihood
 
 
-time = np.arange(100)
-u = utils.stim_boxcar([[0, 30, 1]])
+# %%
+# Data Generation and Setup
+# =============================================================================
 
-# Model parameters
-num_rois = 2
-num_layers = 1
+# Setup time and stimulus
+time = np.arange(TIME_POINTS)
+u = utils.stim_boxcar(STIMULUS_CONFIG)
 
-# Parameters to use in the simulation and estimation
-params_to_sim = ["alpha", "kappa", "gamma", "A_L0", "C_L0"]
-params_to_est = ["alpha"]
-# Ground truth parameter values
-true_params = {
-    "alpha": 0.2,
-    "kappa": 1.5,
-    "gamma": 0.5,
-    "A_L0": 0.8,
-    "C_L0": 0.7,
-}
-true_params = filter_params(true_params, params_to_sim)
-bounds = {
-    "alpha": (0.2, 1.0),
-    "kappa": (1.0, 2.0),
-    "gamma": (0.0, 1.0),
-    "A_L0": (0.0, 1.0),
-    "C_L0": (0.0, 1.0),
-}
-bounds = filter_params(bounds, params_to_sim)
-initial_values = initialize_parameters(bounds, params_to_est)
-bounds = [(bounds[param]) for param in params_to_est]
+# Filter parameters for this run
+true_params = filter_params(TRUE_PARAMS, PARAMS_TO_SIM)
+param_bounds = filter_params(PARAM_BOUNDS, PARAMS_TO_SIM)
 
+# Initialize parameter values
+initial_values = initialize_parameters(param_bounds, PARAMS_TO_EST)
+bounds_list = [param_bounds[param] for param in PARAMS_TO_EST]
+
+print("Setup complete:")
+print(f"  - Time points: {len(time)}")
+print(f"  - True parameters: {true_params}")
+print(f"  - Parameters to estimate: {PARAMS_TO_EST}")
+
+# %%
+# Generate Synthetic Data
+# =============================================================================
+
+# Generate synthetic data
 bold_true = simulate_bold(
     true_params,
     time=time,
     u=u,
-    num_rois=num_rois,
+    num_rois=NUM_ROIS,
 )
-bold_noisy = add_noise(bold_true, snr_db=100)
+
+# Add noise to create observed data
+bold_noisy = add_noise(bold_true, snr_db=SNR_DB)
+
+print(f"Data generated:")
+print(f"  - BOLD signal shape: {bold_true.shape}")
+print(f"  - SNR: {SNR_DB} dB")
+print(f"  - Signal range: [{bold_true.min():.3f}, {bold_true.max():.3f}]")
+
+# Plot the true and noisy signals
+fig, axes = plt.subplots(1, NUM_ROIS, figsize=(12, 4))
+if NUM_ROIS == 1:
+    axes = [axes]
+
+for i in range(NUM_ROIS):
+    axes[i].plot(time, bold_true[:, i], label="True BOLD", lw=2, alpha=0.8)
+    axes[i].plot(time, bold_noisy[:, i], label="Noisy BOLD", lw=1, alpha=0.7)
+    axes[i].set_title(f"ROI {i}")
+    axes[i].set_xlabel("Time (s)")
+    axes[i].legend()
+    axes[i].grid(True, alpha=0.3)
+
+axes[0].set_ylabel("BOLD Signal")
+plt.tight_layout()
+plt.show()
+
+# %%
+# MCMC Setup and Execution
+# =============================================================================
 
 # Number of dimensions (parameters to estimate)
-n_dim = len(params_to_est)
-
-# Number of walkers (chains)
-n_walkers = 32
-
-# Burn-in phase + Sampling
-n_burn = 500  # Samples to discard
-n_samples = 1000  # Samples to keep
+n_dim = len(PARAMS_TO_EST)
 
 # Initialize walkers around the initial guess
 initial_guess = [
-    initial_values + 0.01 * np.random.randn(n_dim) for _ in range(n_walkers)
+    initial_values + 0.01 * np.random.randn(n_dim) for _ in range(N_WALKERS)
 ]
+
+print(f"Starting MCMC with:")
+print(f"  - {N_WALKERS} walkers")
+print(f"  - {n_dim} dimensions")
+print(f"  - {N_BURN} burn-in samples")
+print(f"  - {N_SAMPLES} sampling iterations")
+print(f"  - Initial values: {initial_values}")
 
 # Run MCMC
 sampler = emcee.EnsembleSampler(
-    n_walkers,
+    N_WALKERS,
     n_dim,
     log_probability,
-    args=(bold_noisy, params_to_est, true_params.copy(), bounds),
+    args=(
+        bold_noisy,
+        PARAMS_TO_EST,
+        true_params.copy(),
+        bounds_list,
+        time,
+        u,
+        NUM_ROIS,
+    ),
 )
-sampler.run_mcmc(initial_guess, n_burn + n_samples, progress=True)
+
+# Execute the sampling
+sampler.run_mcmc(initial_guess, N_BURN + N_SAMPLES, progress=True)
+
+print("MCMC sampling completed!")
 
 # %%
+# Results Analysis
+# =============================================================================
+
 # Discard burn-in samples and reshape
-samples = sampler.get_chain(discard=n_burn, flat=True)
+samples = sampler.get_chain(discard=N_BURN, flat=True)
+
+print(f"Final sample shape: {samples.shape}")
+print(f"Acceptance fraction: {np.mean(sampler.acceptance_fraction):.3f}")
 
 # %%
+# Parameter Estimation Results
+# =============================================================================
+
 # Compute mean and standard deviation for each parameter
 means = np.mean(samples, axis=0)
 stds = np.std(samples, axis=0)
-estimated_params = dict(zip(params_to_est, means))
+estimated_params = dict(zip(PARAMS_TO_EST, means))
 
 # Print results
-print("True Parameters:", true_params)
-print("Estimated Parameters (MCMC):", estimated_params)
+print("Parameter Estimation Results:")
+print("=" * 50)
+print(f"{'Parameter':<12} {'True':<8} {'Estimated':<12} {'Std Dev':<10}")
+print("-" * 50)
+for i, param in enumerate(PARAMS_TO_EST):
+    true_val = true_params[param]
+    est_val = means[i]
+    std_val = stds[i]
+    print(f"{param:<12} {true_val:<8.3f} {est_val:<12.3f} {std_val:<10.3f}")
+
+print("\nEstimation Errors:")
+for i, param in enumerate(PARAMS_TO_EST):
+    error = abs(true_params[param] - means[i])
+    rel_error = error / abs(true_params[param]) * 100
+    print(f"  {param}: {error:.4f} ({rel_error:.1f}%)")
+
+# %%
+# Posterior Visualization
+# =============================================================================
 
 # Visualize posterior distributions
-corner.corner(
+fig = corner.corner(
     samples,
-    labels=params_to_est,
-    truths=[true_params[p] for p in params_to_est],
+    labels=PARAMS_TO_EST,
+    truths=[true_params[p] for p in PARAMS_TO_EST],
+    show_titles=True,
+    title_kwargs={"fontsize": 12},
+    quantiles=[0.16, 0.5, 0.84],
+    levels=(1 - np.exp(-0.5), 1 - np.exp(-2)),
+    plot_density=False,
+    plot_contours=True,
+    fill_contours=True,
+    smooth=True,
 )
+
+plt.suptitle("MCMC Posterior Distributions", fontsize=16, y=1.02)
 plt.show()
+
+# Show chain convergence
+if len(PARAMS_TO_EST) <= 4:  # Only plot if not too many parameters
+    fig, axes = plt.subplots(
+        len(PARAMS_TO_EST), 1, figsize=(10, 3 * len(PARAMS_TO_EST))
+    )
+    if len(PARAMS_TO_EST) == 1:
+        axes = [axes]
+
+    for i, param in enumerate(PARAMS_TO_EST):
+        chain = sampler.get_chain()[:, :, i]
+        for walker in range(N_WALKERS):
+            axes[i].plot(chain[:, walker], alpha=0.3, color="steelblue", lw=0.5)
+        axes[i].axhline(
+            true_params[param],
+            color="red",
+            linestyle="--",
+            lw=2,
+            label=f"True value: {true_params[param]:.3f}",
+        )
+        axes[i].axvline(
+            N_BURN, color="black", linestyle=":", alpha=0.7, label="Burn-in end"
+        )
+        axes[i].set_ylabel(f"{param}")
+        axes[i].legend(fontsize=8)
+        axes[i].grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("MCMC Step")
+    plt.suptitle("MCMC Chain Traces", fontsize=14)
+    plt.tight_layout()
+    plt.show()
+
+print("Analysis complete!")
+
 
 # %%

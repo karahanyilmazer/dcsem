@@ -9,7 +9,12 @@ from dcsem.utils import stim_boxcar
 from utils import add_underscore, get_param_colors, set_style, simulate_bold
 
 set_style()
-plt.rcParams['legend.frameon'] = True
+plt.rcParams["font.family"] = "Helvetica"
+plt.rcParams["axes.labelsize"] = 14
+plt.rcParams["xtick.labelsize"] = 12
+plt.rcParams["ytick.labelsize"] = 12
+plt.rcParams["legend.fontsize"] = 12
+plt.rcParams["legend.frameon"] = True
 
 
 # %%
@@ -25,15 +30,15 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
         # Lighter color for each successive line
         light_color = lighten_color(base_color, 0.9 * (i / len(param_values)))
         axs[row, 0].plot(
-            time, bold[:, 0], label=f'{value:.2f}', lw=1.5, color=light_color
+            time, bold[:, 0], label=f"{value:.2f}", lw=1.5, color=light_color
         )
         axs[row, 1].plot(
-            time, bold[:, 1], label=f'{value:.2f}', lw=1.5, color=light_color
+            time, bold[:, 1], label=f"{value:.2f}", lw=1.5, color=light_color
         )
 
     # Define the title of the legend
-    if param_name in ['alpha', 'gamma', 'kappa']:
-        title = fr'$\{param_name}$'
+    if param_name in ["alpha", "gamma", "kappa"]:
+        title = rf"$\{param_name}$"
     else:
         # title = param_name.split('_')
         # title = fr'${title[0]}_{{{title[1]}}}$'
@@ -42,10 +47,10 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     # Create legend and place it outside the plot to the right
     legend = axs[row, 1].legend(
         bbox_to_anchor=(1.05, 0.5),
-        loc='center left',
+        loc="center left",
         borderaxespad=0.0,
         title=title,
-        fontsize='small',
+        fontsize="small",
         ncol=1,
     )
 
@@ -67,20 +72,21 @@ def plot_param_change(figsize=(10, 12), save=False):
 
     # Set titles and labels
     for i in range(num_rois):
-        axs[0, i].set_title(f'ROI {i}')
-        axs[len(params) - 1, i].set_xlabel('Time (s)')
+        axs[0, i].set_title(f"ROI {i}")
+        axs[len(params) - 1, i].set_xlabel("Time (s)")
 
     for i in range(len(params)):
-        axs[i, 0].set_ylabel('BOLD Signal')
+        axs[i, 0].set_ylabel("BOLD")
+        axs[i, 1].set_yticks([])
 
     plt.tight_layout(rect=[0, 0, 0.95, 1])
     if save:
-        plt.savefig('img/presentation/param_change.png', dpi=600)
+        plt.savefig("img/poster/param_change.png", dpi=300)
     plt.show()
 
 
 # %%
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Input
     time = np.arange(100)  # Time vector (seconds)
     # Stimulus function (onset, duration, amplitude)
@@ -92,10 +98,10 @@ if __name__ == '__main__':
 
     # Parameters to vary
     params = {
-        'a01': np.linspace(0, 1, 9),
-        'a10': np.linspace(0, 1, 9),
-        'c0': np.linspace(0, 1, 9),
-        'c1': np.linspace(0, 1, 9),
+        "a01": np.linspace(0, 1, 9),
+        "a10": np.linspace(0, 1, 9),
+        "c0": np.linspace(0, 1, 9),
+        "c1": np.linspace(0, 1, 9),
     }
 
     # Run simulations for each parameter set
@@ -104,6 +110,6 @@ if __name__ == '__main__':
         for param, values in params.items()
     }
 
-    plot_param_change((12, 9), save=True)
+    plot_param_change((14, 8), save=True)
 
 # %%
