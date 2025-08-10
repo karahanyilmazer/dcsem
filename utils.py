@@ -144,7 +144,6 @@ def set_style():
 
 
 def get_param_colors():
-    set_style()
     # Set the colors for each parameter
     color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"][:4]
     param_colors = dict(zip(["a01", "a10", "c0", "c1"], color_cycle))
