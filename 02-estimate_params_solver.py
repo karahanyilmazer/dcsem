@@ -28,7 +28,24 @@ IMG_DIR = get_out_dir(type="img", subfolder="wip", extra_subfolders="estimation"
 
 
 # %%
-def objective(param_vals, param_names, bold_observed, remaining_params):
+def objective(
+    param_vals, param_names, bold_observed, remaining_params, time, u, num_rois
+):
+    """
+    Objective function for parameter estimation.
+
+    Args:
+        param_vals: Current parameter values being optimized
+        param_names: Names of parameters being optimized
+        bold_observed: Observed BOLD signal to fit
+        remaining_params: Fixed parameters not being estimated
+        time: Time vector
+        u: Input stimulus
+        num_rois: Number of ROIs
+
+    Returns:
+        Mean squared error loss
+    """
     # Map the parameter values to their names
     params = dict(zip(param_names, param_vals))
 
@@ -36,12 +53,11 @@ def objective(param_vals, param_names, bold_observed, remaining_params):
     params.update(remaining_params)
 
     # Simulate the estimated BOLD signal
-    bold_simulated = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+    bold_simulated = simulate_bold(params, time=time, u=u, num_rois=num_rois)
 
     # Compute the mean squared error
     loss = np.mean((bold_simulated - bold_observed) ** 2)
 
-    # Compute the sum of squared errors
     return loss
 
 
@@ -60,6 +76,9 @@ def estimate_parameters(
             param_names,
             kwargs["bold_signal"],
             kwargs["remaining_params"],
+            kwargs["time"],
+            kwargs["u"],
+            kwargs["num_rois"],
         ),
         bounds=bounds,
         method="L-BFGS-B",
@@ -72,7 +91,14 @@ def estimate_parameters(
     hessian = approx_hess(
         opt.x,
         objective,
-        args=(param_names, kwargs["bold_signal"], kwargs["remaining_params"]),
+        args=(
+            param_names,
+            kwargs["bold_signal"],
+            kwargs["remaining_params"],
+            kwargs["time"],
+            kwargs["u"],
+            kwargs["num_rois"],
+        ),
     )
 
     if normalize:
