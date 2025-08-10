@@ -28,8 +28,9 @@ def lighten_color(color, factor):
 # Plotting function with color gradation
 def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     for i, (bold, value) in enumerate(zip(bold_tcs, param_values)):
-        # Lighter color for each successive line
-        light_color = lighten_color(base_color, 0.9 * (i / len(param_values)))
+        # Lighter color for each successive line, capped to max 0.8 for visibility
+        factor = min(0.8, i / max(1, len(param_values) - 1))
+        light_color = lighten_color(base_color, factor)
         axs[row, 0].plot(
             time, bold[:, 0], label=f"{value:.2f}", lw=1.5, color=light_color
         )
