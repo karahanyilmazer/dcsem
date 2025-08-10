@@ -236,7 +236,23 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     return components
 
 
-def get_out_dir(type="img", subfolder=None):
+def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
+    """
+    Get output directory with flexible subdirectory creation.
+
+    Args:
+        type: Type of output directory ('img' or 'model')
+        subfolder: Main subfolder (e.g., 'wip', 'final')
+        extra_subfolders: Additional nested subfolders as string or list
+                              (e.g., 'estimation' or ['estimation', 'plots'])
+
+    Returns:
+        Path object pointing to the created directory
+
+    Examples:
+        get_out_dir("img", "wip", "estimation")  # results/images/wip/estimation/
+        get_out_dir("img", "final", ["plots", "snr"])  # results/images/final/plots/snr/
+    """
     if type == "img":
         out_dir = Path("results/images")
     elif type == "model":
@@ -247,9 +263,19 @@ def get_out_dir(type="img", subfolder=None):
     # Get the absolute path to the output directory
     out_dir = Path(__file__).parent / out_dir
 
-    # Add subfolder if provided
+    # Add main subfolder if provided
     if subfolder:
         out_dir = out_dir / subfolder
+
+    # Add additional subfolders if provided
+    if extra_subfolders:
+        if isinstance(extra_subfolders, str):
+            out_dir = out_dir / extra_subfolders
+        elif isinstance(extra_subfolders, (list, tuple)):
+            for sub in extra_subfolders:
+                out_dir = out_dir / sub
+        else:
+            raise ValueError("extra_subfolders must be string, list, or tuple")
 
     # Create the output directory if it doesn't exist
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -24,7 +24,7 @@ from utils import (
 )
 
 set_style()
-IMG_DIR = get_out_dir(type="img", subfolder="wip")
+IMG_DIR = get_out_dir(type="img", subfolder="wip", extra_subfolders="estimation")
 
 
 # %%
@@ -363,7 +363,7 @@ if __name__ == "__main__":
             f"Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})"
         )
         plt.tight_layout()
-        plt.savefig(IMG_DIR / "estimation" / f"{'_'.join(tmp_names)}_estimation.png")
+        plt.savefig(IMG_DIR / f"{'_'.join(tmp_names)}_estimation.png")
         plt.show()
 
 

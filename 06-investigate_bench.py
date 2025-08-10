@@ -24,7 +24,7 @@ from utils import (
 )
 
 set_style()
-IMG_DIR = get_out_dir(type="img", subfolder="wip")
+IMG_DIR = get_out_dir(type="img", subfolder="wip", extra_subfolders="bench")
 MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 
 
@@ -240,7 +240,7 @@ ax.set_title("BENCH Arrow Plot")
 ax.set_xlabel(f"PC{comp1}")
 ax.set_ylabel(f"PC{comp2}")
 ax.legend()
-plt.savefig(IMG_DIR / "bench" / f"arrow_plot-pc{comp1}and{comp2}.png")
+plt.savefig(IMG_DIR / f"arrow_plot-pc{comp1}and{comp2}.png")
 plt.show()
 
 # %%
@@ -344,9 +344,7 @@ axs[1].set_ylabel("")
 axs[3].set_ylabel("")
 
 plt.tight_layout()
-plt.savefig(
-    IMG_DIR / "bench" / f"change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png"
-)
+plt.savefig(IMG_DIR / f"change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png")
 plt.show()
 
 # %%
@@ -394,9 +392,7 @@ cbar = g.figure.colorbar(
 )
 cbar.set_label(f"{param_labels[param_to_plot]} Value")
 
-plt.savefig(
-    IMG_DIR / "bench" / f"change_by_param_{param_to_plot}-{method}_pairplot.png"
-)
+plt.savefig(IMG_DIR / f"change_by_param_{param_to_plot}-{method}_pairplot.png")
 plt.show()
 
 # %%
@@ -435,7 +431,7 @@ g.map_offdiag(sns.scatterplot, edgecolor=None, s=10)
 g.add_legend()
 g.figure.suptitle(f"Effect of Parameter Changes on {method} Summary Measures", y=1.02)
 
-plt.savefig(IMG_DIR / "bench" / f"bench_param_change-{method}_pairplot.png")
+plt.savefig(IMG_DIR / f"bench_param_change-{method}_pairplot.png")
 plt.show()
 
 # %%
