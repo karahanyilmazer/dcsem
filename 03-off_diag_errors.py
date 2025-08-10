@@ -16,6 +16,7 @@ from utils import (
     add_noise,
     add_underscore,
     filter_params,
+    get_out_dir,
     get_param_colors,
     initialize_parameters,
     set_style,
@@ -276,6 +277,12 @@ if __name__ == "__main__":
     snr_range = np.logspace(np.log10(min_snr), np.log10(max_snr), n_snrs)
     snr_range = np.linspace(min_snr, max_snr, n_snrs)
 
+    IMG_DIR = get_out_dir(
+        type="img",
+        subfolder="wip",
+        extra_subfolders=["estimation", f"random-{random}"],
+    )
+
     # ==================================================================================
     # Run the simulation and estimation
     # ==================================================================================
@@ -384,9 +391,7 @@ if __name__ == "__main__":
             f"Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})"
         )
         plt.tight_layout()
-        plt.savefig(
-            f"img/presentation/estimation/random-{random}/on_diag-{'_'.join(tmp_names)}.png"
-        )
+        plt.savefig(IMG_DIR / f"on_diag-{'_'.join(tmp_names)}.png")
         plt.show()
 
     for val, pairs, comb in zip(all_vals, pair_list, all_combinations):
@@ -400,9 +405,7 @@ if __name__ == "__main__":
         for i, curr_off in enumerate(tmp_val.T):
             plt.plot(curr_off, label=pairs[i])
             plt.legend()
-        plt.savefig(
-            f"img/presentation/estimation/random-{random}/off_diag-{'_'.join(tmp_names)}.png"
-        )
+        plt.savefig(IMG_DIR / f"off_diag-{'_'.join(tmp_names)}.png")
         plt.show()
 
 # %%

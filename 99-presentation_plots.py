@@ -6,9 +6,12 @@ import numpy as np
 
 from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
-from utils import set_style
+from utils import get_out_dir, set_style
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+
+
 # %%
 time = np.arange(200)  # Time vector (seconds)
 # Stimulus function (onset, duration, amplitude)
@@ -45,7 +48,7 @@ plt.gca().spines["top"].set_visible(False)
 plt.gca().spines["bottom"].set_visible(False)
 plt.gca().spines["left"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
-plt.savefig("img/presentation/bold_control.png", dpi=300)
+plt.savefig(IMG_DIR / "bold_control.png")
 plt.show()
 # %%
 # Instantiate the DCM object
@@ -65,7 +68,7 @@ plt.gca().spines["bottom"].set_visible(False)
 plt.gca().spines["left"].set_visible(False)
 plt.gca().spines["right"].set_visible(False)
 
-plt.savefig("img/presentation/bold_affected.png", dpi=300)
+plt.savefig(IMG_DIR / "bold_affected.png")
 plt.show()
 
 # %%
@@ -75,5 +78,5 @@ plt.ylabel("Amplitude")
 plt.xlabel("Time")
 plt.title("Stimulus Function")
 plt.tight_layout()
-plt.savefig("img/presentation/stimulus.png", dpi=300)
+plt.savefig(IMG_DIR / "stimulus.png")
 plt.show()

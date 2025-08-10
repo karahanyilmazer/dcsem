@@ -8,9 +8,10 @@ import scienceplots
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 
-from utils import add_noise, set_style
+from utils import add_noise, get_out_dir, set_style
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
 
 
 # %%
@@ -165,7 +166,7 @@ def plot_snr_sweep(snr_vals, std_vals, true_vals, est_params_history):
     plot_snr_to_std(snr_vals, std_vals, true_vals, ax=axs[0])
     plot_snr_to_err(snr_vals, est_params_history, std_vals, true_vals, ax=axs[1])
     plt.tight_layout()
-    plt.savefig("img/presentation/min_test.png")
+    plt.savefig(IMG_DIR / "min_test.png")
     plt.show()
 
 

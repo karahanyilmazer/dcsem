@@ -1,5 +1,6 @@
 import pickle
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -45,7 +46,7 @@ def get_one_layer_C(c0=0.5, c1=0.5):
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
-def simulate_bold(params, num_rois, time, u):
+def simulate_bold(params, num_rois, time, u, squeeze=True):
     """
     Simulate BOLD signals for the given parameters.
 
@@ -56,7 +57,8 @@ def simulate_bold(params, num_rois, time, u):
         u: Input signal.
 
     Returns:
-        A list of simulated BOLD signals, one for each value in the parameter arrays.
+        A numpy array of shape (N, T, R) where N is number of parameter sets,
+        T is time points, and R is number of ROIs.
     """
     # Define input arguments for defining A and C matrices
     A_param_names = ["a01", "a10", "self_connections"]
@@ -86,7 +88,11 @@ def simulate_bold(params, num_rois, time, u):
                 **params,
             },
         )
-        return dcm.simulate(time, u)[0]
+        bold, _ = dcm.simulate(time, u)
+        if squeeze:
+            return bold  # Shape (T, R)
+        else:
+            return bold[np.newaxis, :, :]  # Shape (1, T, R)
 
     # If there are arrays, run multiple simulations
     results = []
@@ -116,17 +122,30 @@ def simulate_bold(params, num_rois, time, u):
                 **single_params,
             },
         )
-        bold_signal = dcm.simulate(time, u)[0]
-        results.append(bold_signal)
+        bold, _ = dcm.simulate(time, u)
+        results.append(bold)
 
-    return np.array(results)
+    return np.array(results)  # Shape (N, T, R)
 
 
-def add_noise(signal, snr_db):
+def add_noise(signal, snr_db, rng=None):
+    """
+    Add Gaussian noise to a signal given a target SNR in dB.
+
+    Args:
+        signal: numpy array of signal to add noise to.
+        snr_db: desired signal-to-noise ratio in decibels.
+        rng: numpy random Generator instance or None.
+
+    Returns:
+        noisy_signal: signal plus Gaussian noise.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
     signal_power = np.mean(signal**2)
     snr = 10 ** (snr_db / 10)  # Convert dB to linear scale
     noise_power = signal_power / snr
-    noise = np.random.normal(0, np.sqrt(noise_power), signal.shape)
+    noise = rng.normal(0, np.sqrt(noise_power), signal.shape)
     noisy_signal = signal + noise
     return noisy_signal
 
@@ -137,21 +156,28 @@ def add_underscore(param):
     return r"${" + latex_param + r"}$"
 
 
-def set_style():
-    plt.style.use(["science", "no-latex"])
-    plt.rcParams["font.family"] = "Times New Roman"
-    plt.rcParams["figure.dpi"] = 300
+def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
+    styles = []
+    if use_science:
+        styles.append("science")
+    if use_latex:
+        styles.append("latex")
+    else:
+        styles.append("no-latex")
+    plt.style.use(styles)
+    if font_family is not None:
+        plt.rcParams["font.family"] = font_family
+    plt.rcParams["figure.dpi"] = dpi
 
 
 def get_param_colors():
-    set_style()
     # Set the colors for each parameter
     color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"][:4]
     param_colors = dict(zip(["a01", "a10", "c0", "c1"], color_cycle))
     return param_colors
 
 
-def get_summary_measures(method, time, u, num_rois, **kwargs):
+def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     # Define the allowed parameters
     allowed_keys = ["a01", "a10", "c0", "c1"]
 
@@ -191,14 +217,67 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     )
     bold_obsv = bold_true
 
-    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
+    # Concatenate along the last axis (ROIs) for PCA/ICA input
+    # bold_obsv shape: (N, T, R) --> (N, T*R)
+    tmp_bold = bold_obsv.reshape(bold_obsv.shape[0], -1)
+
+    # Center the data
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == "PCA":
-        pca = pickle.load(open("models/pca.pkl", "rb"))
+        pca = pickle.load(open(model_dir / "pca.pkl", "rb"))
         components = pca.transform(tmp_bold_c)
     elif method == "ICA":
-        ica = pickle.load(open("models/ica.pkl", "rb"))
+        ica = pickle.load(open(model_dir / "ica.pkl", "rb"))
         components = ica.transform(tmp_bold_c)
+    else:
+        raise ValueError(f"Method '{method}' not supported. Use 'PCA' or 'ICA'.")
 
     return components
+
+
+def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
+    """
+    Get output directory with flexible subdirectory creation.
+
+    Args:
+        type: Type of output directory ('img' or 'model')
+        subfolder: Main subfolder (e.g., 'wip', 'final')
+        extra_subfolders: Additional nested subfolders as string or list
+                              (e.g., 'estimation' or ['estimation', 'plots'])
+
+    Returns:
+        Path object pointing to the created directory
+
+    Examples:
+        get_out_dir("img", "wip", "estimation")  # results/images/wip/estimation/
+        get_out_dir("img", "final", ["plots", "snr"])  # results/images/final/plots/snr/
+    """
+    if type == "img":
+        out_dir = Path("results/images")
+    elif type == "model":
+        out_dir = Path("results/models")
+    else:
+        raise ValueError(f"Unknown output type: {type}. Use 'img' or 'model'.")
+
+    # Get the absolute path to the output directory
+    out_dir = Path(__file__).parent / out_dir
+
+    # Add main subfolder if provided
+    if subfolder:
+        out_dir = out_dir / subfolder
+
+    # Add additional subfolders if provided
+    if extra_subfolders:
+        if isinstance(extra_subfolders, str):
+            out_dir = out_dir / extra_subfolders
+        elif isinstance(extra_subfolders, (list, tuple)):
+            for sub in extra_subfolders:
+                out_dir = out_dir / sub
+        else:
+            raise ValueError("extra_subfolders must be string, list, or tuple")
+
+    # Create the output directory if it doesn't exist
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    return out_dir

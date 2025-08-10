@@ -15,15 +15,11 @@ from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
 from dcsem.utils import stim_boxcar
-from utils import set_style, simulate_bold
+from utils import get_out_dir, set_style, simulate_bold
 
 set_style()
-plt.rcParams["font.family"] = "Helvetica"
-plt.rcParams["axes.labelsize"] = 14
-plt.rcParams["xtick.labelsize"] = 12
-plt.rcParams["ytick.labelsize"] = 12
-plt.rcParams["legend.fontsize"] = 12
-plt.rcParams["legend.frameon"] = True
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 
 
 # %%
@@ -48,9 +44,9 @@ bounds = {
 
 METHOD = "PCA"
 if METHOD == "PCA":
-    pca = pickle.load(open("models/pca.pkl", "rb"))
+    pca = pickle.load(open(MODEL_DIR / "pca.pkl", "rb"))
 elif METHOD == "ICA":
-    ica = pickle.load(open("models/ica.pkl", "rb"))
+    ica = pickle.load(open(MODEL_DIR / "ica.pkl", "rb"))
 
 
 # ======================================================================================
@@ -123,10 +119,10 @@ tr = change_model.Trainer(
     kwargs={"method": "PCA"},
     measurement_names=["PC1", "PC2", "PC3", "PC4"],
 )
-mdl = tr.train(n_samples=2000, verbose=True)
+mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
-n_test_samples = 500
+n_test_samples = 2000
 noise_level = 0.0001
 effect_size = 0.3
 n_repeats = 50
@@ -173,11 +169,19 @@ heatmap(
 )
 ax.set_xlabel("Inferred Change")
 ax.set_ylabel("Actual Change")
-ax.tick_params(axis="x", which="minor", bottom=False, top=False)
-ax.tick_params(axis="y", which="minor", left=False, right=False)
 plt.title("BENCH")
-plt.savefig("img/poster/confusion_matrix_bench.png")
+plt.tick_params(axis="x", which="minor", bottom=False, top=False)
+plt.tick_params(axis="y", which="minor", left=False, right=False)
+plt.savefig(IMG_DIR / "confusion_matrix_bench_new.png")
 plt.show()
 
 
+# %%
+import pickle
+
+with open(MODEL_DIR / "conf_bench_new.pkl", "wb") as f:
+    pickle.dump(conf_mat, f)
+
+with open(MODEL_DIR / "mdl.pkl", "wb") as f:
+    pickle.dump(mdl, f)
 # %%
