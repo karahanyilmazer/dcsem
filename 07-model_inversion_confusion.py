@@ -6,15 +6,19 @@ from random import choice
 import matplotlib.pyplot as plt
 import numpy as np
 from IPython.display import Markdown, display
+from palettable.colorbrewer import diverging as cbd
+from palettable.colorbrewer import sequential as cbs
 from scipy.optimize import minimize
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, set_style, simulate_bold
+from utils import get_out_dir, initialize_parameters, set_style, simulate_bold
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 
 
 # %%
@@ -27,31 +31,31 @@ u = stim_boxcar([[0, 30, 1]])  # Input stimulus
 # u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Parameters to set and estimate
-params_to_set = ['a01', 'a10', 'c0', 'c1']
+params_to_set = ["a01", "a10", "c0", "c1"]
 
 # Ground truth parameter values
 bounds = {
-    'a01': (0.0, 1.0),
-    'a10': (0.0, 1.0),
-    'c0': (0.0, 1.0),
-    'c1': (0.0, 1.0),
+    "a01": (0.0, 1.0),
+    "a10": (0.0, 1.0),
+    "c0": (0.0, 1.0),
+    "c1": (0.0, 1.0),
 }
 
 
 def loss(params, true_params, true_bold):
     a01, a10, c0, c1 = params
     current_params = dict(true_params)
-    current_params['a01'] = a01
-    current_params['a10'] = a10
-    current_params['c0'] = c0
-    current_params['c1'] = c1
+    current_params["a01"] = a01
+    current_params["a10"] = a10
+    current_params["c0"] = c0
+    current_params["c1"] = c1
     obs_bold = simulate_bold(current_params, time=time, u=u, num_rois=NUM_ROIS)
 
     return np.mean((true_bold - obs_bold) ** 2)
 
 
 # %%#
-display(Markdown('## Run the simulation'))
+display(Markdown("## Run the simulation"))
 n_samples = 500
 change_amount = 0.1
 param_vals = []
@@ -77,8 +81,8 @@ for sample_i in tqdm(range(n_samples)):
         loss,
         initial_guess,
         args=(params, true_bold),
-        options={'gtol': 1e-12, 'ftol': 1e-12},
-        method='L-BFGS-B',
+        options={"gtol": 1e-12, "ftol": 1e-12},
+        method="L-BFGS-B",
         bounds=[(0, 1), (0, 1), (0, 1), (0, 1)],
     )
 
@@ -95,8 +99,8 @@ for sample_i in tqdm(range(n_samples)):
             loss,
             initial_guess,
             args=(params, true_bold),
-            options={'gtol': 1e-12, 'ftol': 1e-12},
-            method='L-BFGS-B',
+            options={"gtol": 1e-12, "ftol": 1e-12},
+            method="L-BFGS-B",
             bounds=[(0, 1), (0, 1), (0, 1), (0, 1)],
         )
 
@@ -124,8 +128,8 @@ for sample_i in tqdm(range(n_samples)):
             loss,
             initial_guess,
             args=(params, true_bold),
-            options={'gtol': 1e-12, 'ftol': 1e-12},
-            method='L-BFGS-B',
+            options={"gtol": 1e-12, "ftol": 1e-12},
+            method="L-BFGS-B",
             bounds=[(0, 1), (0, 1), (0, 1), (0, 1)],
         )
 
@@ -141,56 +145,58 @@ for sample_i in tqdm(range(n_samples)):
 
 
 # %%
-labels = ['No Change', 'a01', 'a10', 'c0', 'c1']
-conf_mat = confusion_matrix(true_change, inferred_change, normalize='true')
+labels = ["No Change", "a01", "a10", "c0", "c1"]
+conf_mat = confusion_matrix(true_change, inferred_change, normalize="true")
+# cmap = cbd.Spectral_8_r.mpl_colormap
+cmap = cbs.GnBu_9.mpl_colormap
 
 fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 heatmap(
     conf_mat,
     annot=True,
-    fmt='.2f',
-    # cmap='coolwarm',
+    fmt=".2f",
+    cmap=cmap,
     cbar=False,
     square=True,
     xticklabels=labels,
     yticklabels=labels,
     ax=ax,
 )
-ax.set_xlabel('Inferred Change')
-ax.set_ylabel('Actual Change')
-plt.title('Model Inversion')
-plt.tick_params(axis='x', which='minor', bottom=False, top=False)
-plt.tick_params(axis='y', which='minor', left=False, right=False)
-plt.savefig('results/confusion_matrix_model_inversion.png')
+ax.set_xlabel("Inferred Change")
+ax.set_ylabel("Actual Change")
+plt.title("Model Inversion")
+plt.tick_params(axis="x", which="minor", bottom=False, top=False)
+plt.tick_params(axis="y", which="minor", left=False, right=False)
+plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
 plt.show()
 
 # %%
-labels = ['No Change', 'a01', 'a10', 'c0', 'c1']
-conf_mat = confusion_matrix(true_change, inferred_change, normalize='true')
+labels = ["No Change", "a01", "a10", "c0", "c1"]
+conf_mat = confusion_matrix(true_change, inferred_change, normalize="true")
 
 fig, ax = plt.subplots(1, 1, figsize=(5, 5))
 heatmap(
     conf_mat,
     annot=True,
-    fmt='.2f',
-    cmap='Blues',
+    fmt=".2f",
+    cmap="Blues",
     cbar=False,
     square=True,
     xticklabels=labels,
     yticklabels=labels,
     ax=ax,
 )
-ax.set_xlabel('Inferred Change')
-ax.set_ylabel('Actual Change')
-plt.title('Model Inversion')
-plt.tick_params(axis='x', which='minor', bottom=False, top=False)
-plt.tick_params(axis='y', which='minor', left=False, right=False)
-plt.savefig('results/confusion_matrix_model_inversion.png')
+ax.set_xlabel("Inferred Change")
+ax.set_ylabel("Actual Change")
+plt.title("Model Inversion")
+plt.tick_params(axis="x", which="minor", bottom=False, top=False)
+plt.tick_params(axis="y", which="minor", left=False, right=False)
+plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
 plt.show()
 # %%
 import pickle
 
-with open('models/conf_inversion.pkl', 'wb') as f:
+with open(MODEL_DIR / "conf_inversion.pkl", "wb") as f:
     pickle.dump(conf_mat, f)
 
 # %%

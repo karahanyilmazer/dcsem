@@ -43,8 +43,8 @@ def init_argument_parser(name=None, **kwargs):
             % (name, _parsers[name])
         )
 
-    kwargs.setdefault('formatter_class', argparse.ArgumentDefaultsHelpFormatter)
-    kwargs.setdefault('conflict_handler', 'resolve')
+    kwargs.setdefault("formatter_class", argparse.ArgumentDefaultsHelpFormatter)
+    kwargs.setdefault("conflict_handler", "resolve")
     _parsers[name] = ArgumentParser(**kwargs)
 
 
@@ -197,7 +197,7 @@ class DefaultConfigFileParser(ConfigFileParser):
 
             raise ConfigFileParserException(
                 "Unexpected line {} in {}: {}".format(
-                    i, getattr(stream, 'name', 'stream'), line
+                    i, getattr(stream, "name", "stream"), line
                 )
             )
         return items
@@ -257,12 +257,12 @@ class ConfigparserConfigFileParser(ConfigFileParser):
         result = OrderedDict()
         for section in config.sections():
             for k, v in config[section].items():
-                multiLine2SingleLine = v.replace('\n', ' ').replace('\r', ' ')
+                multiLine2SingleLine = v.replace("\n", " ").replace("\r", " ")
                 # handle special case for lists
-                if '[' in multiLine2SingleLine and ']' in multiLine2SingleLine:
+                if "[" in multiLine2SingleLine and "]" in multiLine2SingleLine:
                     # ensure not a dict with a list value
-                    prelist_string = multiLine2SingleLine.split('[')[0]
-                    if '{' not in prelist_string:
+                    prelist_string = multiLine2SingleLine.split("[")[0]
+                    if "{" not in prelist_string:
                         result[k] = literal_eval(multiLine2SingleLine)
                     else:
                         result[k] = multiLine2SingleLine
@@ -330,7 +330,7 @@ class YAMLConfigFileParser(ConfigFileParser):
                 "The config file doesn't appear to "
                 "contain 'key: value' pairs (aka. a YAML mapping). "
                 "yaml.load('%s') returned type '%s' instead of 'dict'."
-                % (getattr(stream, 'name', 'stream'), type(parsed_obj).__name__)
+                % (getattr(stream, "name", "stream"), type(parsed_obj).__name__)
             )
 
         result = OrderedDict()
@@ -425,32 +425,32 @@ class ArgumentParser(argparse.ArgumentParser):
         # This is the only way to make positional args (tested in the argparse
         # main test suite) and keyword arguments work across both Python 2 and
         # 3. This could be refactored to not need extra local variables.
-        add_config_file_help = kwargs.pop('add_config_file_help', True)
-        add_env_var_help = kwargs.pop('add_env_var_help', True)
-        auto_env_var_prefix = kwargs.pop('auto_env_var_prefix', None)
-        default_config_files = kwargs.pop('default_config_files', [])
+        add_config_file_help = kwargs.pop("add_config_file_help", True)
+        add_env_var_help = kwargs.pop("add_env_var_help", True)
+        auto_env_var_prefix = kwargs.pop("auto_env_var_prefix", None)
+        default_config_files = kwargs.pop("default_config_files", [])
         ignore_unknown_config_file_keys = kwargs.pop(
-            'ignore_unknown_config_file_keys', False
+            "ignore_unknown_config_file_keys", False
         )
         config_file_parser_class = kwargs.pop(
-            'config_file_parser_class', DefaultConfigFileParser
+            "config_file_parser_class", DefaultConfigFileParser
         )
-        args_for_setting_config_path = kwargs.pop('args_for_setting_config_path', [])
-        config_arg_is_required = kwargs.pop('config_arg_is_required', False)
+        args_for_setting_config_path = kwargs.pop("args_for_setting_config_path", [])
+        config_arg_is_required = kwargs.pop("config_arg_is_required", False)
         config_arg_help_message = kwargs.pop(
-            'config_arg_help_message', "config file path"
+            "config_arg_help_message", "config file path"
         )
         args_for_writing_out_config_file = kwargs.pop(
-            'args_for_writing_out_config_file', []
+            "args_for_writing_out_config_file", []
         )
         write_out_config_file_arg_help_message = kwargs.pop(
-            'write_out_config_file_arg_help_message',
+            "write_out_config_file_arg_help_message",
             "takes the current "
             "command line args and writes them out to a config file at the "
             "given path, then exits",
         )
 
-        self._config_file_open_func = kwargs.pop('config_file_open_func', open)
+        self._config_file_open_func = kwargs.pop("config_file_open_func", open)
 
         self._add_config_file_help = add_config_file_help
         self._add_env_var_help = add_env_var_help
@@ -502,7 +502,7 @@ class ArgumentParser(argparse.ArgumentParser):
             env_vars=env_vars,
         )
         if argv:
-            self.error('unrecognized arguments: %s' % ' '.join(argv))
+            self.error("unrecognized arguments: %s" % " ".join(argv))
         return args
 
     def parse_known_args(
@@ -533,7 +533,7 @@ class ArgumentParser(argparse.ArgumentParser):
         self._source_to_settings = OrderedDict()
         if args:
             a_v_pair = (None, list(args))  # copy args list to isolate changes
-            self._source_to_settings[_COMMAND_LINE_SOURCE_KEY] = {'': a_v_pair}
+            self._source_to_settings[_COMMAND_LINE_SOURCE_KEY] = {"": a_v_pair}
 
         # handle auto_env_var_prefix __init__ arg by setting a.env_var as needed
         if self._auto_env_var_prefix is not None:
@@ -552,7 +552,7 @@ class ArgumentParser(argparse.ArgumentParser):
                     )
                     a.env_var = (
                         (self._auto_env_var_prefix + stripped_config_file_key)
-                        .replace('-', '_')
+                        .replace("-", "_")
                         .upper()
                     )
 
@@ -573,11 +573,11 @@ class ArgumentParser(argparse.ArgumentParser):
             # Make list-string into list.
             if action.nargs or isinstance(action, argparse._AppendAction):
                 nargs = True
-                element_capture = re.match(r'\[(.*)\]', value)
+                element_capture = re.match(r"\[(.*)\]", value)
                 if element_capture:
                     value = [
                         val.strip()
-                        for val in element_capture.group(1).split(',')
+                        for val in element_capture.group(1).split(",")
                         if val.strip()
                     ]
             env_var_args += self.convert_item_to_command_line_arg(action, key, value)
@@ -771,7 +771,7 @@ class ArgumentParser(argparse.ArgumentParser):
         config_file_items = OrderedDict()
         for source, settings in source_to_settings.items():
             if source == _COMMAND_LINE_SOURCE_KEY:
-                _, existing_command_line_args = settings['']
+                _, existing_command_line_args = settings[""]
                 for action in self._actions:
                     config_file_keys = self.get_possible_config_keys(action)
                     if (
@@ -845,7 +845,7 @@ class ArgumentParser(argparse.ArgumentParser):
         elif isinstance(value, list):
             accepts_list = (
                 isinstance(action, (argparse._StoreAction, argparse._AppendAction))
-                and action.nargs in ('+', '*')
+                and action.nargs in ("+", "*")
             ) or (
                 isinstance(action, argparse._StoreAction)
                 and isinstance(action.nargs, int)
@@ -889,7 +889,7 @@ class ArgumentParser(argparse.ArgumentParser):
         keys = []
 
         # Do not write out the config options for writing out a config file
-        if getattr(action, 'is_write_out_config_file_arg', None):
+        if getattr(action, "is_write_out_config_file_arg", None):
             return keys
 
         for arg in action.option_strings:
@@ -953,7 +953,7 @@ class ArgumentParser(argparse.ArgumentParser):
             # validate the user-provided config file path
             user_config_file = os.path.expanduser(user_config_file)
             if not os.path.isfile(user_config_file):
-                self.error('File not found: %s' % user_config_file)
+                self.error("File not found: %s" % user_config_file)
 
             config_files += [self._config_file_open_func(user_config_file)]
 
@@ -982,7 +982,7 @@ class ArgumentParser(argparse.ArgumentParser):
                     if isinstance(value, str):
                         r.write("  %s\n" % value)
                     elif isinstance(value, list):
-                        r.write("  %s\n" % ' '.join(value))
+                        r.write("  %s\n" % " ".join(value))
 
         return r.getvalue()
 

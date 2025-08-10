@@ -1,5 +1,6 @@
 import pickle
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,8 +29,8 @@ def initialize_parameters(bounds, params_to_sim, random=False):
 
 def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
     connections = []
-    connections.append(f'R0, L0 -> R1, L0 = {a01}')  # ROI0 -> ROI1 connection
-    connections.append(f'R1, L0 -> R0, L0 = {a10}')  # ROI1 -> ROI0 connection
+    connections.append(f"R0, L0 -> R1, L0 = {a01}")  # ROI0 -> ROI1 connection
+    connections.append(f"R1, L0 -> R0, L0 = {a10}")  # ROI1 -> ROI0 connection
     return create_A_matrix(
         num_rois=2,
         num_layers=1,
@@ -40,12 +41,12 @@ def get_one_layer_A(a01=0.4, a10=0.4, self_connections=-1):
 
 def get_one_layer_C(c0=0.5, c1=0.5):
     connections = []
-    connections.append(f'R0, L0 = {c0}')  # Input --> ROI0 connection
-    connections.append(f'R1, L0 = {c1}')  # Input --> ROI1 connection
+    connections.append(f"R0, L0 = {c0}")  # Input --> ROI0 connection
+    connections.append(f"R1, L0 = {c1}")  # Input --> ROI1 connection
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
-def simulate_bold(params, num_rois, time, u):
+def simulate_bold(params, num_rois, time, u, squeeze=True):
     """
     Simulate BOLD signals for the given parameters.
 
@@ -56,11 +57,12 @@ def simulate_bold(params, num_rois, time, u):
         u: Input signal.
 
     Returns:
-        A list of simulated BOLD signals, one for each value in the parameter arrays.
+        A numpy array of shape (N, T, R) where N is number of parameter sets,
+        T is time points, and R is number of ROIs.
     """
     # Define input arguments for defining A and C matrices
-    A_param_names = ['a01', 'a10', 'self_connections']
-    C_param_names = ['c0', 'c1']
+    A_param_names = ["a01", "a10", "self_connections"]
+    C_param_names = ["c0", "c1"]
 
     # Determine if any parameter is an array
     param_keys = list(params.keys())
@@ -81,12 +83,16 @@ def simulate_bold(params, num_rois, time, u):
         dcm = DCM(
             num_rois,
             params={
-                'A': A,
-                'C': C,
+                "A": A,
+                "C": C,
                 **params,
             },
         )
-        return dcm.simulate(time, u)[0]
+        bold, _ = dcm.simulate(time, u)
+        if squeeze:
+            return bold  # Shape (T, R)
+        else:
+            return bold[np.newaxis, :, :]  # Shape (1, T, R)
 
     # If there are arrays, run multiple simulations
     results = []
@@ -111,49 +117,69 @@ def simulate_bold(params, num_rois, time, u):
         dcm = DCM(
             num_rois,
             params={
-                'A': A,
-                'C': C,
+                "A": A,
+                "C": C,
                 **single_params,
             },
         )
-        bold_signal = dcm.simulate(time, u)[0]
-        results.append(bold_signal)
+        bold, _ = dcm.simulate(time, u)
+        results.append(bold)
 
-    return np.array(results)
+    return np.array(results)  # Shape (N, T, R)
 
 
-def add_noise(signal, snr_db):
+def add_noise(signal, snr_db, rng=None):
+    """
+    Add Gaussian noise to a signal given a target SNR in dB.
+
+    Args:
+        signal: numpy array of signal to add noise to.
+        snr_db: desired signal-to-noise ratio in decibels.
+        rng: numpy random Generator instance or None.
+
+    Returns:
+        noisy_signal: signal plus Gaussian noise.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
     signal_power = np.mean(signal**2)
     snr = 10 ** (snr_db / 10)  # Convert dB to linear scale
     noise_power = signal_power / snr
-    noise = np.random.normal(0, np.sqrt(noise_power), signal.shape)
+    noise = rng.normal(0, np.sqrt(noise_power), signal.shape)
     noisy_signal = signal + noise
     return noisy_signal
 
 
 def add_underscore(param):
     # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r'(\D)(\d+)', r'\1_{\2}', param)
+    latex_param = re.sub(r"(\D)(\d+)", r"\1_{\2}", param)
     return r"${" + latex_param + r"}$"
 
 
-def set_style():
-    plt.style.use(['science', 'no-latex'])
-    plt.rcParams['font.family'] = 'Times New Roman'
-    plt.rcParams['figure.dpi'] = 300
+def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
+    styles = []
+    if use_science:
+        styles.append("science")
+    if use_latex:
+        styles.append("latex")
+    else:
+        styles.append("no-latex")
+    plt.style.use(styles)
+    if font_family is not None:
+        plt.rcParams["font.family"] = font_family
+    plt.rcParams["figure.dpi"] = dpi
 
 
 def get_param_colors():
-    set_style()
     # Set the colors for each parameter
-    color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color'][:4]
-    param_colors = dict(zip(['a01', 'a10', 'c0', 'c1'], color_cycle))
+    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"][:4]
+    param_colors = dict(zip(["a01", "a10", "c0", "c1"], color_cycle))
     return param_colors
 
 
-def get_summary_measures(method, time, u, num_rois, **kwargs):
+def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     # Define the allowed parameters
-    allowed_keys = ['a01', 'a10', 'c0', 'c1']
+    allowed_keys = ["a01", "a10", "c0", "c1"]
 
     # Find invalid keys
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
@@ -161,11 +187,11 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     # Assert that all keys are allowed
     assert (
         not invalid_keys
-    ), f'Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}.'
+    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
     # Filter all arguments that are not None
     params = {}
     for key, val in kwargs.items():
-        if key == 'method':
+        if key == "method":
             continue
         if val is not None:
             # Convert the values to a numpy array
@@ -180,7 +206,7 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     lengths = [len(v) for v in params.values()]
     assert all(
         length == lengths[0] for length in lengths
-    ), 'All values must have the same length!'
+    ), "All values must have the same length!"
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
@@ -191,14 +217,67 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     )
     bold_obsv = bold_true
 
-    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
+    # Concatenate along the last axis (ROIs) for PCA/ICA input
+    # bold_obsv shape: (N, T, R) --> (N, T*R)
+    tmp_bold = bold_obsv.reshape(bold_obsv.shape[0], -1)
+
+    # Center the data
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
-    if method == 'PCA':
-        pca = pickle.load(open('models/pca.pkl', 'rb'))
+    if method == "PCA":
+        pca = pickle.load(open(model_dir / "pca.pkl", "rb"))
         components = pca.transform(tmp_bold_c)
-    elif method == 'ICA':
-        ica = pickle.load(open('models/ica.pkl', 'rb'))
+    elif method == "ICA":
+        ica = pickle.load(open(model_dir / "ica.pkl", "rb"))
         components = ica.transform(tmp_bold_c)
+    else:
+        raise ValueError(f"Method '{method}' not supported. Use 'PCA' or 'ICA'.")
 
     return components
+
+
+def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
+    """
+    Get output directory with flexible subdirectory creation.
+
+    Args:
+        type: Type of output directory ('img' or 'model')
+        subfolder: Main subfolder (e.g., 'wip', 'final')
+        extra_subfolders: Additional nested subfolders as string or list
+                              (e.g., 'estimation' or ['estimation', 'plots'])
+
+    Returns:
+        Path object pointing to the created directory
+
+    Examples:
+        get_out_dir("img", "wip", "estimation")  # results/images/wip/estimation/
+        get_out_dir("img", "final", ["plots", "snr"])  # results/images/final/plots/snr/
+    """
+    if type == "img":
+        out_dir = Path("results/images")
+    elif type == "model":
+        out_dir = Path("results/models")
+    else:
+        raise ValueError(f"Unknown output type: {type}. Use 'img' or 'model'.")
+
+    # Get the absolute path to the output directory
+    out_dir = Path(__file__).parent / out_dir
+
+    # Add main subfolder if provided
+    if subfolder:
+        out_dir = out_dir / subfolder
+
+    # Add additional subfolders if provided
+    if extra_subfolders:
+        if isinstance(extra_subfolders, str):
+            out_dir = out_dir / extra_subfolders
+        elif isinstance(extra_subfolders, (list, tuple)):
+            for sub in extra_subfolders:
+                out_dir = out_dir / sub
+        else:
+            raise ValueError("extra_subfolders must be string, list, or tuple")
+
+    # Create the output directory if it doesn't exist
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    return out_dir
