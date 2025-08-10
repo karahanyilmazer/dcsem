@@ -45,7 +45,7 @@ def get_one_layer_C(c0=0.5, c1=0.5):
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
-def simulate_bold(params, num_rois, time, u):
+def simulate_bold(params, num_rois, time, u, squeeze=True):
     """
     Simulate BOLD signals for the given parameters.
 
@@ -56,7 +56,8 @@ def simulate_bold(params, num_rois, time, u):
         u: Input signal.
 
     Returns:
-        A list of simulated BOLD signals, one for each value in the parameter arrays.
+        A numpy array of shape (N, T, R) where N is number of parameter sets,
+        T is time points, and R is number of ROIs.
     """
     # Define input arguments for defining A and C matrices
     A_param_names = ["a01", "a10", "self_connections"]
@@ -86,7 +87,11 @@ def simulate_bold(params, num_rois, time, u):
                 **params,
             },
         )
-        return dcm.simulate(time, u)[0]
+        bold, _ = dcm.simulate(time, u)
+        if squeeze:
+            return bold  # Shape (T, R)
+        else:
+            return bold[np.newaxis, :, :]  # Shape (1, T, R)
 
     # If there are arrays, run multiple simulations
     results = []
@@ -116,10 +121,10 @@ def simulate_bold(params, num_rois, time, u):
                 **single_params,
             },
         )
-        bold_signal = dcm.simulate(time, u)[0]
-        results.append(bold_signal)
+        bold, _ = dcm.simulate(time, u)
+        results.append(bold)
 
-    return np.array(results)
+    return np.array(results)  # Shape (N, T, R)
 
 
 def add_noise(signal, snr_db):
@@ -190,7 +195,11 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     )
     bold_obsv = bold_true
 
-    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
+    # Concatenate along the last axis (ROIs) for PCA/ICA input
+    # bold_obsv shape: (N, T, R) --> (N, T*R)
+    tmp_bold = bold_obsv.reshape(bold_obsv.shape[0], -1)
+
+    # Center the data
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == "PCA":
