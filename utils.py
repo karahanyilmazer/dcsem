@@ -142,10 +142,18 @@ def add_underscore(param):
     return r"${" + latex_param + r"}$"
 
 
-def set_style(font="Times New Roman"):
-    plt.style.use(["science", "no-latex"])
-    plt.rcParams["font.family"] = font
-    plt.rcParams["figure.dpi"] = 300
+def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
+    styles = []
+    if use_science:
+        styles.append("science")
+    if use_latex:
+        styles.append("latex")
+    else:
+        styles.append("no-latex")
+    plt.style.use(styles)
+    if font_family is not None:
+        plt.rcParams["font.family"] = font_family
+    plt.rcParams["figure.dpi"] = dpi
 
 
 def get_param_colors():
