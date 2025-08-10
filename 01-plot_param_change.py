@@ -6,15 +6,16 @@ import numpy as np
 from matplotlib.colors import to_rgba
 
 from dcsem.utils import stim_boxcar
-from utils import add_underscore, get_param_colors, set_style, simulate_bold
+from utils import (
+    add_underscore,
+    get_out_dir,
+    get_param_colors,
+    set_style,
+    simulate_bold,
+)
 
 set_style()
-plt.rcParams["font.family"] = "Helvetica"
-plt.rcParams["axes.labelsize"] = 14
-plt.rcParams["xtick.labelsize"] = 12
-plt.rcParams["ytick.labelsize"] = 12
-plt.rcParams["legend.fontsize"] = 12
-plt.rcParams["legend.frameon"] = True
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
 
 
 # %%
@@ -58,7 +59,7 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
     legend.get_title().set_color(base_color)
 
 
-def plot_param_change(figsize=(10, 12), save=False):
+def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
     # Create the plot
     _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
 
@@ -80,8 +81,11 @@ def plot_param_change(figsize=(10, 12), save=False):
         axs[i, 1].set_yticks([])
 
     plt.tight_layout(rect=[0, 0, 0.95, 1])
+
     if save:
-        plt.savefig("img/poster/param_change.png", dpi=300)
+        out_dir = out_dir or get_out_dir(type="img", subfolder="tmp")
+        plt.savefig(f"{out_dir}/param_change.png")
+
     plt.show()
 
 
@@ -110,6 +114,6 @@ if __name__ == "__main__":
         for param, values in params.items()
     }
 
-    plot_param_change((14, 8), save=True)
+    plot_param_change((14, 8), save=True, out_dir=IMG_DIR)
 
 # %%

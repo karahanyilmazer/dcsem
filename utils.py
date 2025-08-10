@@ -1,5 +1,6 @@
 import pickle
 import re
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -163,7 +164,7 @@ def get_param_colors():
     return param_colors
 
 
-def get_summary_measures(method, time, u, num_rois, **kwargs):
+def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     # Define the allowed parameters
     allowed_keys = ["a01", "a10", "c0", "c1"]
 
@@ -211,10 +212,33 @@ def get_summary_measures(method, time, u, num_rois, **kwargs):
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == "PCA":
-        pca = pickle.load(open("models/pca.pkl", "rb"))
+        pca = pickle.load(open(model_dir / "pca.pkl", "rb"))
         components = pca.transform(tmp_bold_c)
     elif method == "ICA":
-        ica = pickle.load(open("models/ica.pkl", "rb"))
+        ica = pickle.load(open(model_dir / "ica.pkl", "rb"))
         components = ica.transform(tmp_bold_c)
+    else:
+        raise ValueError(f"Method '{method}' not supported. Use 'PCA' or 'ICA'.")
 
     return components
+
+
+def get_out_dir(type="img", subfolder=None):
+    if type == "img":
+        out_dir = Path("results/images")
+    elif type == "model":
+        out_dir = Path("results/models")
+    else:
+        raise ValueError(f"Unknown output type: {type}. Use 'img' or 'model'.")
+
+    # Get the absolute path to the output directory
+    out_dir = Path(__file__).parent / out_dir
+
+    # Add subfolder if provided
+    if subfolder:
+        out_dir = out_dir / subfolder
+
+    # Create the output directory if it doesn't exist
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    return out_dir

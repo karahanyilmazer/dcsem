@@ -15,6 +15,7 @@ from tqdm import tqdm
 from dcsem.utils import stim_boxcar
 from utils import (
     add_underscore,
+    get_out_dir,
     get_param_colors,
     get_summary_measures,
     initialize_parameters,
@@ -23,6 +24,9 @@ from utils import (
 )
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+MODEL_DIR = get_out_dir(type="model", subfolder="wip")
+
 
 # %%
 # ======================================================================================
@@ -52,28 +56,28 @@ params["a10"] = 0.5
 params["c0"] = 0.5
 params["c1"] = 0
 bold_base = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_base = get_summary_measures("PCA", time, u, NUM_ROIS, **params)
+summ_base = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)
 
 # Increase alpha
 params["a01"] += 0.5
 bold_a01 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_a01 = get_summary_measures("PCA", time, u, NUM_ROIS, **params)
+summ_a01 = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)
 
 # Increase gamma
 params["a01"] -= 0.5
 params["a10"] += 0.5
 bold_a10 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_a10 = get_summary_measures("PCA", time, u, NUM_ROIS, **params)
+summ_a10 = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)
 
 params["a10"] -= 0.5
 params["c0"] += 0.5
 bold_c0 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_c0 = get_summary_measures("PCA", time, u, NUM_ROIS, **params)
+summ_c0 = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)
 
 params["c0"] -= 0.5
 params["c1"] += 0.5
 bold_c1 = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
-summ_c1 = get_summary_measures("PCA", time, u, NUM_ROIS, **params)
+summ_c1 = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)
 
 
 # ======================================================================================
@@ -236,7 +240,7 @@ ax.set_title("BENCH Arrow Plot")
 ax.set_xlabel(f"PC{comp1}")
 ax.set_ylabel(f"PC{comp2}")
 ax.legend()
-plt.savefig(f"img/bench/arrow_plot-pc{comp1}and{comp2}.png")
+plt.savefig(IMG_DIR / "bench" / f"arrow_plot-pc{comp1}and{comp2}.png")
 plt.show()
 
 # %%
@@ -262,8 +266,8 @@ for sample_i in tqdm(range(n_samples)):
     params = dict(zip(params_to_set, sample))
 
     # Get the summary measures for unchanged parameters
-    summ_pca = get_summary_measures("PCA", time, u, NUM_ROIS, **params)[0]
-    # summ_ica = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
+    summ_pca = get_summary_measures("PCA", time, u, NUM_ROIS, MODEL_DIR, **params)[0]
+    # summ_ica = get_summary_measures('ICA', time, u, NUM_ROIS, MODEL_DIR, **params)[0]
 
     summs_pca.append(summ_pca)
     # summs_ica.append(summ_ica)
@@ -283,8 +287,12 @@ for sample_i in tqdm(range(n_samples)):
         params = dict(zip(params_to_set, sample))
 
         # Get the summary measures after the change
-        summ_pca_change = get_summary_measures("PCA", time, u, NUM_ROIS, **params)[0]
-        # summ_ica_change = get_summary_measures('ICA', time, u, NUM_ROIS, **params)[0]
+        summ_pca_change = get_summary_measures(
+            "PCA", time, u, NUM_ROIS, MODEL_DIR, **params
+        )[0]
+        # summ_ica_change = get_summary_measures(
+        #     "ICA", time, u, NUM_ROIS, MODEL_DIR, **params
+        # )[0]
 
         # Calculate the difference between unchanged and changed summary measures
         summ_pca_diff = summ_pca - summ_pca_change
@@ -336,7 +344,9 @@ axs[1].set_ylabel("")
 axs[3].set_ylabel("")
 
 plt.tight_layout()
-plt.savefig(f"img/bench/change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png")
+plt.savefig(
+    IMG_DIR / "bench" / f"change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png"
+)
 plt.show()
 
 # %%
@@ -384,7 +394,9 @@ cbar = g.figure.colorbar(
 )
 cbar.set_label(f"{param_labels[param_to_plot]} Value")
 
-plt.savefig(f"img/bench/change_by_param_{param_to_plot}-{method}_pairplot.png")
+plt.savefig(
+    IMG_DIR / "bench" / f"change_by_param_{param_to_plot}-{method}_pairplot.png"
+)
 plt.show()
 
 # %%
@@ -423,7 +435,7 @@ g.map_offdiag(sns.scatterplot, edgecolor=None, s=10)
 g.add_legend()
 g.figure.suptitle(f"Effect of Parameter Changes on {method} Summary Measures", y=1.02)
 
-plt.savefig(f"img/bench/bench_param_change-{method}_pairplot.png")
+plt.savefig(IMG_DIR / "bench" / f"bench_param_change-{method}_pairplot.png")
 plt.show()
 
 # %%

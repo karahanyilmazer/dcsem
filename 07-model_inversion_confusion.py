@@ -14,15 +14,12 @@ from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, set_style, simulate_bold
+from utils import get_out_dir, initialize_parameters, set_style, simulate_bold
 
 set_style()
-plt.rcParams["font.family"] = "Helvetica"
-plt.rcParams["axes.labelsize"] = 14
-plt.rcParams["xtick.labelsize"] = 12
-plt.rcParams["ytick.labelsize"] = 12
-plt.rcParams["legend.fontsize"] = 12
-plt.rcParams["legend.frameon"] = True
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+MODEL_DIR = get_out_dir(type="model", subfolder="wip")
+
 
 # %%
 # ======================================================================================
@@ -170,7 +167,7 @@ ax.set_ylabel("Actual Change")
 plt.title("Model Inversion")
 plt.tick_params(axis="x", which="minor", bottom=False, top=False)
 plt.tick_params(axis="y", which="minor", left=False, right=False)
-plt.savefig("results/confusion_matrix_model_inversion.png")
+plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
 plt.show()
 
 # %%
@@ -194,12 +191,12 @@ ax.set_ylabel("Actual Change")
 plt.title("Model Inversion")
 plt.tick_params(axis="x", which="minor", bottom=False, top=False)
 plt.tick_params(axis="y", which="minor", left=False, right=False)
-plt.savefig("results/confusion_matrix_model_inversion.png")
+plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
 plt.show()
 # %%
 import pickle
 
-with open("models/conf_inversion.pkl", "wb") as f:
+with open(MODEL_DIR / "conf_inversion.pkl", "wb") as f:
     pickle.dump(conf_mat, f)
 
 # %%

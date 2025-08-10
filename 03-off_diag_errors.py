@@ -16,6 +16,7 @@ from utils import (
     add_noise,
     add_underscore,
     filter_params,
+    get_out_dir,
     get_param_colors,
     initialize_parameters,
     set_style,
@@ -23,6 +24,7 @@ from utils import (
 )
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
 
 
 # %%
@@ -385,7 +387,10 @@ if __name__ == "__main__":
         )
         plt.tight_layout()
         plt.savefig(
-            f"img/presentation/estimation/random-{random}/on_diag-{'_'.join(tmp_names)}.png"
+            IMG_DIR
+            / "estimation"
+            / f"random-{random}"
+            / f"on_diag-{'_'.join(tmp_names)}.png"
         )
         plt.show()
 
@@ -401,7 +406,10 @@ if __name__ == "__main__":
             plt.plot(curr_off, label=pairs[i])
             plt.legend()
         plt.savefig(
-            f"img/presentation/estimation/random-{random}/off_diag-{'_'.join(tmp_names)}.png"
+            IMG_DIR
+            / "estimation"
+            / f"random-{random}"
+            / f"off_diag-{'_'.join(tmp_names)}.png"
         )
         plt.show()
 

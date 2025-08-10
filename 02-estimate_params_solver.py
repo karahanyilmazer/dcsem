@@ -16,6 +16,7 @@ from utils import (
     add_noise,
     add_underscore,
     filter_params,
+    get_out_dir,
     get_param_colors,
     initialize_parameters,
     set_style,
@@ -23,6 +24,7 @@ from utils import (
 )
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
 
 
 # %%
@@ -361,7 +363,7 @@ if __name__ == "__main__":
             f"Parameter Estimation Results ({', '.join([add_underscore(name) for name in tmp_names])})"
         )
         plt.tight_layout()
-        plt.savefig(f"img/presentation/estimation/{'_'.join(tmp_names)}_estimation.png")
+        plt.savefig(IMG_DIR / "estimation" / f"{'_'.join(tmp_names)}_estimation.png")
         plt.show()
 
 

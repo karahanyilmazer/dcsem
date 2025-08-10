@@ -12,15 +12,11 @@ from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import initialize_parameters, set_style, simulate_bold
+from utils import get_out_dir, initialize_parameters, set_style, simulate_bold
 
 set_style()
-plt.rcParams["font.family"] = "Helvetica"
-plt.rcParams["axes.labelsize"] = 14
-plt.rcParams["xtick.labelsize"] = 12
-plt.rcParams["ytick.labelsize"] = 12
-plt.rcParams["legend.fontsize"] = 12
-plt.rcParams["legend.frameon"] = True
+IMG_DIR = get_out_dir(type="img", subfolder="wip")
+MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 
 # %%
 # ======================================================================================
@@ -82,7 +78,7 @@ axs[1].set_title("ROI 1")
 axs[1].set_xlabel("Time")
 axs[1].set_ylim(-0.003, 0.07)
 
-plt.savefig("img/poster/bold_signals.png")
+plt.savefig(IMG_DIR / "bold_signals.png")
 plt.show()
 
 # %%
@@ -93,7 +89,7 @@ plt.title("Concatenated BOLD Signal")
 plt.xlabel("Time")
 plt.ylabel("Amplitude")
 plt.grid()
-plt.savefig("img/poster/bold_concat.png")
+plt.savefig(IMG_DIR / "bold_concat.png")
 plt.show()
 
 # %%
@@ -117,7 +113,7 @@ plt.xlabel("Number of PCA Components")
 plt.ylabel("Reconstruction Error")
 plt.legend()
 plt.grid()
-plt.savefig("img/poster/pca_elbow.png")
+plt.savefig(IMG_DIR / "pca_elbow.png")
 plt.show()
 
 # %%
@@ -136,7 +132,7 @@ axs[1].set_title("Transformed Data")
 axs[1].set_xlabel("Sample")
 axs[1].set_ylabel("PCA Value")
 
-plt.savefig("img/poster/pca_components.png")
+plt.savefig(IMG_DIR / "pca_components.png")
 plt.show()
 
 # %%
@@ -160,6 +156,7 @@ plt.xlabel("Number of ICA Components")
 plt.ylabel("Reconstruction Error")
 plt.legend()
 plt.grid()
+plt.savefig(IMG_DIR / "ica_elbow.png")
 plt.show()
 
 # %%
@@ -193,6 +190,7 @@ ax3.set_ylabel("IC Value")
 
 # Adjust layout and display
 plt.tight_layout()
+plt.savefig(IMG_DIR / "ica_components.png")
 plt.show()
 
 # %%
@@ -241,14 +239,11 @@ print(f"ICA Reconstruction Error: {recon_error_ica}")
 # %%
 display(Markdown("## Save the Fitted Models"))
 
-# Create a models folder if it doesn't exist
-os.makedirs("models", exist_ok=True)
-
 # Dump the PCA and ICA objects
-with open("models/pca.pkl", "wb") as f:
+with open(MODEL_DIR / "pca.pkl", "wb") as f:
     pickle.dump(pca, f)
 
-with open("models/ica.pkl", "wb") as f:
+with open(MODEL_DIR / "ica.pkl", "wb") as f:
     pickle.dump(ica, f)
 
 
