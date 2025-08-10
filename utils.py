@@ -137,9 +137,9 @@ def add_underscore(param):
     return r"${" + latex_param + r"}$"
 
 
-def set_style():
+def set_style(font="Times New Roman"):
     plt.style.use(["science", "no-latex"])
-    plt.rcParams["font.family"] = "Times New Roman"
+    plt.rcParams["font.family"] = font
     plt.rcParams["figure.dpi"] = 300
 
 
