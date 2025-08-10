@@ -128,11 +128,24 @@ def simulate_bold(params, num_rois, time, u, squeeze=True):
     return np.array(results)  # Shape (N, T, R)
 
 
-def add_noise(signal, snr_db):
+def add_noise(signal, snr_db, rng=None):
+    """
+    Add Gaussian noise to a signal given a target SNR in dB.
+
+    Args:
+        signal: numpy array of signal to add noise to.
+        snr_db: desired signal-to-noise ratio in decibels.
+        rng: numpy random Generator instance or None.
+
+    Returns:
+        noisy_signal: signal plus Gaussian noise.
+    """
+    if rng is None:
+        rng = np.random.default_rng()
     signal_power = np.mean(signal**2)
     snr = 10 ** (snr_db / 10)  # Convert dB to linear scale
     noise_power = signal_power / snr
-    noise = np.random.normal(0, np.sqrt(noise_power), signal.shape)
+    noise = rng.normal(0, np.sqrt(noise_power), signal.shape)
     noisy_signal = signal + noise
     return noisy_signal
 
