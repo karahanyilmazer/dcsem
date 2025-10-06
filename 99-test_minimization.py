@@ -24,7 +24,9 @@ def loss(params):
     current_params["c0"] = c0
     current_params["c1"] = c1
     obs_bold = simulate_bold(current_params, time=time, u=u, num_rois=NUM_ROIS)
-    return np.mean((true_bold - obs_bold) ** 2)
+    loss_val = np.mean((true_bold - obs_bold) ** 2)
+    loss_list.append(loss_val)
+    return loss_val
 
 
 time = np.arange(100)
@@ -88,12 +90,21 @@ print(f'c0:\t {initial_guess[2]} --> {est_params[2]:.4f}\t ({true_params["c0"]})
 print(f'c1:\t {initial_guess[3]} --> {est_params[3]:.4f}\t ({true_params["c1"]})')
 
 # %%
-# plt.figure()
-# plt.plot(a01_range, loss_scape, label='Loss Landscape')
-# plt.axvline(est_params, color='r', linestyle='--', label='Optimized a01')
-# plt.xlabel('a01')
-# plt.ylabel('Loss (MSE)')
-# plt.legend()
-# plt.show()
+plt.figure()
+plt.plot(a01_range, loss_scape, label='Loss Landscape')
+plt.axvline(est_params[0], color='r', linestyle='--', label='Optimized a01')
+plt.xlabel('a01')
+plt.ylabel('Loss (MSE)')
+plt.legend()
+plt.show()
+
+# %%
+plt.figure()
+plt.plot(loss_list)
+plt.yscale('log')
+plt.xlabel('Iteration')
+plt.ylabel('Loss (MSE)')
+plt.title('Loss Reduction Over Iterations')
+plt.show()
 
 # %%
