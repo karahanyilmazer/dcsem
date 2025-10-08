@@ -47,7 +47,17 @@ def get_one_layer_C(c0=0.5, c1=0.5):
     return create_C_matrix(num_rois=2, num_layers=1, input_connections=connections)
 
 
-def simulate_bold(params, num_rois, time, u, squeeze=True):
+def simulate_bold(
+    params,
+    num_rois,
+    time,
+    u,
+    squeeze=True,
+    ode_method=None,
+    ode_rtol=None,
+    ode_atol=None,
+    ode_max_step=None,
+):
     """
     Simulate BOLD signals for the given parameters.
 
@@ -89,6 +99,15 @@ def simulate_bold(params, num_rois, time, u, squeeze=True):
                 **params,
             },
         )
+        # Set optional solver controls
+        if ode_method is not None:
+            dcm.ode_method = ode_method
+        if ode_rtol is not None:
+            dcm.ode_rtol = ode_rtol
+        if ode_atol is not None:
+            dcm.ode_atol = ode_atol
+        if ode_max_step is not None:
+            dcm.ode_max_step = ode_max_step
         bold, _ = dcm.simulate(time, u)
         if squeeze:
             return bold  # Shape (T, R)
@@ -123,6 +142,15 @@ def simulate_bold(params, num_rois, time, u, squeeze=True):
                 **single_params,
             },
         )
+        # Set optional solver controls
+        if ode_method is not None:
+            dcm.ode_method = ode_method
+        if ode_rtol is not None:
+            dcm.ode_rtol = ode_rtol
+        if ode_atol is not None:
+            dcm.ode_atol = ode_atol
+        if ode_max_step is not None:
+            dcm.ode_max_step = ode_max_step
         bold, _ = dcm.simulate(time, u)
         results.append(bold)
 

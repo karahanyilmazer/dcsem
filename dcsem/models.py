@@ -362,6 +362,12 @@ class DCM(BaseModel):
         # SDE or ODE
         self.stochastic = stochastic
         self.state_noise_std = 0.05
+        # ODE solver controls (optional)
+        # If left as None, scipy.integrate.solve_ivp defaults (RK45) are used
+        self.ode_method = None  # e.g., "BDF" or "Radau" for stiff systems
+        self.ode_rtol = None
+        self.ode_atol = None
+        self.ode_max_step = None
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change"""
@@ -477,7 +483,19 @@ class DCM(BaseModel):
         def func(t, p):
             return F(t, p, x_fun)
 
-        ivp = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec).y
+        solve_kwargs = {}
+        if getattr(self, "ode_method", None) is not None:
+            solve_kwargs["method"] = self.ode_method
+        if getattr(self, "ode_rtol", None) is not None:
+            solve_kwargs["rtol"] = self.ode_rtol
+        if getattr(self, "ode_atol", None) is not None:
+            solve_kwargs["atol"] = self.ode_atol
+        if getattr(self, "ode_max_step", None) is not None:
+            solve_kwargs["max_step"] = self.ode_max_step
+
+        ivp = solve_ivp(
+            func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec, **solve_kwargs
+        ).y
 
         return ivp, x
 
@@ -507,7 +525,19 @@ class DCM(BaseModel):
             def func(t, p):
                 return F(t, p, u)
 
-            x = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec).y
+            solve_kwargs = {}
+            if getattr(self, "ode_method", None) is not None:
+                solve_kwargs["method"] = self.ode_method
+            if getattr(self, "ode_rtol", None) is not None:
+                solve_kwargs["rtol"] = self.ode_rtol
+            if getattr(self, "ode_atol", None) is not None:
+                solve_kwargs["atol"] = self.ode_atol
+            if getattr(self, "ode_max_step", None) is not None:
+                solve_kwargs["max_step"] = self.ode_max_step
+
+            x = solve_ivp(
+                func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec, **solve_kwargs
+            ).y
         return x
 
     def simulate(self, tvec, u=None, p=None, CNR=None):
