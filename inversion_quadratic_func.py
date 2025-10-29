@@ -333,7 +333,9 @@ span_b = SPAN_B if SPAN_B is not None else 0.7 * max(8.0, abs(b_est))
 span_c = SPAN_C if SPAN_C is not None else 0.7 * max(20.0, abs(c_est))
 spans = [span_a, span_b, span_c]
 
-for i, name in enumerate(param_names):
+fig, axes = plt.subplots(1, len(param_names), sharey=True, figsize=(13, 4))
+
+for i, (ax, name) in enumerate(zip(axes, param_names)):
     fixed_vals = make_range(theta_est[i], spans[i], n_profile)
     profile_losses = []
 
@@ -355,16 +357,16 @@ for i, name in enumerate(param_names):
         profile_losses.append(res_profile.fun)
 
     # Plotting
-    plt.figure()
-    plt.plot(fixed_vals, profile_losses, label="Profile likelihood")
-    plt.axvline(theta_est[i], color="tomato", linestyle="--", label="estimate")
-    plt.axvline(theta_true[i], color="gray", linestyle="--", label="true")
-    plt.xlabel(f"{name} value")
-    plt.ylabel("MSE")
-    plt.title(f"Profile likelihood for {name}")
-    plt.legend()
-    plt.tight_layout()
-    plt.show()
+    ax.plot(fixed_vals, profile_losses, label="Profile likelihood")
+    ax.axvline(theta_est[i], color="tomato", linestyle="--", label="estimate")
+    ax.axvline(theta_true[i], color="gray", linestyle="--", label="true")
+    ax.set_xlabel(f"{name} value")
+    ax.set_ylabel("MSE")
+    ax.set_title(f"Profile likelihood for {name}")
+    ax.legend()
+
+plt.tight_layout()
+plt.show()
 
 # %% Recovery plot
 # Assume theta_true and est_params are given arrays of shape (n_simulations,)
