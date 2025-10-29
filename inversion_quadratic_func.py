@@ -7,7 +7,7 @@ from pypalettes import load_cmap
 from scipy.optimize import minimize
 
 # Plot settings
-CMAP = load_cmap("blues9", cmap_type="continuous")
+CMAP = load_cmap("Blues", cmap_type="continuous")
 
 # Reproducibility and data settings
 SEED = 0
@@ -16,6 +16,7 @@ X_MIN, X_MAX = -5.0, 15.0
 NOISE_SIGMA = 3.0  # set 0 for noiseless
 
 # Ground-truth parameters and initial guess
+param_names = ["a", "b", "c"]
 theta_true = np.array([1.0, -12.0, 20.0])  # [a, b, c]
 theta_zero = np.array([0.5, 0.0, 0.0])
 
@@ -34,7 +35,7 @@ SPAN_B = None
 SPAN_C = None
 
 # Diagnostics toggles
-SHOW_DIAGNOSTICS = True  # Print Hessian diagnostics
+SHOW_DIAGNOSTICS = True  # Display Hessian diagnostics
 
 
 # %% Helpers: model, loss, gradient, Hessian
@@ -298,8 +299,8 @@ if SHOW_DIAGNOSTICS:
         annot=True,
         fmt=".2f",
         cmap=CMAP,
-        # vmin=-1,
-        # vmax=1,
+        vmin=-1,
+        vmax=1,
         # cbar_kws={"label": "Parameter correlation"},
     )
     ax.set_title("Correlation Matrix")
@@ -322,5 +323,67 @@ if SHOW_DIAGNOSTICS:
         print(
             f"    {['a','b','c'][i]}: [{lo:.4f}, {hi:.4f}] (True {['a','b','c'][i]}: {theta_true[i]:.4f})"
         )
+
+# %% Profile likelihoods
+n_profile = 50
+
+# Use same spans as before or compute if needed
+span_a = SPAN_A if SPAN_A is not None else 1.5 * max(1.0, abs(a_est))
+span_b = SPAN_B if SPAN_B is not None else 0.7 * max(8.0, abs(b_est))
+span_c = SPAN_C if SPAN_C is not None else 0.7 * max(20.0, abs(c_est))
+spans = [span_a, span_b, span_c]
+
+for i, name in enumerate(param_names):
+    fixed_vals = make_range(theta_est[i], spans[i], n_profile)
+    profile_losses = []
+
+    for val in fixed_vals:
+
+        def obj_fixed(th_rest):
+            th = np.array([a_est, b_est, c_est], dtype=float)
+            # Replace the ith parameter with fixed val
+            th[i] = val
+            # Replace the other parameters with th_rest
+            idx_rest = [j for j in range(3) if j != i]
+            for idx, v in zip(idx_rest, th_rest):
+                th[idx] = v
+            return mse(th, x_data, y_data)
+
+        # Initial guess for the free parameters
+        th0_rest = [theta_est[j] for j in range(3) if j != i]
+        res_profile = minimize(obj_fixed, th0_rest, method="BFGS")
+        profile_losses.append(res_profile.fun)
+
+    # Plotting
+    plt.figure()
+    plt.plot(fixed_vals, profile_losses, label="Profile likelihood")
+    plt.axvline(theta_est[i], color="tomato", linestyle="--", label="estimate")
+    plt.axvline(theta_true[i], color="gray", linestyle="--", label="true")
+    plt.xlabel(f"{name} value")
+    plt.ylabel("MSE")
+    plt.title(f"Profile likelihood for {name}")
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+# %% Recovery plot
+# Assume theta_true and est_params are given arrays of shape (n_simulations,)
+# Sort both arrays by theta_true
+sorted_indices = np.argsort(theta_true)
+true_sorted = theta_true[sorted_indices]
+est_sorted = theta_est[sorted_indices]
+
+# Compute best-fit line slope
+slope, intercept = np.polyfit(true_sorted, est_sorted, 1)
+
+plt.figure()
+plt.plot(true_sorted, est_sorted, "o", label="Estimates")
+plt.plot(true_sorted, true_sorted, "k--", label="Perfect recovery (y=x)")
+plt.xlabel("True parameter")
+plt.ylabel("Estimated parameter")
+plt.title(f"Recovery plot (slope = {slope:.3f})")
+plt.legend()
+plt.tight_layout()
+plt.show()
 
 # %%
