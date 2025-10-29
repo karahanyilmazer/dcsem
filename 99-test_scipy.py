@@ -1,5 +1,6 @@
 # %%
 import matplotlib.pyplot as plt
+import numdifftools as nd
 import numpy as np
 from scipy.optimize import minimize
 
@@ -197,5 +198,215 @@ fig.colorbar(surf, ax=ax, shrink=0.7, aspect=12, pad=0.1, label="MSE")
 ax.legend(loc="best")
 plt.tight_layout()
 plt.show()
+
+# %% HESSIAN-BASED DIAGNOSTICS
+# Create Hessian function
+hess_func = nd.Hessian(lambda theta: mse(theta, x_data, y_data))
+H = hess_func(theta_hat)
+print("\nHessian (numdifftools):")
+print(H)
+
+print("\n" + "=" * 60)
+print("HESSIAN-BASED DIAGNOSTICS")
+print("=" * 60)
+
+# 1. Check for degeneracy via eigenvalues
+eigenvalues, eigenvectors = np.linalg.eigh(H)
+print("\n1. Eigenvalue Analysis (Degeneracy Check)")
+print("-" * 40)
+print(f"Eigenvalues: {eigenvalues}")
+print(
+    f"Condition number: {np.max(eigenvalues) / np.max([np.min(eigenvalues), 1e-10]):.2e}"
+)
+
+# Check for near-zero or negative eigenvalues
+min_eig = np.min(eigenvalues)
+if min_eig < 1e-6:
+    print(
+        f"⚠️  WARNING: Near-zero eigenvalue ({min_eig:.2e}) - model may be degenerate!"
+    )
+    # Find which parameter combination is problematic
+    idx = np.argmin(eigenvalues)
+    print(f"   Problematic direction: {eigenvectors[:, idx]}")
+elif min_eig < 0:
+    print(f"⚠️  WARNING: Negative eigenvalue ({min_eig:.2e}) - not at a minimum!")
+else:
+    print(f"✓  All eigenvalues positive - well-defined minimum")
+
+# 2. Parameter uncertainty (standard errors)
+print("\n2. Parameter Uncertainty")
+print("-" * 40)
+# For MSE, the Hessian relates to Fisher Information
+# Covariance matrix ≈ σ² * H^(-1), where σ² is the noise variance
+try:
+    H_inv = np.linalg.inv(H)
+
+    # Estimate noise variance from residuals
+    residuals = y_data - model(theta_hat, x_data)
+    sigma_sq_hat = np.var(residuals, ddof=3)  # ddof=3 for 3 parameters
+
+    # Parameter covariance matrix
+    cov_matrix = sigma_sq_hat * H_inv
+
+    # Standard errors
+    param_std = np.sqrt(np.diag(cov_matrix))
+    param_names = ["a", "b", "c"]
+    true_params = [a_true, b_true, c_true]
+
+    print(f"Estimated noise variance: {sigma_sq_hat:.4f}")
+    print(f"True noise variance: {noise_sigma**2:.4f}\n")
+
+    print("Parameter estimates ± std error:")
+    for i, name in enumerate(param_names):
+        print(
+            f"  {name}: {theta_hat[i]:8.4f} ± {param_std[i]:.4f}  "
+            f"(true: {true_params[i]:8.4f})"
+        )
+
+    # Check if true parameters are within confidence intervals
+    print("\n95% Confidence Intervals:")
+    all_within = True
+    for i, name in enumerate(param_names):
+        ci_lower = theta_hat[i] - 1.96 * param_std[i]
+        ci_upper = theta_hat[i] + 1.96 * param_std[i]
+        within = ci_lower <= true_params[i] <= ci_upper
+        all_within &= within
+        status = "✓" if within else "✗"
+        print(f"  {status} {name}: [{ci_lower:8.4f}, {ci_upper:8.4f}]")
+
+    if all_within:
+        print("\n✓  All true parameters within 95% CI")
+
+except np.linalg.LinAlgError:
+    print("⚠️  WARNING: Hessian is singular - model is degenerate!")
+    print("   Cannot compute parameter uncertainties.")
+
+# 3. Correlation between parameters
+print("\n3. Parameter Correlations")
+print("-" * 40)
+try:
+    # Correlation matrix from covariance
+    corr_matrix = cov_matrix / np.outer(param_std, param_std)
+
+    print("Correlation matrix:")
+    print("       a       b       c")
+    for i, name in enumerate(param_names):
+        row_str = f"{name}  "
+        for j in range(3):
+            row_str += f"{corr_matrix[i,j]:7.3f} "
+        print(row_str)
+
+    # Check for high correlations (potential identifiability issues)
+    high_corr_threshold = 0.95
+    for i in range(3):
+        for j in range(i + 1, 3):
+            if abs(corr_matrix[i, j]) > high_corr_threshold:
+                print(
+                    f"\n⚠️  High correlation between {param_names[i]} and {param_names[j]}: "
+                    f"{corr_matrix[i,j]:.3f}"
+                )
+                print("   Parameters may be difficult to estimate independently.")
+
+except:
+    pass
+
+# 4. Curvature analysis
+print("\n4. Loss Landscape Curvature")
+print("-" * 40)
+print(f"Determinant of Hessian: {np.linalg.det(H):.2e}")
+print(f"Trace of Hessian: {np.trace(H):.4f}")
+print(f"Frobenius norm: {np.linalg.norm(H, 'fro'):.4f}")
+
+# Effective dimensionality
+eig_sum = np.sum(eigenvalues)
+if eig_sum > 0:
+    eff_dim = (np.sum(eigenvalues) ** 2) / np.sum(eigenvalues**2)
+    print(f"Effective dimensionality: {eff_dim:.2f} / 3")
+    if eff_dim < 2.5:
+        print("⚠️  Low effective dimensionality suggests redundant parameters")
+
+# 5. Visualize Hessian structure
+print("\n5. Hessian Visualization")
+print("-" * 40)
+
+fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+
+# Heatmap of Hessian
+im = axes[0].imshow(H, cmap="RdBu_r", aspect="auto")
+axes[0].set_xticks(range(3))
+axes[0].set_yticks(range(3))
+axes[0].set_xticklabels(param_names)
+axes[0].set_yticklabels(param_names)
+axes[0].set_title("Hessian Matrix")
+plt.colorbar(im, ax=axes[0])
+
+# Eigenvalue spectrum
+axes[1].bar(range(3), eigenvalues, color="steelblue", alpha=0.7)
+axes[1].axhline(0, color="red", linestyle="--", linewidth=1)
+axes[1].set_xlabel("Eigenvalue index")
+axes[1].set_ylabel("Eigenvalue")
+axes[1].set_title("Eigenvalue Spectrum")
+axes[1].set_xticks(range(3))
+
+# Correlation matrix
+try:
+    im2 = axes[2].imshow(corr_matrix, cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
+    axes[2].set_xticks(range(3))
+    axes[2].set_yticks(range(3))
+    axes[2].set_xticklabels(param_names)
+    axes[2].set_yticklabels(param_names)
+    axes[2].set_title("Parameter Correlation")
+    plt.colorbar(im2, ax=axes[2])
+
+    # Add correlation values as text
+    for i in range(3):
+        for j in range(3):
+            text = axes[2].text(
+                j,
+                i,
+                f"{corr_matrix[i, j]:.2f}",
+                ha="center",
+                va="center",
+                color="black",
+                fontsize=9,
+            )
+except:
+    axes[2].text(
+        0.5,
+        0.5,
+        "Could not compute\ncorrelation matrix",
+        ha="center",
+        va="center",
+        transform=axes[2].transAxes,
+    )
+    axes[2].set_title("Parameter Correlation")
+
+plt.tight_layout()
+plt.show()
+
+# 6. Compare numerical vs analytical Hessian (for validation)
+print("\n6. Numerical Validation")
+print("-" * 40)
+
+
+def hessian_analytical(theta, x, y):
+    """Analytical Hessian of MSE for quadratic model."""
+    H = np.zeros((3, 3))
+    H[0, 0] = 2 * np.mean(x**4)
+    H[0, 1] = H[1, 0] = 2 * np.mean(x**3)
+    H[0, 2] = H[2, 0] = 2 * np.mean(x**2)
+    H[1, 1] = 2 * np.mean(x**2)
+    H[1, 2] = H[2, 1] = 2 * np.mean(x)
+    H[2, 2] = 2.0
+    return H
+
+
+H_analytical = hessian_analytical(theta_hat, x_data, y_data)
+diff = np.abs(H - H_analytical)
+print(f"Max difference (numerical vs analytical): {np.max(diff):.2e}")
+if np.max(diff) < 1e-4:
+    print("✓  Numerical Hessian agrees with analytical")
+else:
+    print("⚠️  Large discrepancy - check numerical precision")
 
 # %%
