@@ -6,7 +6,6 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
 from matplotlib.colors import LinearSegmentedColormap
 
 from dcsem.models import DCM

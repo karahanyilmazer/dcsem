@@ -6,7 +6,6 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
 from IPython.display import Markdown, display
 from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
