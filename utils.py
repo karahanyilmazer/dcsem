@@ -1,5 +1,7 @@
+import json
 import pickle
 import re
+import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -310,6 +312,26 @@ def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     return out_dir
+
+
+def log_run(
+    model_name, method, seed, settings, params, hessian, performance, log_dir="logs"
+):
+    record = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "model": model_name,
+        "method": method,
+        "seed": seed,
+        "settings": settings,
+        "params": params,
+        "hessian": hessian,
+        "performance": performance,
+    }
+    Path(log_dir).mkdir(exist_ok=True)
+    fname = Path(log_dir) / f"{model_name}_{method}.json"
+    with open(fname, "w") as f:
+        json.dump(record, f, indent=2)
+    print(f"Logged results to {fname}")
 
 
 def get_colormap(name="parula", as_colors=False):

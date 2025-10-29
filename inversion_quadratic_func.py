@@ -6,19 +6,24 @@ import seaborn as sns
 from pypalettes import load_cmap
 from scipy.optimize import minimize
 
-# Plot settings
-CMAP = load_cmap("Blues", cmap_type="continuous")
+from utils import log_run
 
 # Reproducibility and data settings
-SEED = 0
-N_POINTS = 50
-X_MIN, X_MAX = -5.0, 15.0
-NOISE_SIGMA = 3.0  # set 0 for noiseless
+SEED = 42
+n_samples = 50
+x_min, x_max = -5.0, 15.0
+noise_sigma = 3.0  # set 0 for noiseless
 
 # Ground-truth parameters and initial guess
 param_names = ["a", "b", "c"]
 theta_true = np.array([1.0, -12.0, 20.0])  # [a, b, c]
 theta_zero = np.array([0.5, 0.0, 0.0])
+
+# Optimization settings
+opt_method = "BFGS"  # Optimization method
+
+# Plot settings
+cmap = load_cmap("Blues", cmap_type="continuous")
 
 # Plot toggles
 PLOT_1D = True
@@ -80,14 +85,14 @@ def make_range(center, span, n):
 
 # %% Data generation
 rng = np.random.default_rng(SEED)
-x_data = np.linspace(X_MIN, X_MAX, N_POINTS)
+x_data = np.linspace(x_min, x_max, n_samples)
 y_clean = model(theta_true, x_data)
-y_data = y_clean + rng.normal(0.0, NOISE_SIGMA, size=x_data.shape)
+y_data = y_clean + rng.normal(0.0, noise_sigma, size=x_data.shape)
 
 # %% Fit
 obj = lambda th: mse(th, x_data, y_data)
 
-res = minimize(obj, theta_zero, method="BFGS")
+res = minimize(obj, theta_zero, method=opt_method)
 theta_est = res.x
 a_est, b_est, c_est = theta_est.tolist()
 
@@ -110,7 +115,7 @@ plt.show()
 print("Fit:")
 print(f"  theta_true: {theta_true}")
 print(f"  theta_est : {np.round(theta_est, 4)}")
-print(f"  MSE: {mse_est:.4f}  (noise var ~ {NOISE_SIGMA**2:.2f})")
+print(f"  MSE: {mse_est:.4f}  (noise var ~ {noise_sigma**2:.2f})")
 
 # %% Loss landscapes - 1D (optional)
 if PLOT_1D:
@@ -298,7 +303,7 @@ if SHOW_DIAGNOSTICS:
         corr,
         annot=True,
         fmt=".2f",
-        cmap=CMAP,
+        cmap=cmap,
         vmin=-1,
         vmax=1,
         # cbar_kws={"label": "Parameter correlation"},
@@ -313,7 +318,7 @@ if SHOW_DIAGNOSTICS:
     print(f"  Difference to analytical Hessian: {np.linalg.norm(H - H_analytical):.2e}")
     print(f"  Eigenvalues: {np.round(eigvals, 4)}")
     print(f"  Condition number: {cond:.2e}")
-    print(f"  Estimated noise variance: {sigma_sq_est:.4f}, True: {NOISE_SIGMA**2:.4f}")
+    print(f"  Estimated noise variance: {sigma_sq_est:.4f}, True: {noise_sigma**2:.4f}")
     print(f"  Standard error[a,b,c]: {np.round(se, 4)}")
     if np.isfinite(max_offdiag_corr):
         print(f"  Max. off-diagonal correlation: {max_offdiag_corr:.3f}")
@@ -351,7 +356,7 @@ for i, name in enumerate(param_names):
 
         # Initial guess for the free parameters
         th0_rest = [theta_est[j] for j in range(3) if j != i]
-        res_profile = minimize(obj_fixed, th0_rest, method="BFGS")
+        res_profile = minimize(obj_fixed, th0_rest, method=opt_method)
         profile_losses.append(res_profile.fun)
 
     # Plotting
@@ -385,5 +390,22 @@ plt.title(f"Recovery plot (slope = {slope:.3f})")
 plt.legend()
 plt.tight_layout()
 plt.show()
+
+# %%
+log_run(
+    model_name="quadratic",
+    method=opt_method,
+    seed=SEED,
+    settings={"n_samples": n_samples, "noise_sigma": noise_sigma},
+    params={
+        "names": ["a", "b", "c"],
+        "true": theta_true.tolist(),
+        "est": theta_est.tolist(),
+        "se": se.tolist(),
+        "corr_max": float(max_offdiag_corr),
+    },
+    hessian={"cond": cond, "eigvals": eigvals.tolist()},
+    performance={"mse": mse_est, "slope_recovery": slope},
+)
 
 # %%
