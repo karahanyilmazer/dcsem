@@ -43,12 +43,7 @@ SPAN_C = None
 SHOW_DIAGNOSTICS = True  # Display Hessian diagnostics
 
 
-# %% Helpers: model, loss, gradient, Hessian
-def design_matrix(x):
-    # Features: [x^2, x, 1]
-    return np.stack([x**2, x, np.ones_like(x)], axis=1)
-
-
+# %% Helper functions
 def model(theta, x):
     a, b, c = theta
     return a * x**2 + b * x + c
