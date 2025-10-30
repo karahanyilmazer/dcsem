@@ -1,5 +1,6 @@
 # %% Imports and config
 import itertools
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numdifftools as nd
@@ -8,7 +9,7 @@ import seaborn as sns
 from pypalettes import load_cmap
 from scipy.optimize import minimize
 
-from utils import log_run
+from utils import log_run, to_latex_label
 
 # =============================================================================
 # MODEL DEFINITIONS - Choose one or define your own
@@ -22,6 +23,7 @@ def model(theta, x):
 
 
 model_name = "quadratic"
+model_display_name = "Quadratic Model"
 param_names = ["a", "b", "c"]
 theta_true = np.array([1.0, -12.0, 20.0])
 theta_zero = np.array([0.5, 0.0, 0.0])
@@ -34,18 +36,20 @@ theta_zero = np.array([0.5, 0.0, 0.0])
 
 
 # model_name = "product_degen"
+# model_display_name = "Product Model (Degenerate)"
 # param_names = ["a", "b", "c"]
 # theta_true = np.array([2.0, 3.0, 5.0])  # slope = a*b = 6
 # theta_zero = np.array([1.0, 1.0, 0.0])
 
 
-# 3️⃣ Product degeneracy (structural non-identifiability)
+# 3️⃣ Product reparametrized (identifiable)
 # def model(theta, x):
 #     alpha, c = theta
 #     return alpha * x + c
 
 
 # model_name = "product_reparam"
+# model_display_name = "Product Model (Reparametrized)"
 # param_names = ["alpha", "c"]
 # theta_true = np.array([6.0, 5.0])  # slope = a*b = 6
 # theta_zero = np.array([1.0, 0.0])
@@ -58,6 +62,7 @@ theta_zero = np.array([0.5, 0.0, 0.0])
 
 
 # model_name = "sum_of_exponentials"
+# model_display_name = "Sum of Exponentials"
 # param_names = ["A1", "k1", "A2", "k2"]
 # theta_true = np.array([5.0, 0.5, 3.0, 0.1])
 # theta_zero = np.array([4.0, 0.4, 2.0, 0.15])
@@ -70,6 +75,7 @@ theta_zero = np.array([0.5, 0.0, 0.0])
 
 
 # model_name = "michaelis_menten"
+# model_display_name = "Michaelis-Menten"
 # param_names = ["Vmax", "KM"]
 # theta_true = np.array([10.0, 2.0])
 # theta_zero = np.array([8.0, 1.5])
@@ -82,6 +88,7 @@ theta_zero = np.array([0.5, 0.0, 0.0])
 
 
 # model_name = "logistic_sigmoid"
+# model_display_name = "Logistic Sigmoid"
 # param_names = ["L", "k", "x0"]
 # theta_true = np.array([1.0, 1.0, 5.0])
 # theta_zero = np.array([0.8, 0.8, 4.0])
@@ -94,6 +101,7 @@ theta_zero = np.array([0.5, 0.0, 0.0])
 
 
 # model_name = "power_law"
+# model_display_name = "Power Law"
 # param_names = ["a", "b"]
 # theta_true = np.array([2.0, 1.5])
 # theta_zero = np.array([1.5, 1.2])
@@ -116,6 +124,9 @@ opt_method = "BFGS"
 
 # Plot settings
 cmap = load_cmap("Blues", cmap_type="continuous")
+plot_dir = Path("img") / "inversion" / opt_method / model_name
+plot_dir.mkdir(parents=True, exist_ok=True)
+print(f"Plots will be saved to: {plot_dir}")
 
 # Plot toggles
 PLOT_1D = True
@@ -197,8 +208,10 @@ plt.plot(x_plot, y_fit, color="tomato", label="fitted")
 plt.plot(x_plot, y_true, color="gray", linestyle="--", label="true")
 plt.xlabel("x")
 plt.ylabel("y")
+plt.title(f"{model_display_name} - Data and Fit")
 plt.legend()
 plt.tight_layout()
+plt.savefig(plot_dir / "data_fit.png", dpi=300, bbox_inches="tight")
 plt.show()
 
 
@@ -231,12 +244,14 @@ if PLOT_1D:
         ax.plot(grid, losses)
         ax.axvline(theta_true[i], color="gray", linestyle="--", label="true")
         ax.axvline(theta_est[i], color="tomato", label="estimate")
-        ax.set_xlabel(name)
-        ax.set_title(f"MSE vs {name}")
+        ax.set_xlabel(to_latex_label(name))
+        ax.set_title(f"MSE vs {to_latex_label(name)}")
 
     axes[0].set_ylabel("MSE")
     axes[0].legend()
+    fig.suptitle(f"{model_display_name} - 1D Loss Landscape", y=1.02)
     plt.tight_layout()
+    plt.savefig(plot_dir / "loss_landscape_1d.png", dpi=300, bbox_inches="tight")
     plt.show()
 
 
@@ -296,18 +311,21 @@ if PLOT_2D and n_params >= 2:
             s=40,
             label="true",
         )
-        ax.set_xlabel(param_names[i])
-        ax.set_ylabel(param_names[j])
+        ax.set_xlabel(to_latex_label(param_names[i]))
+        ax.set_ylabel(to_latex_label(param_names[j]))
 
         # Build title showing fixed params
         fixed_params = [k for k in range(n_params) if k not in [i, j]]
         fixed_str = ", ".join(
-            [f"{param_names[k]}={theta_est[k]:.3g}" for k in fixed_params]
+            [
+                f"{to_latex_label(param_names[k])}={theta_est[k]:.3g}"
+                for k in fixed_params
+            ]
         )
         ax.set_title(
-            f"({param_names[i]}, {param_names[j]}) | {fixed_str}"
+            f"({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
             if fixed_str
-            else f"({param_names[i]}, {param_names[j]})"
+            else f"({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])})"
         )
         ax.legend()
 
@@ -315,8 +333,10 @@ if PLOT_2D and n_params >= 2:
     for idx in range(n_pairs, len(axes)):
         axes[idx].axis("off")
 
+    fig.suptitle(f"{model_display_name} - 2D Loss Landscape Contours", y=1.02)
     plt.tight_layout()
     fig.colorbar(cont, ax=axes[:n_pairs].tolist(), shrink=0.8, label="MSE", pad=0.02)
+    plt.savefig(plot_dir / "loss_landscape_2d.png", dpi=300, bbox_inches="tight")
     plt.show()
 
 
@@ -352,12 +372,14 @@ if PLOT_3D and n_params == 3:
     surf = ax.plot_surface(
         Grid_i, Grid_j, Z, cmap="viridis", linewidth=0, antialiased=True, alpha=0.95
     )
-    ax.set_xlabel(param_names[i])
-    ax.set_ylabel(param_names[j])
+    ax.set_xlabel(to_latex_label(param_names[i]))
+    ax.set_ylabel(to_latex_label(param_names[j]))
     ax.set_zlabel("MSE")
 
-    fixed_str = f"{param_names[2]}={theta_est[2]:.3g}"
-    ax.set_title(f"MSE({param_names[i]}, {param_names[j]}) | {fixed_str}")
+    fixed_str = f"{to_latex_label(param_names[2])}={theta_est[2]:.3g}"
+    ax.set_title(
+        f"{model_display_name} | MSE({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
+    )
 
     z_est = mse(theta_est, x_data, y_data)
     th_true_proj = theta_est.copy()
@@ -375,11 +397,12 @@ if PLOT_3D and n_params == 3:
         color="white",
         edgecolors="black",
         s=45,
-        label=f"true ({param_names[2]} fixed)",
+        label=f"true ({to_latex_label(param_names[2])} fixed)",
     )
     fig.colorbar(surf, ax=ax, shrink=0.7, aspect=12, pad=0.1, label="MSE")
     ax.legend(loc="best")
     plt.tight_layout()
+    plt.savefig(plot_dir / "loss_landscape_3d.png", dpi=300, bbox_inches="tight")
     plt.show()
 
 
@@ -435,6 +458,7 @@ if SHOW_DIAGNOSTICS:
             max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
 
             # Plot correlation matrix
+            latex_labels = [to_latex_label(name) for name in param_names]
             fig, ax = plt.subplots()
             sns.heatmap(
                 corr,
@@ -443,12 +467,15 @@ if SHOW_DIAGNOSTICS:
                 cmap=cmap,
                 vmin=-1,
                 vmax=1,
-                xticklabels=param_names,
-                yticklabels=param_names,
+                xticklabels=latex_labels,
+                yticklabels=latex_labels,
                 ax=ax,
             )
-            ax.set_title("Parameter Correlation Matrix")
+            ax.set_title(f"{model_display_name} - Parameter Correlation Matrix")
             plt.tight_layout()
+            plt.savefig(
+                plot_dir / "correlation_matrix.png", dpi=300, bbox_inches="tight"
+            )
             plt.show()
 
         except np.linalg.LinAlgError:
@@ -498,11 +525,12 @@ log_run(
         "names": param_names,
         "true": theta_true.tolist(),
         "est": theta_est.tolist(),
-        "se": se.tolist(),
+        "se": se.tolist() if not rank_deficient else [float("nan")] * n_params,
         "corr_max": float(max_offdiag_corr) if np.isfinite(max_offdiag_corr) else None,
     },
     hessian={"cond": float(cond), "eigvals": eigvals.tolist()},
     performance={"mse": float(mse_est)},
+    correlation=corr.tolist() if corr is not None else None,
 )
 
 # %%
