@@ -364,8 +364,30 @@ def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
 
 
 def log_run(
-    model_name, method, seed, settings, params, hessian, performance, log_dir="logs"
+    model_name,
+    method,
+    seed,
+    settings,
+    params,
+    hessian,
+    performance,
+    log_dir="logs",
+    diagnostics=None,
+    correlation=None,
 ):
+    """
+    Log a run (standard optimization or MCMC).
+    If diagnostics is provided, treat as MCMC-style run and include diagnostics in metadata.
+    Hessian is stored as {} if None.
+    Correlation matrix can be provided separately.
+    """
+    # Handle hessian as empty dict if None
+    hessian_to_store = hessian if hessian is not None else {}
+
+    # Add correlation to hessian dict if provided
+    if correlation is not None:
+        hessian_to_store["correlation"] = correlation
+
     record = {
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
         "model": model_name,
@@ -373,14 +395,18 @@ def log_run(
         "seed": seed,
         "settings": settings,
         "params": params,
-        "hessian": hessian,
+        "hessian": hessian_to_store,
         "performance": performance,
+        "diagnostics": diagnostics,
     }
     Path(log_dir).mkdir(exist_ok=True)
     fname = Path(log_dir) / f"{model_name}_{method}.json"
     with open(fname, "w") as f:
         json.dump(record, f, indent=2)
-    print(f"Logged results to {fname}")
+    if diagnostics is not None:
+        print(f"Logged MCMC results to {fname}")
+    else:
+        print(f"Logged standard run results to {fname}")
 
 
 def get_colormap(name="parula", as_colors=False):
