@@ -186,6 +186,56 @@ def add_underscore(param):
     return r"${" + latex_param + r"}$"
 
 
+def to_latex_label(param):
+    """
+    Convert parameter name to LaTeX label.
+
+    Examples:
+        'a' -> r'$a$'
+        'alpha' -> r'$\alpha$'
+        'Vmax' -> r'$V_{\mathrm{max}}$'
+        'KM' -> r'$K_M$'
+        'k1' -> r'$k_1$'
+        'A1' -> r'$A_1$'
+        'x0' -> r'$x_0$'
+    """
+    # Greek letters mapping
+    greek = {
+        "alpha": r"\alpha",
+        "beta": r"\beta",
+        "gamma": r"\gamma",
+        "delta": r"\delta",
+        "epsilon": r"\epsilon",
+        "theta": r"\theta",
+        "lambda": r"\lambda",
+        "mu": r"\mu",
+        "sigma": r"\sigma",
+        "tau": r"\tau",
+        "phi": r"\phi",
+        "omega": r"\omega",
+    }
+
+    # Check if it's a Greek letter
+    if param.lower() in greek:
+        return f"${greek[param.lower()]}$"
+
+    # Special cases
+    if param == "Vmax":
+        return r"$V_{\mathrm{max}}$"
+    if param == "KM":
+        return r"$K_M$"
+
+    # Handle mixed case with subscript (e.g., 'k1', 'A2', 'x0')
+    # Pattern: letter(s) followed by digit(s)
+    match = re.match(r"^([A-Za-z]+)(\d+)$", param)
+    if match:
+        base, subscript = match.groups()
+        return f"${base}_{{{subscript}}}$"
+
+    # Default: wrap in $...$
+    return f"${param}$"
+
+
 def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
     styles = []
     if use_science:
