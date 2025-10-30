@@ -14,8 +14,8 @@ set_style()
 # Input
 time = np.arange(200)  # Time vector (seconds)
 # Stimulus function (onset, duration, amplitude)
-# u = stim_boxcar([[0, 10, 1]])
-u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
+u = stim_boxcar([[10, 10, 1]])
+# u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Connectivity parameters
 num_rois = 2
