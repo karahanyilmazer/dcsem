@@ -6,7 +6,9 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from cycler import cycler
 from matplotlib.colors import LinearSegmentedColormap
+from pypalettes import load_cmap
 
 from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix
@@ -236,18 +238,42 @@ def to_latex_label(param):
     return f"${param}$"
 
 
-def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
-    styles = []
-    if use_science:
-        styles.append("science")
-    if use_latex:
-        styles.append("latex")
-    else:
-        styles.append("no-latex")
-    plt.style.use(styles)
-    if font_family is not None:
-        plt.rcParams["font.family"] = font_family
-    plt.rcParams["figure.dpi"] = dpi
+def set_style(dpi=300):
+    pt = 1.0 / 72.27
+    width = 483.6969 * pt
+    golden = (1 + 5**0.5) / 2
+    cmap = load_cmap("X78")
+    plt.rcParams.update(
+        {
+            "figure.figsize": (width, width / golden),
+            "axes.linewidth": 0.7,
+            "xtick.direction": "in",
+            "ytick.direction": "in",
+            "xtick.minor.visible": True,
+            "ytick.minor.visible": True,
+            "xtick.top": False,
+            "ytick.right": False,
+            "axes.spines.right": False,
+            "axes.spines.top": False,
+            "xtick.major.size": 3.0,
+            "ytick.major.size": 3.0,
+            "xtick.minor.size": 1.5,
+            "ytick.minor.size": 1.5,
+            "xtick.major.width": 0.5,
+            "ytick.major.width": 0.5,
+            "xtick.minor.width": 0.5,
+            "ytick.minor.width": 0.5,
+            "legend.edgecolor": "black",
+            "legend.borderaxespad": 0.7,
+            "text.usetex": True,
+            "savefig.bbox": "tight",
+            "text.latex.preamble": r"\usepackage{amsmath}\usepackage{amssymb}",
+            "font.family": "serif",
+            "figure.dpi": dpi,
+            "savefig.dpi": dpi,
+            "axes.prop_cycle": cycler("color", cmap.colors),
+        }
+    )
 
 
 def get_param_colors():
