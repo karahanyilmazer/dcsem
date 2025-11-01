@@ -429,12 +429,14 @@ def log_run(
     log_dir="logs",
     diagnostics=None,
     correlation=None,
+    overwrite=False,
 ):
     """
     Log a run (standard optimization or MCMC).
     If diagnostics is provided, treat as MCMC-style run and include diagnostics in metadata.
     Hessian is stored as {} if None.
     Correlation matrix can be provided separately.
+    Files are saved with timestamps to avoid overwriting existing logs.
     """
     # Handle hessian as empty dict if None
     hessian_to_store = hessian if hessian is not None else {}
@@ -455,7 +457,14 @@ def log_run(
         "diagnostics": diagnostics,
     }
     Path(log_dir).mkdir(exist_ok=True)
-    fname = Path(log_dir) / f"{model_name}_{method}.json"
+
+    # Create filename with timestamp to avoid overwriting
+    if overwrite:
+        fname = Path(log_dir) / f"{model_name}_{method}.json"
+    else:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        fname = Path(log_dir) / f"{model_name}_{method}_{timestamp}.json"
+
     with open(fname, "w") as f:
         json.dump(record, f, indent=2)
     if diagnostics is not None:
