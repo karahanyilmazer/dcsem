@@ -160,26 +160,66 @@ def simulate_bold(
     return np.array(results)  # Shape (N, T, R)
 
 
-def add_noise(signal, snr_db, rng=None):
+def add_noise(signal, snr_db=None, tsnr=None, noise_std=None, rng=None):
     """
-    Add Gaussian noise to a signal given a target SNR in dB.
+    Add Gaussian noise to a BOLD signal using one of three methods.
 
     Args:
-        signal: numpy array of signal to add noise to.
-        snr_db: desired signal-to-noise ratio in decibels.
+        signal: numpy array of BOLD signal to add noise to (shape: T or T×R).
+        snr_db: (optional) signal-to-noise ratio in decibels (power-based).
+        tsnr: (optional) temporal SNR = mean(signal) / std(noise) (amplitude-based, fMRI standard).
+        noise_std: (optional) direct specification of noise standard deviation.
         rng: numpy random Generator instance or None.
+
+    Note: Provide exactly ONE of snr_db, tsnr, or noise_std.
+
+    Temporal SNR (tSNR) is the standard metric in fMRI:
+        - tSNR = mean(signal) / std(noise)
+        - Typical values: 7-50 for raw voxels, up to 400 for regional averages
+        - Lower tSNR = more noise relative to baseline signal
 
     Returns:
         noisy_signal: signal plus Gaussian noise.
+        noise_std_used: the standard deviation of noise that was added.
+
+    Examples:
+        # Add noise with tSNR=50 (typical for fMRI regional average)
+        noisy, noise_std = add_noise(bold_signal, tsnr=50)
+
+        # Add noise with specific noise level
+        noisy, noise_std = add_noise(bold_signal, noise_std=0.1)
     """
     if rng is None:
         rng = np.random.default_rng()
-    signal_power = np.mean(signal**2)
-    snr = 10 ** (snr_db / 10)  # Convert dB to linear scale
-    noise_power = signal_power / snr
-    noise = rng.normal(0, np.sqrt(noise_power), signal.shape)
+
+    # Check that exactly one noise specification is provided
+    specs_provided = sum(x is not None for x in [snr_db, tsnr, noise_std])
+    if specs_provided != 1:
+        raise ValueError("Provide exactly ONE of: snr_db, tsnr, or noise_std")
+
+    # Calculate noise standard deviation based on the method
+    if noise_std is not None:
+        # Direct specification
+        sigma = noise_std
+
+    elif tsnr is not None:
+        # Temporal SNR (fMRI standard): tSNR = mean(signal) / std(noise)
+        # Therefore: std(noise) = mean(signal) / tSNR
+        signal_mean = np.mean(signal)
+        sigma = signal_mean / tsnr
+
+    else:  # snr_db is not None
+        # Power-based SNR (convert dB to linear scale)
+        signal_power = np.mean(signal**2)
+        snr_linear = 10 ** (snr_db / 10)
+        noise_power = signal_power / snr_linear
+        sigma = np.sqrt(noise_power)
+
+    # Generate and add noise
+    noise = rng.normal(0, sigma, signal.shape)
     noisy_signal = signal + noise
-    return noisy_signal
+
+    return noisy_signal, sigma
 
 
 def add_underscore(param, bold=False):
