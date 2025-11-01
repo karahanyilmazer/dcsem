@@ -182,10 +182,13 @@ def add_noise(signal, snr_db, rng=None):
     return noisy_signal
 
 
-def add_underscore(param):
+def add_underscore(param, bold=False):
     # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
     latex_param = re.sub(r"(\D)(\d+)", r"\1_{\2}", param)
-    return r"${" + latex_param + r"}$"
+    if bold:
+        return r"$\mathbf{" + latex_param + r"}$"
+    else:
+        return r"${" + latex_param + r"}$"
 
 
 def to_latex_label(param):
@@ -238,14 +241,38 @@ def to_latex_label(param):
     return f"${param}$"
 
 
-def set_style(dpi=300):
+def get_width_height_latex(column_width=483.6969):
+    # Calculate figsize ratios for the LaTeX file
     pt = 1.0 / 72.27
-    width = 483.6969 * pt
+
+    # \usepackage{printlen} \printlength{\columnwidth} (within a figure block)
+    width = column_width * pt
     golden = (1 + 5**0.5) / 2
-    cmap = load_cmap("X78")
+    height = width / golden
+
+    return width, height
+
+
+def set_style(dpi=300, cmap="science"):
+
+    width, height = get_width_height_latex()
+
+    if cmap == "science":
+        colors = [
+            "#0C5DA5",
+            "#00B945",
+            "#FF9500",
+            "#FF2C00",
+            "#845B97",
+            "#474747",
+            "#9e9e9e",
+        ]
+    else:
+        colors = load_cmap(cmap).colors
+
     plt.rcParams.update(
         {
-            "figure.figsize": (width, width / golden),
+            "figure.figsize": (width, height),
             "axes.linewidth": 0.7,
             "xtick.direction": "in",
             "ytick.direction": "in",
@@ -271,7 +298,7 @@ def set_style(dpi=300):
             "font.family": "serif",
             "figure.dpi": dpi,
             "savefig.dpi": dpi,
-            "axes.prop_cycle": cycler("color", cmap.colors),
+            "axes.prop_cycle": cycler("color", colors),
         }
     )
 
@@ -363,8 +390,10 @@ def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
         out_dir = Path("results/images")
     elif type == "model":
         out_dir = Path("results/models")
+    elif type == "latex":
+        out_dir = Path("/Users/karahanyilmazer/Coding/latex/68fb5441e89d8dccbc6573d3")
     else:
-        raise ValueError(f"Unknown output type: {type}. Use 'img' or 'model'.")
+        raise ValueError(f"Unknown output type: {type}. Use 'img', 'model' or 'latex'.")
 
     # Get the absolute path to the output directory
     out_dir = Path(__file__).parent / out_dir
