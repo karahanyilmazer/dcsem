@@ -1,6 +1,5 @@
 # %% Imports and config
 import warnings
-from pathlib import Path
 
 import corner
 import emcee
@@ -9,8 +8,28 @@ import numpy as np
 import seaborn as sns
 from pypalettes import load_cmap
 from scipy import optimize
+from sklearn.metrics import mean_squared_error
 
-from utils import log_run, to_latex_label
+from dcsem.utils import stim_boxcar
+from utils import (
+    add_noise,
+    get_colormap,
+    get_out_dir,
+    get_width_height_latex,
+    log_run,
+    set_style,
+    simulate_bold,
+    to_latex_label,
+)
+
+set_style()
+width, height = get_width_height_latex()
+cmap = get_colormap("YlGnBu_r")
+conf_cmap = load_cmap("Revolucion", cmap_type="continuous")
+default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+# Reproducibility and data settings
+SEED = 42
 
 # =============================================================================
 # MODEL DEFINITIONS - Choose one or define your own
@@ -18,20 +37,21 @@ from utils import log_run, to_latex_label
 
 
 # 1️⃣ Quadratic (baseline, convex, well-conditioned)
-def model(theta, x):
-    a, b, c = theta
-    return a * x**2 + b * x + c
+# def model(theta, x):
+#     a, b, c = theta
+#     return a * x**2 + b * x + c
 
 
-model_name = "quadratic"
-model_display_name = "Quadratic Model"
-param_names = ["a", "b", "c"]
-theta_true = np.array([1.0, -12.0, 20.0])
-theta_zero = np.array([0.5, 0.0, 0.0])
+# model_name = "quadratic"
+# model_display_name = "Quadratic Model"
+# param_names = ["a", "b", "c"]
+# theta_true = np.array([1.0, -12.0, 20.0])
+# theta_zero = np.array([0.5, 0.0, 0.0])
 
-# Prior specification: [(mu, sigma), ...]
-# Broad, weakly-informative Normal priors
-priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
+# # Prior specification: [(mu, sigma), ...]
+# # Broad, weakly-informative Normal priors
+# priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
+# IS_DCM_MODEL = False
 
 
 # 2️⃣ Product degeneracy (structural non-identifiability)
@@ -46,19 +66,22 @@ priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
 # theta_true = np.array([2.0, 3.0, 5.0])  # slope = a*b = 6
 # theta_zero = np.array([1.0, 1.0, 0.0])
 # priors = [(0.0, 5.0), (0.0, 5.0), (0.0, 20.0)]
+# IS_DCM_MODEL = False
 
 
 # 3️⃣ Product reparametrized (identifiable)
 # def model(theta, x):
 #     alpha, c = theta
 #     return alpha * x + c
+
+
 # model_name = "product_reparam"
 # model_display_name = "Product Model (Reparametrized)"
 # param_names = ["alpha", "c"]
 # theta_true = np.array([6.0, 5.0])
 # theta_zero = np.array([1.0, 0.0])
 # priors = [(0.0, 10.0), (0.0, 20.0)]
-
+# IS_DCM_MODEL = False
 
 # 4️⃣ Sum of exponentials (sloppy model, huge condition number)
 # def model(theta, x):
@@ -72,7 +95,7 @@ priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
 # theta_true = np.array([5.0, 0.5, 3.0, 0.1])
 # theta_zero = np.array([4.0, 0.4, 2.0, 0.15])
 # priors = [(0.0, 10.0), (0.0, 2.0), (0.0, 10.0), (0.0, 2.0)]
-
+# IS_DCM_MODEL = False
 
 # 5️⃣ Michaelis-Menten (nonlinear but identifiable)
 # def model(theta, x):
@@ -86,7 +109,7 @@ priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
 # theta_true = np.array([10.0, 2.0])
 # theta_zero = np.array([8.0, 1.5])
 # priors = [(0.0, 20.0), (0.0, 5.0)]
-
+# IS_DCM_MODEL = False
 
 # 6️⃣ Logistic / Sigmoid (nonlinear, correlated parameters)
 # def model(theta, x):
@@ -100,7 +123,7 @@ priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
 # theta_true = np.array([1.0, 1.0, 5.0])
 # theta_zero = np.array([0.8, 0.8, 4.0])
 # priors = [(0.0, 2.0), (0.0, 3.0), (0.0, 20.0)]
-
+# IS_DCM_MODEL = False
 
 # 7️⃣ Power law
 # def model(theta, x):
@@ -114,22 +137,53 @@ priors = [(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)]
 # theta_true = np.array([2.0, 1.5])
 # theta_zero = np.array([1.5, 1.2])
 # priors = [(0.0, 5.0), (0.0, 3.0)]
+# IS_DCM_MODEL = False
+
+
+# 8️⃣ DCM - 2 ROI BOLD model (requires different setup)
+# This model uses BOLD simulation instead of analytical functions
+
+IS_DCM_MODEL = True
+NUM_ROIS = 2
+time = np.arange(100)
+u = stim_boxcar([[10, 20, 1]])
+ODE_METHOD = "BDF"  # Stiff solver; use None for default RK45
+
+
+def model(theta, x):
+    """
+    For DCM: theta contains [a01, a10, c0, c1]
+    x is ignored (time and u are used instead)
+    Returns BOLD signals of shape (T, R)
+    """
+    params = dict(zip(param_names, theta))
+    bold = simulate_bold(
+        params, time=time, u=u, num_rois=NUM_ROIS, ode_method=ODE_METHOD
+    )
+    return bold  # Shape: (T, R)
+
+
+model_name = "dcm_2roi"
+model_display_name = "DCM 2-ROI BOLD Model"
+param_names = ["a01", "a10", "c0", "c1"]
+theta_true = np.array([0.4, 0.6, 0.9, 0.2])
+theta_zero = np.array([0.1, 0.1, 0.1, 0.1])
+
+# Prior specification for DCM: [(mu, sigma), ...]
+# A-matrix connections: can be negative (inhibitory) or positive (excitatory)
+# C-matrix inputs: non-negative
+priors = [
+    (-1.5, 1.5),  # a01: centered at 0, wide range for excitatory/inhibitory
+    (-1.5, 1.5),  # a10: centered at 0, wide range for excitatory/inhibitory
+    (0.0, 1.5),  # c0: centered at 0.5, moderate positive range
+    (0.0, 1.5),  # c1: centered at 0.5, moderate positive range
+]
 
 
 # =============================================================================
 # SETTINGS
 # =============================================================================
 
-# Reproducibility and data settings
-SEED = 42
-n_samples = 50
-x_min, x_max = -5.0, 15.0
-noise_sigma = 3.0  # known observation noise std
-
-# Guard against zero/invalid noise
-if not np.isfinite(noise_sigma) or noise_sigma <= 0:
-    warnings.warn("noise_sigma <= 0 detected. Clamping to 1e-6 for stability.")
-    noise_sigma = 1e-6
 
 # Auto-detect number of parameters
 n_params = len(theta_true)
@@ -139,11 +193,21 @@ n_walkers = max(24, 2 * n_params)  # should be >= 2 * n_params
 n_burn = 5000
 n_samples_mcmc = 10000
 
+# Optimization method name
+opt_method = "MCMC"
+
 # Plot settings
-cmap = load_cmap("Blues", cmap_type="continuous")
-plot_dir = Path("img") / "inversion" / "MCMC" / model_name
-plot_dir.mkdir(parents=True, exist_ok=True)
-print(f"Plots will be saved to: {plot_dir}")
+IMG_DIR = get_out_dir(
+    type="img",
+    subfolder="inversion",
+    extra_subfolders=[opt_method, model_name],
+)
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+print(f"Using model: {model_display_name}")
+print(f"Plots will be saved to: {IMG_DIR}")
+print(f"Plots will be saved to: {LATEX_DIR}")
 
 # Plot toggles
 PLOT_CORNER = True
@@ -153,12 +217,6 @@ PLOT_POSTERIOR_BANDS = True
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
-
-
-def mse(theta, x, y):
-    """Mean squared error loss."""
-    y_pred = model(theta, x)
-    return np.mean((y_pred - y) ** 2)
 
 
 def log_prior(theta):
@@ -174,9 +232,17 @@ def log_likelihood(theta, x, y, sigma):
     """Gaussian likelihood with known noise std."""
     if sigma <= 0 or not np.isfinite(sigma):
         return -np.inf
-    y_pred = model(theta, x)
-    r = (y - y_pred) / sigma
-    return -0.5 * (np.sum(r * r) + y.size * np.log(2.0 * np.pi * sigma * sigma))
+    try:
+        y_pred = model(theta, x)
+        # Ensure shapes match
+        if y_pred.shape != y.shape:
+            return -np.inf
+        r = (y - y_pred) / sigma
+        # Handle both 1D and multi-dimensional arrays
+        return -0.5 * (np.sum(r * r) + r.size * np.log(2.0 * np.pi * sigma * sigma))
+    except Exception:
+        # If simulation fails, return -inf log likelihood
+        return -np.inf
 
 
 def log_posterior(theta, x, y, sigma):
@@ -203,9 +269,27 @@ def map_estimate(theta0, x, y, sigma):
 # =============================================================================
 
 rng = np.random.default_rng(SEED)
-x_data = np.linspace(x_min, x_max, n_samples)
-y_clean = model(theta_true, x_data)
-y_data = y_clean + rng.normal(0.0, noise_sigma, size=n_samples)
+
+# Data settings
+x_min, x_max = -20.0, 20.0  # Not used for DCM
+n_samples = 50  # Not used for DCM
+
+if not IS_DCM_MODEL:
+    # Standard analytical models
+    x_data = np.linspace(x_min, x_max, n_samples)
+    # Add some variability to x_data
+    # x_data += rng.normal(0.0, 0.5 * (x_max - x_min) / n_samples, size=n_samples)
+    y_true = model(theta_true, x_data)
+    noise_sigma = 0.10 * np.std(y_true)  # 10% of signal std
+    y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
+    noise_std_actual = noise_sigma  # Store actual noise level used
+else:
+    # DCM BOLD model
+    x_data = None  # Not used for DCM
+    y_true = model(theta_true, x_data)  # Shape: (T, R)
+    noise_sigma = 0.10 * np.std(y_true)  # 10% of signal std
+    y_obs = y_true + rng.normal(0.0, noise_sigma, size=y_true.shape)
+    noise_std_actual = noise_sigma  # Store actual noise level used
 
 
 # =============================================================================
@@ -213,13 +297,13 @@ y_data = y_clean + rng.normal(0.0, noise_sigma, size=n_samples)
 # =============================================================================
 
 # Initialize walkers around MAP estimate
-theta_est = map_estimate(theta_zero, x_data, y_data, noise_sigma)
+theta_est = map_estimate(theta_zero, x_data, y_obs, noise_sigma)
 scale = np.maximum(0.05 * np.ones(n_params), 0.05 * np.abs(theta_est))
 p0 = theta_est + rng.normal(0.0, scale, size=(n_walkers, n_params))
 
 # Run sampler
 sampler = emcee.EnsembleSampler(
-    n_walkers, n_params, log_posterior, args=(x_data, y_data, noise_sigma)
+    n_walkers, n_params, log_posterior, args=(x_data, y_obs, noise_sigma)
 )
 
 print(f"Running MCMC: {n_burn} burn-in + {n_samples_mcmc} production samples...")
@@ -277,28 +361,82 @@ if acc_frac < 0.05:
 elif acc_frac > 0.8:
     print("  ⚠️  High acceptance (>0.8) - proposal may be too narrow!")
 
-
+# %%
 # =============================================================================
 # PLOT: DATA AND FITTED CURVE
 # =============================================================================
 
-x_plot = np.linspace(x_data.min(), x_data.max(), 400)
-y_mean = model(theta_mean, x_plot)
-y_true = model(theta_true, x_plot)
+if not IS_DCM_MODEL:
+    # Standard 1D analytical model plot
+    x_plot = np.linspace(x_data.min(), x_data.max(), 400)
+    y_mean = model(theta_mean, x_plot)
+    y_true = model(theta_true, x_plot)
 
-plt.figure(figsize=(8, 5))
-plt.scatter(x_data, y_data, s=20, alpha=0.7, label="data")
-plt.plot(x_plot, y_mean, color="tomato", label="posterior mean")
-plt.plot(x_plot, y_true, color="gray", linestyle="--", label="true")
-plt.xlabel("x")
-plt.ylabel("y")
-plt.title(f"{model_display_name} - Data and Fit")
-plt.legend()
-plt.tight_layout()
-plt.savefig(plot_dir / "data_fit.png", dpi=300, bbox_inches="tight")
-plt.show()
+    # Plot
+    plt.figure(figsize=(width, height))
+    plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
+    plt.plot(x_plot, y_mean, color=default_colors[2], label="posterior mean")
+    plt.plot(x_plot, y_true, color=default_colors[1], linestyle="--", label="true")
 
+    # Adjust
+    plt.xlabel("x")
+    plt.ylabel("y")
+    plt.title(rf"\textbf{{{model_display_name} - Data and Fit}}")
+    plt.legend()
 
+    # Save
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "data_fit.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+    plt.show()
+
+else:
+    # DCM BOLD model: plot each ROI's time series
+    y_mean = model(theta_mean, None)  # Shape: (T, R)
+    y_true = model(theta_true, None)  # Shape: (T, R)
+
+    # Get time vector from globals (defined in DCM model section)
+    time_vec = globals().get("time", np.arange(y_obs.shape[0]))
+    num_rois = y_obs.shape[1]
+    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height))
+
+    if num_rois == 1:
+        axes = [axes]
+
+    for r in range(num_rois):
+        axes[r].plot(
+            time_vec,
+            y_obs[:, r],
+            alpha=0.7,
+            color=default_colors[0],
+            label="observed",
+        )
+        axes[r].plot(
+            time_vec,
+            y_mean[:, r],
+            color=default_colors[2],
+            label="posterior mean",
+        )
+        axes[r].plot(
+            time_vec,
+            y_true[:, r],
+            linestyle="--",
+            color=default_colors[1],
+            label="true",
+        )
+        axes[r].set_title(f"ROI {r+1}")
+        axes[r].set_xlabel("time")
+        axes[r].grid(True, alpha=0.3)
+
+    axes[0].set_ylabel("BOLD amplitude")
+    axes[0].legend()
+    fig.suptitle(f"{model_display_name} - Data and Fit")
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "data_fit.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+    plt.show()
+
+# %%
 # =============================================================================
 # POSTERIOR PREDICTIVE BANDS
 # =============================================================================
@@ -308,33 +446,83 @@ if PLOT_POSTERIOR_BANDS:
     idx = rng.choice(chain.shape[0], size=nsamp, replace=False)
     thetas = chain[idx]
 
-    # Compute predictions for each posterior sample
-    Y = np.array([model(th, x_plot) for th in thetas])
-    y_lo = np.percentile(Y, 2.5, axis=0)
-    y_hi = np.percentile(Y, 97.5, axis=0)
+    if not IS_DCM_MODEL:
+        # Standard 1D analytical model
+        # Compute predictions for each posterior sample
+        Y = np.array([model(th, x_plot) for th in thetas])
+        y_lo = np.percentile(Y, 2.5, axis=0)
+        y_hi = np.percentile(Y, 97.5, axis=0)
 
-    plt.figure(figsize=(8, 5))
-    plt.scatter(x_data, y_data, s=18, alpha=0.6, label="data")
-    plt.plot(x_plot, y_true, color="gray", linestyle="--", label="true")
-    plt.plot(x_plot, y_mean, color="tomato", label="posterior mean")
-    plt.fill_between(
-        x_plot, y_lo, y_hi, color="tomato", alpha=0.2, label="95% posterior band"
-    )
-    plt.xlabel("x")
-    plt.ylabel("y")
-    plt.title(f"{model_display_name} - Posterior Predictive")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(plot_dir / "posterior_predictive.png", dpi=300, bbox_inches="tight")
-    plt.show()
+        plt.figure()
+        plt.scatter(x_data, y_obs, s=18, alpha=0.6, label="data")
+        plt.plot(x_plot, y_true, color=default_colors[1], linestyle="--", label="true")
+        plt.plot(x_plot, y_mean, color=default_colors[2], label="posterior mean")
+        plt.fill_between(
+            x_plot,
+            y_lo,
+            y_hi,
+            color=default_colors[2],
+            alpha=0.2,
+            label="95% posterior band",
+        )
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.title(f"{model_display_name} - Posterior Predictive")
+        plt.legend()
 
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "posterior_predictive.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
+        plt.show()
+    else:
+        # DCM BOLD model: plot each ROI with uncertainty bands
+        time_vec = globals().get("time", np.arange(y_obs.shape[0]))
+        num_rois = y_obs.shape[1]
 
+        # Compute predictions for each posterior sample
+        Y = np.array([model(th, None) for th in thetas])  # Shape: (nsamp, T, R)
+        y_lo = np.percentile(Y, 2.5, axis=0)  # Shape: (T, R)
+        y_hi = np.percentile(Y, 97.5, axis=0)  # Shape: (T, R)
+
+        fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(6 * num_rois, 5))
+        if num_rois == 1:
+            axes = [axes]
+
+        for r in range(num_rois):
+            axes[r].plot(time_vec, y_obs[:, r], label="observed", alpha=0.7)
+            axes[r].plot(
+                time_vec, y_true[:, r], color="gray", linestyle="--", label="true"
+            )
+            axes[r].plot(time_vec, y_mean[:, r], color="tomato", label="posterior mean")
+            axes[r].fill_between(
+                time_vec,
+                y_lo[:, r],
+                y_hi[:, r],
+                color="tomato",
+                alpha=0.2,
+                label="95% posterior band",
+            )
+            axes[r].set_title(f"ROI {r}")
+            axes[r].set_xlabel("time")
+            axes[r].grid(True, alpha=0.3)
+
+        axes[0].set_ylabel("BOLD amplitude")
+        axes[0].legend()
+        fig.suptitle(f"{model_display_name} - Posterior Predictive")
+
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "posterior_predictive.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
+        plt.show()
+
+# %%
 # =============================================================================
 # CORNER PLOT
 # =============================================================================
 
 if PLOT_CORNER:
     latex_labels = [to_latex_label(name) for name in param_names]
+    fig = plt.figure(figsize=(width, width))
     fig = corner.corner(
         chain,
         labels=latex_labels,
@@ -344,16 +532,20 @@ if PLOT_CORNER:
         quantiles=[0.16, 0.5, 0.84],
         bins=50,
         smooth=0.8,
+        truth_color=default_colors[1],
+        fig=fig,
     )
-    fig.suptitle(f"{model_display_name} - Posterior Distributions", y=1.0)
-    plt.savefig(plot_dir / "corner_plot.png", dpi=300, bbox_inches="tight")
+    fig.suptitle(rf"\textbf{{{model_display_name} - Posterior Distributions}}")
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "corner_plot.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_corner_plot.pdf")
     plt.show()
 
 
+# %%
 # =============================================================================
 # CORRELATION PLOT
 # =============================================================================
-
 cov = np.cov(chain, rowvar=False)
 # Check for negative variances
 diag_cov = np.diag(cov)
@@ -375,22 +567,32 @@ max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
 # Plot correlation matrix
 latex_labels = [to_latex_label(name) for name in param_names]
 fig, ax = plt.subplots()
-sns.heatmap(
+heatmap = sns.heatmap(
     corr,
     annot=True,
     fmt=".2f",
-    cmap=cmap,
+    cmap=conf_cmap,
     vmin=-1,
     vmax=1,
     xticklabels=latex_labels,
     yticklabels=latex_labels,
+    square=True,
     ax=ax,
 )
+
+# Remove ticks from heatmap
+ax.tick_params(which="both", left=False, bottom=False)
+# Remove ticks from colorbar
+cbar = heatmap.collections[0].colorbar
+cbar.ax.tick_params(which="both", size=0)
+
 ax.set_title(f"{model_display_name} - Parameter Correlation Matrix")
 plt.tight_layout()
-plt.savefig(plot_dir / "correlation_matrix.png", dpi=300, bbox_inches="tight")
+plt.savefig(IMG_DIR / "correlation_matrix.png", dpi=300, bbox_inches="tight")
+plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_correlation_matrix.pdf")
 plt.show()
 
+# %%
 # =============================================================================
 # LOGGING
 # =============================================================================
@@ -403,7 +605,7 @@ log_run(
     method="MCMC",
     seed=SEED,
     settings={
-        "n_samples": n_samples,
+        "n_samples": n_samples if not IS_DCM_MODEL else y_obs.shape[0],
         "noise_sigma": noise_sigma,
         "n_walkers": n_walkers,
         "n_burn": n_burn,
@@ -412,6 +614,7 @@ log_run(
     params={
         "names": param_names,
         "true": theta_true.tolist(),
+        "init": theta_zero.tolist(),
         "mean": theta_mean.tolist(),
         "median": theta_median.tolist(),
         "map": theta_est_post.tolist(),
@@ -426,11 +629,12 @@ log_run(
         "eff_samples": float(eff_total) if np.isfinite(eff_total) else None,
     },
     performance={
-        "mse_mean": float(mse(theta_mean, x_data, y_data)),
-        "mse_map": float(mse(theta_est_post, x_data, y_data)),
+        "mse_mean": float(mean_squared_error(y_obs, model(theta_mean, x_data))),
+        "mse_map": float(mean_squared_error(y_obs, model(theta_est_post, x_data))),
     },
     hessian=None,
     correlation=corr.tolist() if corr is not None else None,
+    overwrite=False,
 )
 
 # %%
