@@ -14,11 +14,24 @@ from sklearn.metrics import confusion_matrix
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import get_out_dir, initialize_parameters, set_style, simulate_bold
+from utils import (
+    get_colormap,
+    get_out_dir,
+    get_width_height_latex,
+    initialize_parameters,
+    set_style,
+    simulate_bold,
+)
 
 set_style()
-IMG_DIR = get_out_dir(type="img", subfolder="wip")
-MODEL_DIR = get_out_dir(type="model", subfolder="wip")
+IMG_DIR = get_out_dir(type="img", subfolder="bench_final")
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+MODEL_DIR = get_out_dir(type="model", subfolder="bench")
+cmap = get_colormap("YlGnBu")
+width, height = get_width_height_latex()
+
+SEED = 42
+rng = np.random.default_rng(SEED)
 
 
 # %%
@@ -27,7 +40,7 @@ MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 NUM_LAYERS = 1
 NUM_ROIS = 2
 time = np.arange(100)
-u = stim_boxcar([[0, 30, 1]])  # Input stimulus
+u = stim_boxcar([[10, 20, 1]])  # Input stimulus
 # u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Parameters to set and estimate
@@ -148,9 +161,9 @@ for sample_i in tqdm(range(n_samples)):
 labels = ["No Change", "a01", "a10", "c0", "c1"]
 conf_mat = confusion_matrix(true_change, inferred_change, normalize="true")
 # cmap = cbd.Spectral_8_r.mpl_colormap
-cmap = cbs.GnBu_9.mpl_colormap
+# cmap = cbs.GnBu_9.mpl_colormap
 
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+fig, ax = plt.subplots(1, 1)
 heatmap(
     conf_mat,
     annot=True,
@@ -168,35 +181,7 @@ plt.title("Model Inversion")
 plt.tick_params(axis="x", which="minor", bottom=False, top=False)
 plt.tick_params(axis="y", which="minor", left=False, right=False)
 plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
+plt.savefig(LATEX_DIR / "confusion_matrix_model_inversion.pdf")
 plt.show()
-
-# %%
-labels = ["No Change", "a01", "a10", "c0", "c1"]
-conf_mat = confusion_matrix(true_change, inferred_change, normalize="true")
-
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
-heatmap(
-    conf_mat,
-    annot=True,
-    fmt=".2f",
-    cmap="Blues",
-    cbar=False,
-    square=True,
-    xticklabels=labels,
-    yticklabels=labels,
-    ax=ax,
-)
-ax.set_xlabel("Inferred Change")
-ax.set_ylabel("Actual Change")
-plt.title("Model Inversion")
-plt.tick_params(axis="x", which="minor", bottom=False, top=False)
-plt.tick_params(axis="y", which="minor", left=False, right=False)
-plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
-plt.show()
-# %%
-import pickle
-
-with open(MODEL_DIR / "conf_inversion.pkl", "wb") as f:
-    pickle.dump(conf_mat, f)
 
 # %%

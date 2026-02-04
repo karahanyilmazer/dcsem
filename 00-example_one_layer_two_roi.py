@@ -1,14 +1,20 @@
 # %%
 # !%load_ext autoreload
 # !%autoreload 2
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from dcsem.models import DCM
 from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
-from utils import set_style
+from utils import get_out_dir, set_style
 
 set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="dcm")
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+IMG_DIR.mkdir(parents=True, exist_ok=True)
+LATEX_DIR.mkdir(parents=True, exist_ok=True)
 
 # %%
 # Input
@@ -63,12 +69,13 @@ if norm:
 
 fig, axs = plt.subplots(2, 1)
 axs[0].plot(time, u(time), label="Stimulus")
-axs[1].plot(time, bold[:, 0], label="ROI 0")
-axs[1].plot(time, bold[:, 1], label="ROI 1")
-axs[0].set_title("DCM Simulation")
-axs[0].set_ylabel("Stimulus")
+axs[1].plot(time, bold[:, 0], label="ROI 1")
+axs[1].plot(time, bold[:, 1], label="ROI 2")
+
+axs[0].set_title(r"\textbf{Simulated BOLD Responses in a Two-Region DCM}")
 axs[1].set_xlabel("Time (s)")
-axs[1].set_ylabel("BOLD Signal")
+axs[0].set_ylabel("Stimulus (a.u.)")
+axs[1].set_ylabel("BOLD Signal (a.u.)")
 axs[1].legend()
 
 plt.savefig(IMG_DIR / "2roi_input_output.png")

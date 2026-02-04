@@ -33,9 +33,7 @@ class BaseModel(object):
         )  # Parameters of the model, everything that could be fitted to data
         self.num_rois = None  # Number of ROIs
         self.num_layers = None  # Number of layers per ROI
-        self.state_vars = (
-            []
-        )  # Stave variables (things changing with time that are not directly observed)
+        self.state_vars = []  # Stave variables (things changing with time that are not directly observed)
         self.Anz = None  # Non-zero entries of the connectivity matrix
         self.Cnz = None  # non-zero entries of the input modulation matrix
         # Base class knows about T1s so it can generate IR-BOLD
@@ -362,6 +360,12 @@ class DCM(BaseModel):
         # SDE or ODE
         self.stochastic = stochastic
         self.state_noise_std = 0.05
+        # ODE solver controls (optional)
+        # If left as None, scipy.integrate.solve_ivp defaults (RK45) are used
+        self.ode_method = None  # e.g., "BDF" or "Radau" for stiff systems
+        self.ode_rtol = None
+        self.ode_atol = None
+        self.ode_max_step = None
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change"""
@@ -430,12 +434,23 @@ class DCM(BaseModel):
 
         def F(t, p, x):
             s, f, v, q = np.array_split(p, num_state)
+
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)  # ensure positive flow for exponent
+
+            # Stable computation of 1 - (1 - E0) ** (1 / f)
+            log_base = np.log1p(-self.p.E0)  # log(1 - E0) < 0
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
             dsdt = x(t) - self.p.kappa * s - self.p.gamma * (f - 1)
             dfdt = s
-            dvdt = (1 / self.p.tau) * (f - np.power(v, 1 / self.p.alpha))
+            dvdt = (1 / self.p.tau) * (f - np.power(v_eff, 1 / self.p.alpha))
             dqdt = (1 / self.p.tau) * (
-                f * (1 - np.power(1 - self.p.E0, 1 / f)) / self.p.E0
-                - np.power(v, 1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0
+                - np.power(v_eff, 1 / self.p.alpha - 1) * q
             )
             return np.r_[dsdt, dfdt, dvdt, dqdt]
 
@@ -466,7 +481,19 @@ class DCM(BaseModel):
         def func(t, p):
             return F(t, p, x_fun)
 
-        ivp = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec).y
+        solve_kwargs = {}
+        if getattr(self, "ode_method", None) is not None:
+            solve_kwargs["method"] = self.ode_method
+        if getattr(self, "ode_rtol", None) is not None:
+            solve_kwargs["rtol"] = self.ode_rtol
+        if getattr(self, "ode_atol", None) is not None:
+            solve_kwargs["atol"] = self.ode_atol
+        if getattr(self, "ode_max_step", None) is not None:
+            solve_kwargs["max_step"] = self.ode_max_step
+
+        ivp = solve_ivp(
+            func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec, **solve_kwargs
+        ).y
 
         return ivp, x
 
@@ -496,7 +523,19 @@ class DCM(BaseModel):
             def func(t, p):
                 return F(t, p, u)
 
-            x = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec).y
+            solve_kwargs = {}
+            if getattr(self, "ode_method", None) is not None:
+                solve_kwargs["method"] = self.ode_method
+            if getattr(self, "ode_rtol", None) is not None:
+                solve_kwargs["rtol"] = self.ode_rtol
+            if getattr(self, "ode_atol", None) is not None:
+                solve_kwargs["atol"] = self.ode_atol
+            if getattr(self, "ode_max_step", None) is not None:
+                solve_kwargs["max_step"] = self.ode_max_step
+
+            x = solve_ivp(
+                func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec, **solve_kwargs
+            ).y
         return x
 
     def simulate(self, tvec, u=None, p=None, CNR=None):
@@ -594,10 +633,17 @@ class TwoLayerDCM(DCM):
             # drain effect here
             drain_v = np.r_[0 * vs, self.p.l_d * vs]
             drain_q = np.r_[0 * qs, self.p.l_d * qs]
-            dvdt = (1 / self.p.tau) * (f - v ** (1 / self.p.alpha)) + drain_v
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)
+            log_base = np.log1p(-self.p.E0)
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
+            dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (1 - (1 - self.p.E0) ** (1 / f)) / self.p.E0
-                - v ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl, _ = np.array_split(v, self.num_layers)
@@ -690,10 +736,17 @@ class MultiLayerDCM(DCM):
             # drain effect here
             drain_v = np.r_[np.zeros(self.num_rois), self.p.l_d * vs]
             drain_q = np.r_[np.zeros(self.num_rois), self.p.l_d * qs]
-            dvdt = (1 / self.p.tau) * (f - v ** (1 / self.p.alpha)) + drain_v
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)
+            log_base = np.log1p(-self.p.E0)
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
+            dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (1 - (1 - self.p.E0) ** (1 / f)) / self.p.E0
-                - v ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl = v[: self.num_rois * (self.num_layers - 1)]

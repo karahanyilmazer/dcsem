@@ -4,7 +4,6 @@
 # !%matplotlib inline
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess
 
