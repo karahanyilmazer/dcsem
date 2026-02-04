@@ -1,6 +1,4 @@
 # %% Imports and config
-import warnings
-
 import corner
 import emcee
 import matplotlib.pyplot as plt
@@ -12,7 +10,6 @@ from sklearn.metrics import mean_squared_error
 
 from dcsem.utils import stim_boxcar
 from utils import (
-    add_noise,
     get_colormap,
     get_out_dir,
     get_width_height_latex,
@@ -55,18 +52,18 @@ SEED = 42
 
 
 # 2️⃣ Product degeneracy (structural non-identifiability)
-# def model(theta, x):
-#     a, b, c = theta
-#     return (a * b) * x + c
+def model(theta, x):
+    a, b, c = theta
+    return (a * b) * x + c
 
 
-# model_name = "product_degen"
-# model_display_name = "Product Model (Degenerate)"
-# param_names = ["a", "b", "c"]
-# theta_true = np.array([2.0, 3.0, 5.0])  # slope = a*b = 6
-# theta_zero = np.array([1.0, 1.0, 0.0])
-# priors = [(0.0, 5.0), (0.0, 5.0), (0.0, 20.0)]
-# IS_DCM_MODEL = False
+model_name = "product_degen"
+model_display_name = "Product Model (Degenerate)"
+param_names = ["a", "b", "c"]
+theta_true = np.array([2.0, 3.0, 5.0])  # slope = a*b = 6
+theta_zero = np.array([1.0, 1.0, 0.0])
+priors = [(0.0, 5.0), (0.0, 5.0), (0.0, 20.0)]
+IS_DCM_MODEL = False
 
 
 # 3️⃣ Product reparametrized (identifiable)
@@ -83,6 +80,7 @@ SEED = 42
 # priors = [(0.0, 10.0), (0.0, 20.0)]
 # IS_DCM_MODEL = False
 
+
 # 4️⃣ Sum of exponentials (sloppy model, huge condition number)
 # def model(theta, x):
 #     A1, k1, A2, k2 = theta
@@ -96,6 +94,7 @@ SEED = 42
 # theta_zero = np.array([4.0, 0.4, 2.0, 0.15])
 # priors = [(0.0, 10.0), (0.0, 2.0), (0.0, 10.0), (0.0, 2.0)]
 # IS_DCM_MODEL = False
+
 
 # 5️⃣ Michaelis-Menten (nonlinear but identifiable)
 # def model(theta, x):
@@ -111,6 +110,7 @@ SEED = 42
 # priors = [(0.0, 20.0), (0.0, 5.0)]
 # IS_DCM_MODEL = False
 
+
 # 6️⃣ Logistic / Sigmoid (nonlinear, correlated parameters)
 # def model(theta, x):
 #     L, k, x0 = theta
@@ -124,6 +124,7 @@ SEED = 42
 # theta_zero = np.array([0.8, 0.8, 4.0])
 # priors = [(0.0, 2.0), (0.0, 3.0), (0.0, 20.0)]
 # IS_DCM_MODEL = False
+
 
 # 7️⃣ Power law
 # def model(theta, x):
@@ -140,45 +141,48 @@ SEED = 42
 # IS_DCM_MODEL = False
 
 
-# 8️⃣ DCM - 2 ROI BOLD model (requires different setup)
-# This model uses BOLD simulation instead of analytical functions
+# # 8️⃣ DCM - 2 ROI BOLD model (requires different setup)
+# # This model uses BOLD simulation instead of analytical functions
 
-IS_DCM_MODEL = True
-NUM_ROIS = 2
-time = np.arange(100)
-u = stim_boxcar([[10, 20, 1]])
-ODE_METHOD = "BDF"  # Stiff solver; use None for default RK45
-
-
-def model(theta, x):
-    """
-    For DCM: theta contains [a01, a10, c0, c1]
-    x is ignored (time and u are used instead)
-    Returns BOLD signals of shape (T, R)
-    """
-    params = dict(zip(param_names, theta))
-    bold = simulate_bold(
-        params, time=time, u=u, num_rois=NUM_ROIS, ode_method=ODE_METHOD
-    )
-    return bold  # Shape: (T, R)
+# IS_DCM_MODEL = True
+# NUM_ROIS = 2
+# time = np.arange(100)
+# u = stim_boxcar([[10, 20, 1]])
+# ODE_METHOD = "BDF"  # Stiff solver; use None for default RK45
 
 
-model_name = "dcm_2roi"
-model_display_name = "DCM 2-ROI BOLD Model"
-param_names = ["a01", "a10", "c0", "c1"]
-theta_true = np.array([0.4, 0.6, 0.9, 0.2])
-theta_zero = np.array([0.1, 0.1, 0.1, 0.1])
+# def model(theta, x):
+#     """
+#     For DCM: theta contains [a01, a10, c0, c1]
+#     x is ignored (time and u are used instead)
+#     Returns BOLD signals of shape (T, R)
+#     """
+#     params = dict(zip(param_names, theta))
+#     bold = simulate_bold(
+#         params, time=time, u=u, num_rois=NUM_ROIS, ode_method=ODE_METHOD
+#     )
+#     return bold  # Shape: (T, R)
 
-# Prior specification for DCM: [(mu, sigma), ...]
-# A-matrix connections: can be negative (inhibitory) or positive (excitatory)
-# C-matrix inputs: non-negative
-priors = [
-    (-1.5, 1.5),  # a01: centered at 0, wide range for excitatory/inhibitory
-    (-1.5, 1.5),  # a10: centered at 0, wide range for excitatory/inhibitory
-    (0.0, 1.5),  # c0: centered at 0.5, moderate positive range
-    (0.0, 1.5),  # c1: centered at 0.5, moderate positive range
-]
 
+# model_name = "dcm_2roi"
+# model_display_name = "2-ROI DCM"
+# param_names = ["a01", "a10", "c0", "c1"]
+# theta_true = np.array([0.4, 0.6, 0.9, 0.2])
+# theta_zero = np.array([0.1, 0.1, 0.1, 0.1])
+
+# # Prior specification for DCM: [(mu, sigma), ...]
+# # A-matrix connections: can be negative (inhibitory) or positive (excitatory)
+# # C-matrix inputs: non-negative
+# priors = [
+#     (0, 0.5),  # a01: centered at 0, wide range for excitatory/inhibitory
+#     (0, 0.5),  # a10: centered at 0, wide range for excitatory/inhibitory
+#     (0.75, 0.25),  # c0: centered at 0.5, moderate positive range
+#     (0.75, 0.25),  # c1: centered at 0.5, moderate positive range
+# ]
+
+# # Randomly choose true parameters from priors
+# # theta_true = np.array([np.random.normal(mu, sigma) for (mu, sigma) in priors])
+# print(f"True DCM parameters: {theta_true}")
 
 # =============================================================================
 # SETTINGS
@@ -373,7 +377,7 @@ if not IS_DCM_MODEL:
     y_true = model(theta_true, x_plot)
 
     # Plot
-    plt.figure(figsize=(width, height))
+    plt.figure(figsize=(width, height / 1.5))
     plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
     plt.plot(x_plot, y_mean, color=default_colors[2], label="posterior mean")
     plt.plot(x_plot, y_true, color=default_colors[1], linestyle="--", label="true")
@@ -398,7 +402,7 @@ else:
     # Get time vector from globals (defined in DCM model section)
     time_vec = globals().get("time", np.arange(y_obs.shape[0]))
     num_rois = y_obs.shape[1]
-    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height))
+    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
 
     if num_rois == 1:
         axes = [axes]
@@ -424,13 +428,23 @@ else:
             color=default_colors[1],
             label="true",
         )
-        axes[r].set_title(f"ROI {r+1}")
-        axes[r].set_xlabel("time")
+        axes[r].set_title(f"ROI {r + 1}")
+        axes[r].set_xlabel("Time (s)")
         axes[r].grid(True, alpha=0.3)
 
-    axes[0].set_ylabel("BOLD amplitude")
-    axes[0].legend()
-    fig.suptitle(f"{model_display_name} - Data and Fit")
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=4,
+        bbox_to_anchor=(0.5, -0.1),
+        frameon=True,
+    )
+
+    axes[0].set_ylabel("BOLD amplitude (a.u.)")
+    # axes[0].legend()
+    fig.suptitle(rf"\textbf{{{model_display_name} - Best Fit ({opt_method})}}")
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
@@ -467,7 +481,7 @@ if PLOT_POSTERIOR_BANDS:
         )
         plt.xlabel("x")
         plt.ylabel("y")
-        plt.title(f"{model_display_name} - Posterior Predictive")
+        plt.title(f"{model_display_name} - Best Fit")
         plt.legend()
 
         plt.tight_layout()
@@ -484,31 +498,52 @@ if PLOT_POSTERIOR_BANDS:
         y_lo = np.percentile(Y, 2.5, axis=0)  # Shape: (T, R)
         y_hi = np.percentile(Y, 97.5, axis=0)  # Shape: (T, R)
 
-        fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(6 * num_rois, 5))
+        fig, axes = plt.subplots(
+            1, num_rois, sharex=True, figsize=(width, height * 0.8)
+        )
         if num_rois == 1:
             axes = [axes]
 
         for r in range(num_rois):
             axes[r].plot(time_vec, y_obs[:, r], label="observed", alpha=0.7)
             axes[r].plot(
-                time_vec, y_true[:, r], color="gray", linestyle="--", label="true"
+                time_vec, y_mean[:, r], color=default_colors[2], label="posterior mean"
             )
-            axes[r].plot(time_vec, y_mean[:, r], color="tomato", label="posterior mean")
             axes[r].fill_between(
                 time_vec,
                 y_lo[:, r],
                 y_hi[:, r],
-                color="tomato",
+                color=default_colors[2],
                 alpha=0.2,
-                label="95% posterior band",
+                label="95\% posterior band",
+            )
+            axes[r].plot(
+                time_vec,
+                y_true[:, r],
+                color=default_colors[1],
+                linestyle="--",
+                label="true",
             )
             axes[r].set_title(f"ROI {r}")
-            axes[r].set_xlabel("time")
+            axes[r].set_xlabel("Time (s)")
             axes[r].grid(True, alpha=0.3)
 
-        axes[0].set_ylabel("BOLD amplitude")
-        axes[0].legend()
-        fig.suptitle(f"{model_display_name} - Posterior Predictive")
+        # Create a single legend below all subplots
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=4,
+            bbox_to_anchor=(0.5, -0.07),
+            frameon=True,
+        )
+
+        axes[0].set_ylabel("BOLD Amplitude (a.u.)")
+        # axes[0].legend()
+        fig.suptitle(
+            rf"\textbf{{{model_display_name} - Posterior Predictive ({opt_method})}}"
+        )
 
         plt.tight_layout()
         plt.savefig(IMG_DIR / "posterior_predictive.png")
@@ -535,7 +570,9 @@ if PLOT_CORNER:
         truth_color=default_colors[1],
         fig=fig,
     )
-    fig.suptitle(rf"\textbf{{{model_display_name} - Posterior Distributions}}")
+    fig.suptitle(
+        rf"\textbf{{{model_display_name} - Posterior Distributions ({opt_method})}}"
+    )
     plt.tight_layout()
     plt.savefig(IMG_DIR / "corner_plot.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_corner_plot.pdf")
@@ -586,9 +623,11 @@ ax.tick_params(which="both", left=False, bottom=False)
 cbar = heatmap.collections[0].colorbar
 cbar.ax.tick_params(which="both", size=0)
 
-ax.set_title(f"{model_display_name} - Parameter Correlation Matrix")
+ax.set_title(
+    rf"\textbf{{{model_display_name} - Parameter Correlation Matrix ({opt_method})}}"
+)
 plt.tight_layout()
-plt.savefig(IMG_DIR / "correlation_matrix.png", dpi=300, bbox_inches="tight")
+plt.savefig(IMG_DIR / "correlation_matrix.png")
 plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_correlation_matrix.pdf")
 plt.show()
 
@@ -637,4 +676,28 @@ log_run(
     overwrite=False,
 )
 
+# %%
+# Get the full chain (not flattened)
+samples = sampler.get_chain()  # Shape: (n_steps, n_walkers, n_params)
+
+fig, axes = plt.subplots(n_params, figsize=(width, 2 * n_params), sharex=True)
+if n_params == 1:
+    axes = [axes]
+
+for i in range(n_params):
+    ax = axes[i]
+    ax.plot(samples[:, :, i], "k", alpha=0.3, linewidth=0.5)
+    ax.axhline(theta_true[i], color=default_colors[1], linestyle="--", label="true")
+    ax.axhline(theta_mean[i], color=default_colors[2], linestyle="-", label="mean")
+    ax.set_ylabel(to_latex_label(param_names[i]))
+    ax.grid(True, alpha=0.3)
+    if i == 0:
+        ax.legend(loc="upper right")
+
+axes[-1].set_xlabel("Step number")
+fig.suptitle(rf"\textbf{{MCMC Trace Plots - {model_display_name}}}")
+plt.tight_layout()
+plt.savefig(IMG_DIR / "trace_plots.png")
+plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_trace_plots.pdf")
+plt.show()
 # %%

@@ -9,19 +9,9 @@ from scipy.optimize import minimize
 from tqdm import tqdm
 
 from dcsem.utils import stim_boxcar
-from utils import add_underscore, get_colormap, simulate_bold
+from utils import add_underscore, get_colormap, set_style, simulate_bold
 
-plt.rcParams.update(
-    {
-        "font.size": 12,  # base size
-        "axes.titlesize": 14,
-        "axes.labelsize": 13,
-        "xtick.labelsize": 11,
-        "ytick.labelsize": 11,
-        "legend.fontsize": 12,
-        "figure.titlesize": 18,  # suptitle
-    }
-)
+set_style()
 
 # -----------------------------
 # Function definitions
@@ -96,6 +86,7 @@ else:
 # Estimate parameters via minimize
 # -----------------------------
 theta0 = np.array([0.3, 0.8, 0.7, 0.3], dtype=float)
+theta0 = np.array([0.1, 0.3, 0.2, 0.5], dtype=float)
 theta_hist = [theta0.copy()]
 
 

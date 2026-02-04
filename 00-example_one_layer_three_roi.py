@@ -1,6 +1,8 @@
 # %%
 # !%load_ext autoreload
 # !%autoreload 2
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -9,16 +11,17 @@ from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
 from utils import set_style
 
 set_style()
+BASE_DIR = Path("/Users/karahanyilmazer/Coding/latex/68fb5441e89d8dccbc6573d3/figures")
 
 # %%
 # Input
 time = np.arange(200)  # Time vector (seconds)
 # Stimulus function (onset, duration, amplitude)
 # u = stim_boxcar([[0, 10, 1]])
-u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
+u = stim_boxcar([[20, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Connectivity parameters
-num_rois = 3
+num_rois = 5
 num_layers = 1
 
 connections = []
@@ -28,6 +31,13 @@ connections.append("R0, L0 -> R1, L0 = 0.2")
 connections.append("R1, L0 -> R2, L0 = 0.4")
 # ROI2, Layer0 -> ROI0, Layer0 : Magnitude = -0.3
 connections.append("R2, L0 -> R0, L0 = -0.3")
+# ROI2, Layer0 -> ROI3, Layer0 : Magnitude = 0.5
+connections.append("R2, L0 -> R3, L0 = 0.5")
+# ROI3, Layer0 -> ROI4, Layer0 : Magnitude = 0.1
+connections.append("R3, L0 -> R4, L0 = 0.1")
+# ROI4, Layer0 -> ROI1, Layer0 : Magnitude = -0.2
+connections.append("R4, L0 -> R1, L0 = -0.2")
+
 A = create_A_matrix(num_rois, num_layers, connections, self_connections=-1)
 print("A:\n", A)
 
@@ -52,14 +62,19 @@ if norm:
 
 fig, axs = plt.subplots(2, 1)
 axs[0].plot(time, u(time), label="Stimulus")
-axs[1].plot(time, bold[:, 0], label="ROI 0")
-axs[1].plot(time, bold[:, 1], label="ROI 1")
-axs[1].plot(time, bold[:, 2], label="ROI 1")
+axs[0].plot(time, u(time) * 0.3, label="Stimulus x0.5", linestyle="--")
+axs[1].plot(time, bold[:, 0], label="ROI 1")
+axs[1].plot(time, bold[:, 2], label="ROI 2")
+axs[1].plot(time, bold[:, 3], label="ROI 3")
+axs[1].plot(time, bold[:, 1], label="ROI 4")
+axs[1].plot(time, bold[:, 4], label="ROI 5")
 axs[0].set_title("DCM Simulation")
 axs[0].set_ylabel("Stimulus")
 axs[1].set_xlabel("Time (s)")
 axs[1].set_ylabel("BOLD Signal")
 axs[1].legend()
+plt.tight_layout()
+plt.savefig("img/five_roi")
+plt.savefig(BASE_DIR / "five_roi")
 plt.show()
-
 # %%

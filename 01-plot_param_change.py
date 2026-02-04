@@ -78,7 +78,7 @@ def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
     fig.suptitle(r"\textbf{Effect of Model Parameters on Simulated BOLD Responses}")
 
     for i in range(num_rois):
-        axs[0, i].set_title(f"ROI {i+1}")
+        axs[0, i].set_title(f"ROI {i + 1}")
         axs[len(params) - 1, i].set_xlabel("Time (s)")
 
     for i in range(len(params)):
@@ -100,7 +100,18 @@ if __name__ == "__main__":
     # Input
     time = np.arange(100)  # Time vector (seconds)
     # Stimulus function (onset, duration, amplitude)
-    u = stim_boxcar([[0, 30, 1]])
+    u = stim_boxcar([[10, 20, 1]])
+    # u = stim_boxcar(
+    #     [
+    #         [5, 10, 1],
+    #         [20, 10, 0.5],
+    #         [25, 20, 0.8],
+    #         [70, 10, 0.7],
+    #         [80, 5, 0.2],
+    #         # [100, 30, 0.3],
+    #         # [120, 30, 0.1],
+    #     ]
+    # )
 
     # Connectivity parameters
     num_rois = 2
@@ -108,10 +119,10 @@ if __name__ == "__main__":
 
     # Parameters to vary
     params = {
-        "a01": np.linspace(0, 1, 9),
-        "a10": np.linspace(0, 1, 9),
-        "c0": np.linspace(0, 1, 9),
-        "c1": np.linspace(0, 1, 9),
+        "a01": np.linspace(-1.5, 1.5, 9),
+        "a10": np.linspace(-1.5, 1.5, 9),
+        "c0": np.linspace(0.0, 1.5, 9),
+        "c1": np.linspace(0.0, 1.5, 9),
     }
 
     # Run simulations for each parameter set

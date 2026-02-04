@@ -171,15 +171,15 @@ def model(theta, x):
 
 
 model_name = "dcm_2roi"
-model_display_name = "DCM 2-ROI Model"
+model_display_name = "2-ROI DCM"
 param_names = ["a01", "a10", "c0", "c1"]
 
 # DCM-specific bounds for optimization
 param_bounds = [
-    (0, 1.5),  # a01 (A matrix: can be inhibitory/excitatory)
-    (0, 1.5),  # a10 (A matrix: can be inhibitory/excitatory)
-    (0.0, 1.5),  # c0  (C matrix: non-negative input strength)
-    (0.0, 1.5),  # c1  (C matrix: non-negative input strength)
+    (0.0, 1.0),  # a01 (A matrix: can be inhibitory/excitatory)
+    (0.0, 1.0),  # a10 (A matrix: can be inhibitory/excitatory)
+    (0.0, 1.0),  # c0  (C matrix: non-negative input strength)
+    (0.0, 1.0),  # c1  (C matrix: non-negative input strength)
 ]
 
 # Define the true parameter set within bounds
@@ -203,6 +203,7 @@ n_params = len(theta_zero)
 
 # Optimization settings
 opt_method = "L-BFGS-B"  # DCM needs bounds
+title_suffix = "Least Squares"
 
 # Plot settings
 IMG_DIR = get_out_dir(
@@ -218,7 +219,7 @@ print(f"Plots will be saved to: {IMG_DIR}")
 print(f"Plots will be saved to: {LATEX_DIR}")
 
 # Plot toggles
-PLOT_1D = True
+PLOT_1D = False
 PLOT_2D = True
 PLOT_3D = False  # only if n_params == 3
 
@@ -327,6 +328,7 @@ print(f"  Estimated  : {np.round(theta_est, 4)}")
 print(f"  Loss: {mse_est:.4f}  (noise std = {noise_std_actual:.4f})")
 
 
+# %%
 # =============================================================================
 # PLOT: DATA AND FITTED CURVE
 # =============================================================================
@@ -338,7 +340,7 @@ if not IS_DCM_MODEL:
     y_true_plot = model(theta_true, x_plot)
 
     # Plot
-    plt.figure(figsize=(width, height))
+    plt.figure(figsize=(width, height / 1.5))
     plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
     plt.plot(x_plot, y_pred, color=default_colors[2], label="fitted")
     plt.plot(x_plot, y_true_plot, color=default_colors[1], linestyle="--", label="true")
@@ -346,13 +348,13 @@ if not IS_DCM_MODEL:
     # Adjust
     plt.xlabel("x")
     plt.ylabel("y")
-    plt.title(rf"\textbf{{{model_display_name} - Data and Fit}}")
+    plt.title(rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}")
     plt.legend()
 
     # Save
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
     plt.show()
 
 else:
@@ -363,7 +365,7 @@ else:
     # Get time vector from globals (defined in DCM model section)
     time_vec = globals().get("time", np.arange(y_obs.shape[0]))
     num_rois = y_obs.shape[1]
-    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height))
+    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
 
     if num_rois == 1:
         axes = [axes]
@@ -389,7 +391,7 @@ else:
             color=default_colors[1],
             label="true",
         )
-        axes[r].set_title(f"ROI {r+1}")
+        axes[r].set_title(f"ROI {r + 1}")
         axes[r].set_xlabel("Time (s)")
         axes[r].grid(True, alpha=0.3)
 
@@ -400,15 +402,17 @@ else:
         labels,
         loc="lower center",
         ncol=3,
-        bbox_to_anchor=(0.5, -0.07),
+        bbox_to_anchor=(0.5, -0.1),
         frameon=True,
     )
 
     axes[0].set_ylabel("BOLD Amplitude")
-    fig.suptitle(rf"\textbf{{{model_display_name} - Data and Fit}}")
+    fig.suptitle(
+        rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}", y=0.95
+    )
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
     plt.show()
 
 
@@ -456,15 +460,14 @@ if PLOT_1D:
         labels,
         loc="lower center",
         ncol=2,
-        bbox_to_anchor=(0.5, -0.05),
+        bbox_to_anchor=(0.5, -0.1),
         frameon=True,
     )
 
     fig.suptitle(rf"\textbf{{{model_display_name} - 1D Loss Landscape}}")
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)  # Make room for legend
     plt.savefig(IMG_DIR / "loss_landscape_1d.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_loss_landscape_1d.pdf")
+    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_1d_new.pdf")
     plt.show()
 
 # %%
@@ -487,7 +490,7 @@ if PLOT_2D and n_params >= 2:
     nrows = min(3, n_pairs)
     ncols = int(np.ceil(n_pairs / nrows))
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(width, height / 1.5))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(width, height * 2))
     if n_pairs == 1:
         axes = np.array([axes])
     axes = axes.flatten()
@@ -496,8 +499,35 @@ if PLOT_2D and n_params >= 2:
         ax = axes[plot_idx]
 
         # Create grids for parameters i and j
-        grid_i = make_range(theta_est[i], spans[i], N_2D)
-        grid_j = make_range(theta_est[j], spans[j], N_2D)
+        if not IS_DCM_MODEL:
+            grid_i = make_range(theta_est[i], spans[i], N_2D)
+            grid_j = make_range(theta_est[j], spans[j], N_2D)
+        else:
+            if i in [0, 1]:
+                grid_i = make_range(
+                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
+                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
+                    N_2D,
+                )
+            else:
+                grid_i = make_range(
+                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
+                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
+                    N_2D,
+                )
+
+            if j in [0, 1]:
+                grid_j = make_range(
+                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
+                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
+                    N_2D,
+                )
+            else:
+                grid_j = make_range(
+                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
+                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
+                    N_2D,
+                )
 
         Grid_i, Grid_j = np.meshgrid(grid_i, grid_j, indexing="ij")
 
@@ -533,19 +563,8 @@ if PLOT_2D and n_params >= 2:
         )
         ax.set_xlabel(to_latex_label(param_names[i]))
         ax.set_ylabel(to_latex_label(param_names[j]))
-
-        # Build title showing fixed params
-        fixed_params = [k for k in range(n_params) if k not in [i, j]]
-        fixed_str = ", ".join(
-            [
-                f"{to_latex_label(param_names[k])}={theta_est[k]:.3g}"
-                for k in fixed_params
-            ]
-        )
         ax.set_title(
-            f"({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
-            if fixed_str
-            else f"({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])})"
+            rf"{to_latex_label(param_names[i])} vs. {to_latex_label(param_names[j])} (others fixed)"
         )
 
     # Hide unused subplots
@@ -557,17 +576,37 @@ if PLOT_2D and n_params >= 2:
     fig.legend(
         handles,
         labels,
-        loc="lower center",
+        loc="upper center",
         ncol=n_pairs,
-        bbox_to_anchor=(0.5, -0.15),
+        bbox_to_anchor=(0.5, 0.03),
         frameon=True,
     )
 
-    fig.suptitle(rf"\textbf{{{model_display_name} - 2D Loss Landscape Contours}}")
+    # Create a single shared colorbar below all subplots
+    cbar_ax = fig.add_axes([0.25, -0.04, 0.5, 0.02])  # [left, bottom, width, height]
+    cb = fig.colorbar(
+        cont,
+        cax=cbar_ax,
+        orientation="horizontal",
+    )
+
+    # Replace numeric ticks with qualitative labels
+    cb.set_ticks([])
+    cb.set_label("MSE Loss", labelpad=5)
+
+    # Optional gradient labels for clarity
+    cb.ax.text(0.0, -0.3, "Low", va="top", ha="left", fontsize="small", color="black")
+    cb.ax.text(
+        0.0004, -0.3, "High", va="top", ha="left", fontsize="small", color="black"
+    )
+
+    fig.suptitle(
+        rf"\textbf{{{model_display_name} - 2D Loss Landscape Contours}}", y=0.98
+    )
     # fig.colorbar(cont, ax=axes[:n_pairs].tolist(), shrink=0.8, label="MSE", pad=0.02)
     plt.tight_layout()
 
-    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_loss_landscape_2d.pdf")
+    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_2d_new.pdf")
     plt.savefig(IMG_DIR / "loss_landscape_2d.png")
     plt.show()
 
@@ -716,9 +755,12 @@ else:
         cbar = heatmap.collections[0].colorbar
         cbar.ax.tick_params(which="both", size=0)
 
-        ax.set_title(f"{model_display_name} - Parameter Correlation Matrix")
+        ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
         plt.tight_layout()
         plt.savefig(IMG_DIR / "correlation_matrix.png")
+        plt.savefig(
+            LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf"
+        )
         plt.show()
 
     except np.linalg.LinAlgError:
@@ -733,7 +775,7 @@ print(f"  Eigenvalues: {np.round(eigvals, 4)}")
 print(f"  Condition number: {cond:.2e}")
 
 if cond > 1e6:
-    print(f"  ⚠️  High condition number - numerical instability likely!")
+    print("  ⚠️  High condition number - numerical instability likely!")
 if np.min(eigvals) < 1e-6:
     print(
         f"  ⚠️  Near-zero eigenvalue ({np.min(eigvals):.2e}) - model may be degenerate!"
@@ -748,7 +790,7 @@ print(f"  Standard errors: {np.round(se, 4)}")
 if np.isfinite(max_offdiag_corr):
     print(f"  Max. off-diagonal correlation: {max_offdiag_corr:.3f}")
     if max_offdiag_corr > 0.95:
-        print(f"  ⚠️  High parameter correlation - identifiability issues!")
+        print("  ⚠️  High parameter correlation - identifiability issues!")
 
 if not rank_deficient:
     print("  95% Confidence intervals:")
