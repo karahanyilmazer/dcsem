@@ -33,9 +33,7 @@ class BaseModel(object):
         )  # Parameters of the model, everything that could be fitted to data
         self.num_rois = None  # Number of ROIs
         self.num_layers = None  # Number of layers per ROI
-        self.state_vars = (
-            []
-        )  # Stave variables (things changing with time that are not directly observed)
+        self.state_vars = []  # Stave variables (things changing with time that are not directly observed)
         self.Anz = None  # Non-zero entries of the connectivity matrix
         self.Cnz = None  # non-zero entries of the input modulation matrix
         # Base class knows about T1s so it can generate IR-BOLD
@@ -645,8 +643,7 @@ class TwoLayerDCM(DCM):
 
             dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (one_minus_pow) / self.p.E0
-                - v_eff ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl, _ = np.array_split(v, self.num_layers)
@@ -749,8 +746,7 @@ class MultiLayerDCM(DCM):
 
             dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (one_minus_pow) / self.p.E0
-                - v_eff ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl = v[: self.num_rois * (self.num_layers - 1)]
