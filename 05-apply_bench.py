@@ -59,9 +59,9 @@ def calc_comps(method, **kwargs):
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
 
     # Assert that all keys are allowed
-    assert (
-        not invalid_keys
-    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    assert not invalid_keys, (
+        f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    )
     # Filter all arguments that are not None
     params = {}
     for key, val in kwargs.items():
@@ -78,9 +78,9 @@ def calc_comps(method, **kwargs):
 
     # Assert that all values have the same length
     lengths = [len(v) for v in params.values()]
-    assert all(
-        length == lengths[0] for length in lengths
-    ), "All values must have the same length!"
+    assert all(length == lengths[0] for length in lengths), (
+        "All values must have the same length!"
+    )
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
@@ -89,8 +89,15 @@ def calc_comps(method, **kwargs):
         u=u,
         num_rois=NUM_ROIS,
     )
-    bold_obsv = bold_true
-    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
+    if setting == "no_noise":
+        bold_obsv = bold_true
+    else:
+        noise_sigma = 0.10 * np.std(bold_true)  # 10% of signal std
+        bold_obsv = bold_true + rng.normal(0, noise_sigma, size=bold_true.shape)
+
+    # Concatenate all ROIs along the last axis - handles any number of ROIs
+    # bold_obsv shape: (N, T, R) --> (N, T*R)
+    tmp_bold = bold_obsv.reshape(bold_obsv.shape[0], -1)
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == "PCA":

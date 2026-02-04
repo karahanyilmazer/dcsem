@@ -19,3 +19,9 @@ bench 11-27-14-41
 *.ipynb
 *.pkl
 *.pyc
+logs/
+old-logs/
+bench-master/
+
+# Environment variables (contains user-specific paths)
+.env

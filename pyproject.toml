@@ -1,0 +1,23 @@
+[project]
+name = "dcsem"
+version = "0.1.0"
+description = "Simulates fMRI signals with Dynamic Causal Modeling. Demonstrates model degeneracy through model inversion. Addresses this issue with BENCH (Bayesian EstimatioN of CHange)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bench",
+    "corner>=2.2.3",
+    "emcee>=3.1.6",
+    "matplotlib>=3.10.8",
+    "numpy>=2.3.5",
+    "palettable>=3.3.0",
+    "pandas>=3.0.0",
+    "pypalettes>=0.1.0",
+    "python-dotenv>=1.0.0",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.0",
+    "seaborn>=0.13.2",
+]
+
+[tool.uv.sources]
+bench = { git = "https://git.fmrib.ox.ac.uk/hossein/bench.git" }

@@ -1,12 +1,39 @@
 import pickle
 import re
+import time
+import warnings
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import scienceplots
 
+from dcsem.config import PATH_CONFIG
 from dcsem.models import DCM
+
+# Import plotting functions from dcsem.plotting for backwards compatibility
+# These are re-exported here with deprecation warnings
+from dcsem.plotting import (
+    add_underscore as _add_underscore,
+)
+from dcsem.plotting import (
+    get_colormap as _get_colormap,
+)
+from dcsem.plotting import (
+    get_param_colors as _get_param_colors,
+)
+from dcsem.plotting import (
+    get_width_height_latex as _get_width_height_latex,
+)
+from dcsem.plotting import (
+    list_available_colormaps as _list_available_colormaps,
+)
+from dcsem.plotting import (
+    set_style as _set_style,
+)
+from dcsem.plotting import (
+    to_latex_label as _to_latex_label,
+)
 from dcsem.utils import create_A_matrix, create_C_matrix
 
 
@@ -147,34 +174,37 @@ def add_noise(signal, snr_db, rng=None):
     noise_power = signal_power / snr
     noise = rng.normal(0, np.sqrt(noise_power), signal.shape)
     noisy_signal = signal + noise
-    return noisy_signal
+
+    return noisy_signal, sigma
 
 
-def add_underscore(param):
-    # Use regex to insert an underscore before a digit sequence and group digits for LaTeX
-    latex_param = re.sub(r"(\D)(\d+)", r"\1_{\2}", param)
-    return r"${" + latex_param + r"}$"
+# Wrapper functions that delegate to dcsem.plotting
+# These maintain backwards compatibility for existing code importing from utils
 
 
-def set_style(font_family=None, use_science=True, use_latex=False, dpi=300):
-    styles = []
-    if use_science:
-        styles.append("science")
-    if use_latex:
-        styles.append("latex")
-    else:
-        styles.append("no-latex")
-    plt.style.use(styles)
-    if font_family is not None:
-        plt.rcParams["font.family"] = font_family
-    plt.rcParams["figure.dpi"] = dpi
+def add_underscore(param, bold=False):
+    """Add LaTeX subscript formatting. Delegated to dcsem.plotting."""
+    return _add_underscore(param, bold)
+
+
+def to_latex_label(param):
+    """Convert parameter name to LaTeX label. Delegated to dcsem.plotting."""
+    return _to_latex_label(param)
+
+
+def get_width_height_latex(column_width=483.6969):
+    """Calculate figure dimensions for LaTeX. Delegated to dcsem.plotting."""
+    return _get_width_height_latex(column_width)
+
+
+def set_style(dpi=300, cmap="science"):
+    """Set matplotlib style. Delegated to dcsem.plotting."""
+    return _set_style(dpi, cmap)
 
 
 def get_param_colors():
-    # Set the colors for each parameter
-    color_cycle = plt.rcParams["axes.prop_cycle"].by_key()["color"][:4]
-    param_colors = dict(zip(["a01", "a10", "c0", "c1"], color_cycle))
-    return param_colors
+    """Get consistent colors for parameters. Delegated to dcsem.plotting."""
+    return _get_param_colors()
 
 
 def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
@@ -185,9 +215,9 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
 
     # Assert that all keys are allowed
-    assert (
-        not invalid_keys
-    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    assert not invalid_keys, (
+        f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    )
     # Filter all arguments that are not None
     params = {}
     for key, val in kwargs.items():
@@ -204,9 +234,9 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
 
     # Assert that all values have the same length
     lengths = [len(v) for v in params.values()]
-    assert all(
-        length == lengths[0] for length in lengths
-    ), "All values must have the same length!"
+    assert all(length == lengths[0] for length in lengths), (
+        "All values must have the same length!"
+    )
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
@@ -257,6 +287,14 @@ def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
         out_dir = Path("results/images")
     elif type == "model":
         out_dir = Path("results/models")
+    elif type == "latex":
+        latex_path = PATH_CONFIG.get_latex_path()
+        if latex_path is None:
+            raise ValueError(
+                "DCSEM_LATEX_DIR environment variable not set. "
+                "Please set it in your .env file or environment."
+            )
+        out_dir = latex_path
     else:
         raise ValueError(f"Unknown output type: {type}. Use 'img' or 'model'.")
 
@@ -281,3 +319,68 @@ def get_out_dir(type="img", subfolder=None, extra_subfolders=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     return out_dir
+
+
+def log_run(
+    model_name,
+    method,
+    seed,
+    settings,
+    params,
+    hessian,
+    performance,
+    log_dir="logs",
+    diagnostics=None,
+    correlation=None,
+    overwrite=False,
+):
+    """
+    Log a run (standard optimization or MCMC).
+    If diagnostics is provided, treat as MCMC-style run and include diagnostics in metadata.
+    Hessian is stored as {} if None.
+    Correlation matrix can be provided separately.
+    Files are saved with timestamps to avoid overwriting existing logs.
+    """
+    # Handle hessian as empty dict if None
+    hessian_to_store = hessian if hessian is not None else {}
+
+    # Add correlation to hessian dict if provided
+    if correlation is not None:
+        hessian_to_store["correlation"] = correlation
+
+    record = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "model": model_name,
+        "method": method,
+        "seed": seed,
+        "settings": settings,
+        "params": params,
+        "hessian": hessian_to_store,
+        "performance": performance,
+        "diagnostics": diagnostics,
+    }
+    Path(log_dir).mkdir(exist_ok=True)
+
+    # Create filename with timestamp to avoid overwriting
+    if overwrite:
+        fname = Path(log_dir) / f"{model_name}_{method}.json"
+    else:
+        timestamp = time.strftime("%Y%m%d_%H%M%S")
+        fname = Path(log_dir) / f"{model_name}_{method}_{timestamp}.json"
+
+    with open(fname, "w") as f:
+        json.dump(record, f, indent=2)
+    if diagnostics is not None:
+        print(f"Logged MCMC results to {fname}")
+    else:
+        print(f"Logged standard run results to {fname}")
+
+
+def get_colormap(name="parula", as_colors=False):
+    """Get a colormap by name. Delegated to dcsem.plotting."""
+    return _get_colormap(name, as_colors)
+
+
+def list_available_colormaps():
+    """List all available colormaps. Delegated to dcsem.plotting."""
+    return _list_available_colormaps()
