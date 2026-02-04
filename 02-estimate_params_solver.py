@@ -5,7 +5,6 @@ from itertools import combinations
 
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
 from scipy.linalg import inv
 from scipy.optimize import minimize
 from statsmodels.tools.numdiff import approx_hess

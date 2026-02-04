@@ -19,3 +19,4 @@ bench 11-27-14-41
 *.ipynb
 *.pkl
 *.pyc
+logs/
