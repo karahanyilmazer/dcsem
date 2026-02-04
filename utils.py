@@ -294,7 +294,6 @@ def get_width_height_latex(column_width=483.6969):
 
 
 def set_style(dpi=300, cmap="science"):
-
     width, height = get_width_height_latex()
 
     if cmap == "science":
@@ -350,7 +349,7 @@ def get_param_colors():
     return param_colors
 
 
-def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
+def get_summary_measures(method, time, u, num_rois, model_dir, setting, **kwargs):
     # Define the allowed parameters
     allowed_keys = ["a01", "a10", "c0", "c1"]
 
@@ -358,9 +357,9 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
 
     # Assert that all keys are allowed
-    assert (
-        not invalid_keys
-    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    assert not invalid_keys, (
+        f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
+    )
     # Filter all arguments that are not None
     params = {}
     for key, val in kwargs.items():
@@ -377,9 +376,9 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
 
     # Assert that all values have the same length
     lengths = [len(v) for v in params.values()]
-    assert all(
-        length == lengths[0] for length in lengths
-    ), "All values must have the same length!"
+    assert all(length == lengths[0] for length in lengths), (
+        "All values must have the same length!"
+    )
 
     # Initialize the BOLD signals
     bold_true = simulate_bold(
@@ -398,10 +397,12 @@ def get_summary_measures(method, time, u, num_rois, model_dir, **kwargs):
     tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
 
     if method == "PCA":
-        pca = pickle.load(open(model_dir / "pca.pkl", "rb"))
+        with open(model_dir / f"pca_{setting}.pkl", "rb") as f:
+            pca = pickle.load(f)
         components = pca.transform(tmp_bold_c)
     elif method == "ICA":
-        ica = pickle.load(open(model_dir / "ica.pkl", "rb"))
+        with open(model_dir / f"ica_{setting}.pkl", "rb") as f:
+            ica = pickle.load(f)
         components = ica.transform(tmp_bold_c)
     else:
         raise ValueError(f"Method '{method}' not supported. Use 'PCA' or 'ICA'.")
