@@ -10,7 +10,15 @@ L-BFGS-B optimization, MCMC, and BENCH.
 from .config import NOISE_CONFIG, PARAM_BOUNDS, PATH_CONFIG
 
 # Core models
-from .models import DCM, MultiLayerDCM, MultiLayerSEM, SEM, TwoLayerDCM
+from .models import DCM, SEM, MultiLayerDCM, MultiLayerSEM, TwoLayerDCM
+
+# Numerical stability utilities
+from .numerics import (
+    compute_confidence_intervals,
+    compute_correlation_matrix,
+    compute_standard_errors,
+    safe_hessian_inversion,
+)
 
 # Plotting utilities
 from .plotting import (
@@ -25,14 +33,24 @@ from .plotting import (
 
 # Core utilities
 from .utils import (
+    MH,
     A_to_text,
     C_to_text,
-    MH,
     create_A_matrix,
     create_C_matrix,
     plot_posterior,
     plot_signals,
     stim_boxcar,
+)
+
+# Validation utilities
+from .validation import (
+    ShapeError,
+    validate_bold_shape,
+    validate_connectivity_matrix,
+    validate_input_matrix,
+    validate_parameters_in_bounds,
+    validate_stimulus,
 )
 
 __all__ = [
@@ -46,6 +64,18 @@ __all__ = [
     "MultiLayerDCM",
     "SEM",
     "MultiLayerSEM",
+    # Numerical stability
+    "safe_hessian_inversion",
+    "compute_standard_errors",
+    "compute_correlation_matrix",
+    "compute_confidence_intervals",
+    # Validation
+    "ShapeError",
+    "validate_bold_shape",
+    "validate_connectivity_matrix",
+    "validate_input_matrix",
+    "validate_stimulus",
+    "validate_parameters_in_bounds",
     # Plotting
     "set_style",
     "get_param_colors",
