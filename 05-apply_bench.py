@@ -10,12 +10,11 @@ from scipy.stats import uniform
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
+from dcsem import NOISE_CONFIG, get_colormap, set_style
 from dcsem.utils import stim_boxcar
 from utils import (
-    get_colormap,
     get_out_dir,
     get_width_height_latex,
-    set_style,
     simulate_bold,
 )
 
@@ -105,7 +104,7 @@ def calc_comps(method, **kwargs):
     if setting == "no_noise":
         bold_obsv = bold_true
     else:
-        noise_sigma = 0.10 * np.std(bold_true)  # 10% of signal std
+        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(bold_true))
         bold_obsv = bold_true + rng.normal(0, noise_sigma, size=bold_true.shape)
 
     # Concatenate all ROIs along the last axis - handles any number of ROIs

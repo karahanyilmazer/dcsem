@@ -17,17 +17,20 @@ from sklearn.metrics import (
 )
 from tqdm import tqdm
 
-from dcsem.config import PARAM_BOUNDS
+from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style, to_latex_label
+from dcsem.numerics import (
+    compute_confidence_intervals,
+    compute_correlation_matrix,
+    compute_standard_errors,
+    safe_hessian_inversion,
+)
 from dcsem.utils import stim_boxcar
 from utils import (
     add_noise,
-    get_colormap,
     get_out_dir,
     get_width_height_latex,
     log_run,
-    set_style,
     simulate_bold,
-    to_latex_label,
 )
 
 set_style()
@@ -261,14 +264,14 @@ if not IS_DCM_MODEL:
     # Add some variability to x_data
     # x_data += rng.normal(0.0, 0.5 * (x_max - x_min) / n_samples, size=n_samples)
     y_true = model(theta_true, x_data)
-    noise_sigma = 0.10 * np.std(y_true)  # 10% of signal std
+    noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
     y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
     noise_std_actual = noise_sigma  # Store actual noise level used
 else:
     # DCM BOLD model
     x_data = None  # Not used for DCM
     y_true = model(theta_true, x_data)  # Shape: (T, R)
-    noise_sigma = 0.10 * np.std(y_true)  # 10% of signal std
+    noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
     y_obs = y_true + rng.normal(0.0, noise_sigma, size=y_true.shape)
     noise_std_actual = noise_sigma  # Store actual noise level used
 
@@ -687,83 +690,68 @@ if PLOT_3D and n_params == 3:
 hess_func = nd.Hessian(lambda theta: loss_function(y_obs, model(theta, x_data)))
 H = hess_func(theta_est)
 
-# Eigenvalue analysis
-eigvals = np.linalg.eigvalsh(H)
-eps = 1e-12
-eigvals_clipped = np.clip(eigvals, eps, None)
-cond = np.max(eigvals_clipped) / np.min(eigvals_clipped)
-
-# Parameter covariance
+# Parameter covariance estimation
 residuals = y_obs - model(theta_est, x_data)
 sigma_sq_est = np.var(residuals, ddof=n_params)
 
-# Check for degeneracy
-rank_deficient = np.any(eigvals < 1e-8)
+# Use safe Hessian inversion with Tikhonov regularization
+try:
+    cov, hess_diagnostics = safe_hessian_inversion(
+        H, sigma_sq_est, regularization=1e-6, method="tikhonov"
+    )
 
-if rank_deficient:
-    print("\n⚠️  Hessian is rank-deficient or nearly singular. Skipping inversion.")
+    # Extract diagnostics
+    eigvals = hess_diagnostics["eigenvalues"]
+    cond = hess_diagnostics["condition_number"]
+    rank_deficient = hess_diagnostics["rank_deficient"]
+
+    # Compute standard errors (handles negative variances gracefully)
+    se = compute_standard_errors(cov, warn_negative=True)
+
+    # Compute confidence intervals
+    ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
+
+    # Compute correlation matrix
+    corr = compute_correlation_matrix(cov, handle_degenerate=True)
+    max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
+
+    # Plot correlation matrix
+    latex_labels = [to_latex_label(name) for name in param_names]
+    fig, ax = plt.subplots()
+    heatmap = sns.heatmap(
+        corr,
+        annot=True,
+        fmt=".2f",
+        cmap=conf_cmap,
+        vmin=-1,
+        vmax=1,
+        xticklabels=latex_labels,
+        yticklabels=latex_labels,
+        ax=ax,
+        square=True,
+        cbar_kws={"label": "Correlation"},
+    )
+    # Remove ticks from heatmap
+    ax.tick_params(which="both", left=False, bottom=False)
+    # Remove ticks from colorbar
+    cbar = heatmap.collections[0].colorbar
+    cbar.ax.tick_params(which="both", size=0)
+
+    ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "correlation_matrix.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf")
+    plt.show()
+
+except np.linalg.LinAlgError:
+    print("⚠️  Failed to invert Hessian - matrix is singular!")
+    eigvals = np.linalg.eigvalsh(H)
+    cond = np.max(np.abs(eigvals)) / (np.min(np.abs(eigvals)) + 1e-12)
     se = np.full(n_params, np.nan)
     max_offdiag_corr = np.nan
     corr = None
-else:
-    try:
-        H_inv = np.linalg.inv(H)
-        cov = sigma_sq_est * H_inv
-
-        # Check for negative variances
-        diag_cov = np.diag(cov)
-        if np.any(diag_cov < 0):
-            print(
-                "⚠️  Negative variance detected - Hessian may not be positive definite!"
-            )
-            diag_cov = np.clip(diag_cov, 0, None)
-
-        se = np.sqrt(diag_cov)
-
-        # 95% confidence intervals
-        ci = np.vstack([theta_est - 1.96 * se, theta_est + 1.96 * se]).T
-
-        # Correlation matrix
-        denom = np.outer(se, se)
-        with np.errstate(invalid="ignore", divide="ignore"):
-            corr = np.where(denom > 0, cov / denom, 0)
-        max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
-
-        # Plot correlation matrix
-        latex_labels = [to_latex_label(name) for name in param_names]
-        fig, ax = plt.subplots()
-        heatmap = sns.heatmap(
-            corr,
-            annot=True,
-            fmt=".2f",
-            cmap=conf_cmap,
-            vmin=-1,
-            vmax=1,
-            xticklabels=latex_labels,
-            yticklabels=latex_labels,
-            ax=ax,
-            square=True,
-            cbar_kws={"label": "Correlation"},
-        )
-        # Remove ticks from heatmap
-        ax.tick_params(which="both", left=False, bottom=False)
-        # Remove ticks from colorbar
-        cbar = heatmap.collections[0].colorbar
-        cbar.ax.tick_params(which="both", size=0)
-
-        ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
-        plt.tight_layout()
-        plt.savefig(IMG_DIR / "correlation_matrix.png")
-        plt.savefig(
-            LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf"
-        )
-        plt.show()
-
-    except np.linalg.LinAlgError:
-        print("⚠️  Failed to invert Hessian - matrix is singular!")
-        se = np.full(n_params, np.nan)
-        max_offdiag_corr = np.nan
-        corr = None
+    rank_deficient = True
+    ci = np.full((n_params, 2), np.nan)
 
 # Print diagnostics
 print("\nHessian diagnostics:")
@@ -775,6 +763,12 @@ if cond > 1e6:
 if np.min(eigvals) < 1e-6:
     print(
         f"  ⚠️  Near-zero eigenvalue ({np.min(eigvals):.2e}) - model may be degenerate!"
+    )
+
+# Report if regularization was applied
+if "hess_diagnostics" in dir() and hess_diagnostics.get("regularized", False):
+    print(
+        f"  ℹ️  Tikhonov regularization applied (λ={hess_diagnostics['regularization_used']:.2e})"
     )
 
 print(
