@@ -13,6 +13,7 @@ from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style, to_latex_label
+from dcsem.diagnostics import compute_hessian_diagnostics
 from dcsem.numerics import (
     compute_confidence_intervals,
     compute_correlation_matrix,
@@ -701,36 +702,75 @@ if PLOT_3D and n_params == 3:
 # =============================================================================
 # HESSIAN-BASED DIAGNOSTICS
 # =============================================================================
-# Compute numerical Hessian using the SAME objective as optimization
-hess_func = nd.Hessian(obj)
-H = hess_func(theta_est)
+# Canonical NLL Hessian in scaled parameter space for numerical stability.
+# Cov = H_NLL^{-1} directly (sigma_sq=1.0, absorbed into NLL).
+HESS_STEP = 1e-3  # step size for numerical Hessian
 
-# Parameter covariance estimation — residuals in the same space as the objective
-if y_mean is not None:
-    y_pred_norm = (model(theta_est, x_data) - y_mean) / y_std
-    residuals = y_obs_norm - y_pred_norm
+# Parameter scaling: map param_bounds → [0,1]^n if bounds available
+if param_bounds is not None:
+    _lowers_h = np.array([b[0] for b in param_bounds])
+    _scales_h = np.array([b[1] - b[0] for b in param_bounds])
 else:
-    residuals = y_obs - model(theta_est, x_data)
-sigma_sq_est = np.var(residuals, ddof=n_params)
+    _lowers_h = np.zeros(n_params)
+    _scales_h = np.ones(n_params)
 
-# Use safe Hessian inversion with Tikhonov regularization
+
+def _to_scaled_h(theta):
+    return (theta - _lowers_h) / _scales_h
+
+
+def _from_scaled_h(s):
+    return s * _scales_h + _lowers_h
+
+
+# Build canonical NLL objective (0.5 * SSE / sigma2 in residual space)
+if y_mean is not None:
+    _r_est = (y_obs_norm - (model(theta_est, x_data) - y_mean) / y_std).ravel()
+    _resid_scale = 1.0  # already normalized; division is by sigma2_est below
+else:
+    _r_raw = (y_obs - model(theta_est, x_data)).ravel()
+    _resid_scale = float(np.std(_r_raw)) + 1e-12
+    _r_est = _r_raw / _resid_scale
+
+_sigma2_est = float(np.dot(_r_est, _r_est)) / max(_r_est.size - n_params, 1)
+
+
+def _nll_obj(theta):
+    y_pred = model(theta, x_data)
+    if not np.all(np.isfinite(y_pred)):
+        return 1e10
+    if y_mean is not None:
+        r = (y_obs_norm - (y_pred - y_mean) / y_std).ravel()
+    else:
+        r = ((y_obs - y_pred).ravel()) / _resid_scale
+    return 0.5 * float(np.dot(r, r)) / _sigma2_est
+
+
+def _nll_scaled_h(s):
+    return _nll_obj(_from_scaled_h(s))
+
+
+theta_s = _to_scaled_h(theta_est)
+
+# Initialise fallback values
+se = np.full(n_params, np.nan)
+ci = np.full((n_params, 2), np.nan)
+corr = None
+max_offdiag_corr = np.nan
+hess_diag = {}
+
 try:
-    cov, hess_diagnostics = safe_hessian_inversion(
-        H, sigma_sq_est, regularization=1e-6, method="tikhonov"
-    )
+    H_nll_s = nd.Hessian(_nll_scaled_h, step=HESS_STEP)(theta_s)
+    H_nll_s = 0.5 * (H_nll_s + H_nll_s.T)
+    H_nll = H_nll_s / np.outer(_scales_h, _scales_h)
 
-    # Extract diagnostics
-    eigvals = hess_diagnostics["eigenvalues"]
-    cond = hess_diagnostics["condition_number"]
-    rank_deficient = hess_diagnostics["rank_deficient"]
+    # Hessian diagnostics using positive-spectrum condition number
+    hess_diag = compute_hessian_diagnostics(H_nll)
 
-    # Compute standard errors (handles negative variances gracefully)
+    # Cov = H_NLL^{-1} via pinvh (zeros flat/degenerate directions)
+    cov, _ = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="pinvh")
     se = compute_standard_errors(cov, warn_negative=True)
-
-    # Compute confidence intervals
     ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
-
-    # Compute correlation matrix
     corr = compute_correlation_matrix(cov, handle_degenerate=True)
     max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
 
@@ -750,50 +790,34 @@ try:
         square=True,
         cbar_kws={"label": "Correlation"},
     )
-    # Remove ticks from heatmap
     ax.tick_params(which="both", left=False, bottom=False)
-    # Remove ticks from colorbar
     cbar = heatmap.collections[0].colorbar
     cbar.ax.tick_params(which="both", size=0)
-
     ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
     plt.tight_layout()
     plt.savefig(IMG_DIR / "correlation_matrix.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf")
     plt.show()
 
-except np.linalg.LinAlgError:
-    print("⚠️  Failed to invert Hessian - matrix is singular!")
-    eigvals = np.linalg.eigvalsh(H)
-    cond = np.max(np.abs(eigvals)) / (np.min(np.abs(eigvals)) + 1e-12)
-    se = np.full(n_params, np.nan)
-    max_offdiag_corr = np.nan
-    corr = None
-    rank_deficient = True
-    ci = np.full((n_params, 2), np.nan)
+except (np.linalg.LinAlgError, Exception) as _hess_err:
+    print(f"⚠️  Hessian inversion failed: {type(_hess_err).__name__}: {_hess_err}")
 
 # Print diagnostics
+cond = hess_diag.get("condition_number", np.inf)
+rank_deficient = hess_diag.get("is_near_singular", True)
 print("\nHessian diagnostics:")
-print(f"  Eigenvalues: {np.round(eigvals, 4)}")
-print(f"  Condition number: {cond:.2e}")
+if hess_diag:
+    print(f"  Eigenvalues (min/med/max): "
+          f"{hess_diag['eigvals_min']:.3e} / "
+          f"{hess_diag['eigvals_med']:.3e} / "
+          f"{hess_diag['eigvals_max']:.3e}")
+    print(f"  Condition number (pos. spectrum): {cond:.2e}")
+    print(f"  Negative eigenvalues: {hess_diag['n_negative_eigvals']}")
+    if hess_diag["is_near_singular"]:
+        print("  ⚠️  Near-singular Hessian — model may be degenerate!")
+else:
+    print("  (Hessian computation failed)")
 
-if cond > 1e6:
-    print("  ⚠️  High condition number - numerical instability likely!")
-if np.min(eigvals) < 1e-6:
-    print(
-        f"  ⚠️  Near-zero eigenvalue ({np.min(eigvals):.2e}) - model may be degenerate!"
-    )
-
-# Report if regularization was applied
-if "hess_diagnostics" in dir() and hess_diagnostics.get("regularized", False):
-    print(
-        f"  ℹ️  Tikhonov regularization applied (λ={hess_diagnostics['regularization_used']:.2e})"
-    )
-
-print(
-    f"  Estimated noise variance: {sigma_sq_est:.4f}, "
-    f"True: {noise_std_actual**2:.4f} (std={noise_std_actual:.4f})"
-)
 print(f"  Standard errors: {np.round(se, 4)}")
 
 if np.isfinite(max_offdiag_corr):
@@ -802,7 +826,7 @@ if np.isfinite(max_offdiag_corr):
         print("  ⚠️  High parameter correlation - identifiability issues!")
 
 if not rank_deficient:
-    print("  95% Confidence intervals:")
+    print("  95% Confidence intervals (local quadratic approx):")
     for i, name in enumerate(param_names):
         print(
             f"    {name}: [{ci[i, 0]:.4f}, {ci[i, 1]:.4f}] (True: {theta_true[i]:.4f})"
@@ -830,7 +854,12 @@ log_run(
         "se": se.tolist() if not rank_deficient else [float("nan")] * n_params,
         "corr_max": float(max_offdiag_corr) if np.isfinite(max_offdiag_corr) else None,
     },
-    hessian={"cond": float(cond), "eigvals": eigvals.tolist()},
+    hessian={
+        "cond": float(cond),
+        "eigval_min": hess_diag.get("eigvals_min", float("nan")),
+        "eigval_max": hess_diag.get("eigvals_max", float("nan")),
+        "n_negative": hess_diag.get("n_negative_eigvals", 0),
+    },
     performance={"mse": float(mse_est)},
     correlation=corr.tolist() if corr is not None else None,
     overwrite=False,

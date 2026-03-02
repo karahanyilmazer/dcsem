@@ -12,6 +12,7 @@ from scipy import optimize
 from sklearn.metrics import mean_squared_error
 
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS
+from dcsem.numerics import compute_correlation_matrix, compute_standard_errors
 from dcsem.utils import stim_boxcar
 from utils import (
     get_colormap,
@@ -631,21 +632,12 @@ if PLOT_CORNER:
 # CORRELATION PLOT
 # =============================================================================
 cov = np.cov(chain, rowvar=False)
-# Check for negative variances
-diag_cov = np.diag(cov)
-if np.any(diag_cov < 0):
-    print("⚠️  Negative variance detected - Hessian may not be positive definite!")
-    diag_cov = np.clip(diag_cov, 0, None)
+se = compute_standard_errors(cov, warn_negative=True)
 
-se = np.sqrt(diag_cov)
-
-# 95% confidence intervals
+# 95% confidence intervals (MAP ± 1.96 σ_posterior)
 ci = np.vstack([theta_est - 1.96 * se, theta_est + 1.96 * se]).T
 
-# Correlation matrix
-denom = np.outer(se, se)
-with np.errstate(invalid="ignore", divide="ignore"):
-    corr = np.where(denom > 0, cov / denom, 0)
+corr = compute_correlation_matrix(cov, handle_degenerate=True)
 max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
 
 # Plot correlation matrix
