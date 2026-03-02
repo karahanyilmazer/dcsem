@@ -1,5 +1,7 @@
 # %% Imports and config
 import itertools
+from dataclasses import dataclass
+from typing import Callable, Optional
 
 import matplotlib.pyplot as plt
 import numdifftools as nd
@@ -7,14 +9,7 @@ import numpy as np
 import seaborn as sns
 from pypalettes import load_cmap
 from scipy.optimize import minimize
-from sklearn.metrics import (
-    mean_absolute_error,
-    mean_absolute_percentage_error,
-    mean_squared_error,
-    r2_score,
-    root_mean_squared_error,
-    root_mean_squared_log_error,
-)
+from sklearn.metrics import mean_squared_error
 from tqdm import tqdm
 
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style, to_latex_label
@@ -26,7 +21,6 @@ from dcsem.numerics import (
 )
 from dcsem.utils import stim_boxcar
 from utils import (
-    add_noise,
     get_out_dir,
     get_width_height_latex,
     log_run,
@@ -43,158 +37,197 @@ SEED = 42
 rng = np.random.default_rng(SEED)
 
 # =============================================================================
-# MODEL DEFINITIONS - All models defined as functions
+# MODEL REGISTRY
 # =============================================================================
 
 
-# 1️⃣ Quadratic (baseline, convex, well-conditioned)
-# def model(theta, x):
-#     a, b, c = theta
-#     return a * x**2 + b * x + c
+@dataclass(frozen=True)
+class ModelSpec:
+    name: str
+    display_name: str
+    func: Callable
+    param_names: list[str]
+    theta_true: np.ndarray
+    theta_zero: np.ndarray
+    is_dcm: bool = False
+    param_bounds: Optional[list[tuple[float, float]]] = None
+    num_rois: Optional[int] = None
+    time: Optional[np.ndarray] = None
+    u: Optional[Callable] = None
+    ode_method: Optional[str] = None
+    x_min: float = -20.0
+    x_max: float = 20.0
+    n_samples: int = 50
 
 
-# model_name = "quadratic"
-# model_display_name = "Quadratic Model"
-# param_names = ["a", "b", "c"]
-# theta_true = np.array([1.0, -12.0, 20.0])
-# theta_zero = np.array([0.5, 0.0, 0.0])
-# param_bounds = None
-# IS_DCM_MODEL = False
+# =============================================================================
+# MODEL FUNCTIONS
+# =============================================================================
 
 
-# 2️⃣ Product degeneracy (structural non-identifiability)
-# def model(theta, x):
-#     a, b, c = theta
-#     return (a * b) * x + c
+def _quadratic(theta, x):
+    a, b, c = theta
+    return a * x**2 + b * x + c
 
 
-# model_name = "product_degen"
-# model_display_name = "Product Model (Degenerate)"
-# param_names = ["a", "b", "c"]
-# theta_true = np.array([2.0, 3.0, 5.0])  # slope = a*b = 6
-# theta_zero = np.array([1.0, 1.0, 0.0])
-# param_bounds = None
-# IS_DCM_MODEL = False
+def _product_degen(theta, x):
+    a, b, c = theta
+    return (a * b) * x + c
 
 
-# 3️⃣ Product reparametrized (identifiable)
-# def model(theta, x):
-#     alpha, c = theta
-#     return alpha * x + c
+def _product_reparam(theta, x):
+    alpha, c = theta
+    return alpha * x + c
 
 
-# model_name = "product_reparam"
-# model_display_name = "Product Model (Reparametrized)"
-# param_names = ["alpha", "c"]
-# theta_true = np.array([6.0, 5.0])  # slope = a*b = 6
-# theta_zero = np.array([1.0, 0.0])
-# param_bounds = None
-# IS_DCM_MODEL = False
+def _sum_of_exponentials(theta, x):
+    A1, k1, A2, k2 = theta
+    return A1 * np.exp(-k1 * x) + A2 * np.exp(-k2 * x)
 
 
-# 4️⃣ Sum of exponentials (sloppy model, huge condition number)
-# def model(theta, x):
-#     A1, k1, A2, k2 = theta
-#     return A1 * np.exp(-k1 * x) + A2 * np.exp(-k2 * x)
+def _michaelis_menten(theta, x):
+    Vmax, KM = theta
+    return Vmax * x / (KM + x)
 
 
-# model_name = "sum_of_exponentials"
-# model_display_name = "Sum of Exponentials"
-# param_names = ["A1", "k1", "A2", "k2"]
-# theta_true = np.array([5.0, 0.5, 3.0, 0.1])
-# theta_zero = np.array([4.0, 0.4, 2.0, 0.15])
-# param_bounds = None
-# IS_DCM_MODEL = False
+def _logistic_sigmoid(theta, x):
+    L, k, x0 = theta
+    return L / (1 + np.exp(-k * (x - x0)))
 
 
-# 5️⃣ Michaelis-Menten (nonlinear but identifiable)
-# def model(theta, x):
-#     Vmax, KM = theta
-#     return Vmax * x / (KM + x)
+def _power_law(theta, x):
+    a, b = theta
+    return a * x**b
 
 
-# model_name = "michaelis_menten"
-# model_display_name = "Michaelis-Menten"
-# param_names = ["Vmax", "KM"]
-# theta_true = np.array([10.0, 2.0])
-# theta_zero = np.array([8.0, 1.5])
-# param_bounds = None
-# IS_DCM_MODEL = False
+def _make_dcm_func(param_names, time, u, num_rois, ode_method):
+    """Factory returning a closure over DCM config."""
+
+    def _dcm_func(theta, x):
+        params = dict(zip(param_names, theta))
+        bold = simulate_bold(
+            params, time=time, u=u, num_rois=num_rois, ode_method=ode_method
+        )
+        return bold  # Shape: (T, R)
+
+    return _dcm_func
 
 
-# 6️⃣ Logistic / Sigmoid (nonlinear, correlated parameters)
-# def model(theta, x):
-#     L, k, x0 = theta
-#     return L / (1 + np.exp(-k * (x - x0)))
+# =============================================================================
+# BUILD REGISTRY
+# =============================================================================
 
+_dcm_time = np.arange(100)
+_dcm_u = stim_boxcar([[10, 20, 1]])
+_dcm_param_names = ["a01", "a10", "c0", "c1"]
+_dcm_bounds = PARAM_BOUNDS.get_bounds_list(_dcm_param_names)
 
-# model_name = "logistic_sigmoid"
-# model_display_name = "Logistic Sigmoid"
-# param_names = ["L", "k", "x0"]
-# theta_true = np.array([1.0, 1.0, 5.0])
-# theta_zero = np.array([0.8, 0.8, 4.0])
-# param_bounds = None
-# IS_DCM_MODEL = False
+MODEL_REGISTRY: dict[str, ModelSpec] = {
+    "quadratic": ModelSpec(
+        name="quadratic",
+        display_name="Quadratic Model",
+        func=_quadratic,
+        param_names=["a", "b", "c"],
+        theta_true=np.array([1.0, -12.0, 20.0]),
+        theta_zero=np.array([0.5, 0.0, 0.0]),
+    ),
+    "product_degen": ModelSpec(
+        name="product_degen",
+        display_name="Product Model (Degenerate)",
+        func=_product_degen,
+        param_names=["a", "b", "c"],
+        theta_true=np.array([2.0, 3.0, 5.0]),
+        theta_zero=np.array([1.0, 1.0, 0.0]),
+    ),
+    "product_reparam": ModelSpec(
+        name="product_reparam",
+        display_name="Product Model (Reparametrized)",
+        func=_product_reparam,
+        param_names=["alpha", "c"],
+        theta_true=np.array([6.0, 5.0]),
+        theta_zero=np.array([1.0, 0.0]),
+    ),
+    "sum_of_exponentials": ModelSpec(
+        name="sum_of_exponentials",
+        display_name="Sum of Exponentials",
+        func=_sum_of_exponentials,
+        param_names=["A1", "k1", "A2", "k2"],
+        theta_true=np.array([5.0, 0.5, 3.0, 0.1]),
+        theta_zero=np.array([4.0, 0.4, 2.0, 0.15]),
+    ),
+    "michaelis_menten": ModelSpec(
+        name="michaelis_menten",
+        display_name="Michaelis-Menten",
+        func=_michaelis_menten,
+        param_names=["Vmax", "KM"],
+        theta_true=np.array([10.0, 2.0]),
+        theta_zero=np.array([8.0, 1.5]),
+    ),
+    "logistic_sigmoid": ModelSpec(
+        name="logistic_sigmoid",
+        display_name="Logistic Sigmoid",
+        func=_logistic_sigmoid,
+        param_names=["L", "k", "x0"],
+        theta_true=np.array([1.0, 1.0, 5.0]),
+        theta_zero=np.array([0.8, 0.8, 4.0]),
+    ),
+    "power_law": ModelSpec(
+        name="power_law",
+        display_name="Power Law",
+        func=_power_law,
+        param_names=["a", "b"],
+        theta_true=np.array([2.0, 1.5]),
+        theta_zero=np.array([1.5, 1.2]),
+    ),
+    "dcm_2roi": ModelSpec(
+        name="dcm_2roi",
+        display_name="2-ROI DCM",
+        func=_make_dcm_func(
+            _dcm_param_names, _dcm_time, _dcm_u, num_rois=2, ode_method="BDF"
+        ),
+        param_names=_dcm_param_names,
+        theta_true=np.array([0.4, 0.6, 0.9, 0.2]),
+        theta_zero=np.array([rng.uniform(low, high) for (low, high) in _dcm_bounds]),
+        is_dcm=True,
+        param_bounds=_dcm_bounds,
+        num_rois=2,
+        time=_dcm_time,
+        u=_dcm_u,
+        ode_method="BDF",
+    ),
+}
 
+# =============================================================================
+# UNPACK SELECTED MODEL
+# =============================================================================
 
-# 7️⃣ Power law
-# def model(theta, x):
-#     a, b = theta
-#     return a * x**b
+ACTIVE_MODEL = {
+    1: "quadratic",
+    2: "product_degen",
+    3: "product_reparam",
+    4: "sum_of_exponentials",
+    5: "michaelis_menten",
+    6: "logistic_sigmoid",
+    7: "power_law",
+    8: "dcm_2roi",
+}[1]
 
-
-# model_name = "power_law"
-# model_display_name = "Power Law"
-# param_names = ["a", "b"]
-# theta_true = np.array([2.0, 1.5])
-# theta_zero = np.array([1.5, 1.2])
-# param_bounds = None
-# IS_DCM_MODEL = False
-
-# 8️⃣ DCM - 2 ROI BOLD model (requires different setup)
-# This model uses BOLD simulation instead of analytical functions
-
-IS_DCM_MODEL = True
-NUM_ROIS = 2
-time = np.arange(100)
-u = stim_boxcar([[10, 20, 1]])
-ODE_METHOD = "BDF"  # Stiff solver; use None for default RK45
-
-
-def model(theta, x):
-    """
-    For DCM: theta contains [a01, a10, c0, c1]
-    x is ignored (time and u are used instead)
-    Returns BOLD signals of shape (T, R)
-    """
-    params = dict(zip(param_names, theta))
-    bold = simulate_bold(
-        params, time=time, u=u, num_rois=NUM_ROIS, ode_method=ODE_METHOD
-    )
-    return bold  # Shape: (T, R)
-
-
-model_name = "dcm_2roi"
-model_display_name = "2-ROI DCM"
-param_names = ["a01", "a10", "c0", "c1"]
-
-# DCM-specific bounds for optimization (using central config for consistency)
-param_bounds = PARAM_BOUNDS.get_bounds_list(param_names)
-
-# Define the true parameter set within bounds
-# theta_true = np.array([0.4, 0.6, 0.9, 0.2])
-# theta_true = np.array([rng.uniform(low, high) for (low, high) in param_bounds])
-# theta_true = np.array([0.1, 0.3, 0.9, 0.2])
-theta_true = np.array([0.4, 0.6, 0.9, 0.2])
-theta_zero = np.array([rng.uniform(low, high) for (low, high) in param_bounds])
-# theta_true = np.array([0.82646088, 0.91726585, 0.71238939, 0.91609269])
+spec = MODEL_REGISTRY[ACTIVE_MODEL]
+model = spec.func
+model_name = spec.name
+model_display_name = spec.display_name
+param_names = spec.param_names
+theta_true = spec.theta_true
+theta_zero = spec.theta_zero
+IS_DCM_MODEL = spec.is_dcm
+param_bounds = spec.param_bounds
 
 
 # =============================================================================
 # SETTINGS
 # =============================================================================
 
-loss_function = r2_score
+# Loss function must return a value to MINIMIZE (lower = better fit).
 loss_function = mean_squared_error
 
 # Auto-detect number of parameters
@@ -249,20 +282,38 @@ def auto_span(value, default_factor=1.5, min_span=1.0):
     return default_factor * max(min_span, abs(value))
 
 
+def make_objective(model_func, y_obs, x_data, loss_fn, normalize=True):
+    """Define the objective once; reuse for optimization, Hessian, and landscapes."""
+    if normalize:
+        y_mean = y_obs.mean(axis=0, keepdims=True)
+        y_std = y_obs.std(axis=0, keepdims=True) + 1e-12
+
+        y_obs_norm = (y_obs - y_mean) / y_std
+
+        def objective(theta):
+            y_pred_norm = (model_func(theta, x_data) - y_mean) / y_std
+            return loss_fn(y_obs_norm, y_pred_norm)
+
+        return objective, y_mean, y_std, y_obs_norm
+    else:
+
+        def objective(theta):
+            return loss_fn(y_obs, model_func(theta, x_data))
+
+        return objective, None, None, None
+
+
 # =============================================================================
 # DATA GENERATION
 # =============================================================================
 
-
 # Data settings
-x_min, x_max = -20.0, 20.0  # Not used for DCM
-n_samples = 50  # Not used for DCM
+x_min, x_max = spec.x_min, spec.x_max
+n_samples = spec.n_samples
 
 if not IS_DCM_MODEL:
     # Standard analytical models
     x_data = np.linspace(x_min, x_max, n_samples)
-    # Add some variability to x_data
-    # x_data += rng.normal(0.0, 0.5 * (x_max - x_min) / n_samples, size=n_samples)
     y_true = model(theta_true, x_data)
     noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
     y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
@@ -280,28 +331,17 @@ else:
 # =============================================================================
 loss_history = []
 
+# Build the single objective used everywhere
+obj, y_mean, y_std, y_obs_norm = make_objective(
+    model, y_obs, x_data, loss_function, normalize=True
+)
+
 
 def callback(theta):
-    loss = obj(theta)  # your objective function
+    loss = obj(theta)
     loss_history.append(loss)
     print(f"Iteration {len(loss_history)}: loss = {loss:.6e}")
 
-
-def mse_norm(theta, x_data, y_obs_norm, y_mean, y_std):
-    y_pred = model(theta, x_data)
-    y_pred_norm = (y_pred - y_mean) / y_std
-    return np.mean((y_pred_norm - y_obs_norm) ** 2)
-
-
-# Apply z-score normalization
-y_mean = y_obs.mean(axis=0, keepdims=True)
-y_std = y_obs.std(axis=0, keepdims=True) + 1e-12  # avoid div by zero
-y_true_norm = (y_true - y_mean) / y_std
-y_obs_norm = (y_obs - y_mean) / y_std
-
-obj = lambda th: loss_function(y_obs_norm, (model(th, x_data) - y_mean) / y_std)
-# obj = lambda th: loss_function(y_obs, model(th, x_data))
-# obj = lambda th: mse_norm(th, x_data, y_obs_norm, y_mean, y_std)
 
 # Run the optimization
 res = minimize(
@@ -361,8 +401,8 @@ else:
     y_pred = model(theta_est, None)  # Shape: (T, R)
     y_true_plot = model(theta_true, None)  # Shape: (T, R)
 
-    # Get time vector from globals (defined in DCM model section)
-    time_vec = globals().get("time", np.arange(y_obs.shape[0]))
+    # Get time vector from spec
+    time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
     num_rois = y_obs.shape[1]
     fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
 
@@ -442,7 +482,7 @@ if PLOT_1D:
         for v in tqdm(grid, desc=f"1D loss {name}"):
             th = theta_est.copy()
             th[i] = v
-            losses.append(loss_function(y_obs, model(th, x_data)))
+            losses.append(obj(th))
 
         ax.plot(grid, losses)
         ax.axvline(theta_est[i], color=default_colors[2], label="estimate")
@@ -497,36 +537,12 @@ if PLOT_2D and n_params >= 2:
     for plot_idx, (i, j) in enumerate(pairs):
         ax = axes[plot_idx]
 
-        # Create grids for parameters i and j
-        if not IS_DCM_MODEL:
-            grid_i = make_range(theta_est[i], spans[i], N_2D)
-            grid_j = make_range(theta_est[j], spans[j], N_2D)
-        else:
-            if i in [0, 1]:
-                grid_i = make_range(
-                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
-                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
-                    N_2D,
-                )
-            else:
-                grid_i = make_range(
-                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
-                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
-                    N_2D,
-                )
-
-            if j in [0, 1]:
-                grid_j = make_range(
-                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
-                    (param_bounds[0][1] - param_bounds[0][0]) / 2,
-                    N_2D,
-                )
-            else:
-                grid_j = make_range(
-                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
-                    (param_bounds[2][1] - param_bounds[2][0]) / 2,
-                    N_2D,
-                )
+        # Unified grid for all models, centered on theta_est
+        grid_i = make_range(theta_est[i], spans[i], N_2D)
+        grid_j = make_range(theta_est[j], spans[j], N_2D)
+        if param_bounds is not None:
+            grid_i = np.clip(grid_i, param_bounds[i][0], param_bounds[i][1])
+            grid_j = np.clip(grid_j, param_bounds[j][0], param_bounds[j][1])
 
         Grid_i, Grid_j = np.meshgrid(grid_i, grid_j, indexing="ij")
 
@@ -539,7 +555,7 @@ if PLOT_2D and n_params >= 2:
                 th = theta_est.copy()
                 th[i] = Grid_i[ii, jj]
                 th[j] = Grid_j[ii, jj]
-                Z[ii, jj] = loss_function(y_obs, model(th, x_data))
+                Z[ii, jj] = obj(th)
 
         # Plot contour
         cont = ax.contourf(Grid_i, Grid_j, Z, levels=30, cmap=cmap)
@@ -602,7 +618,6 @@ if PLOT_2D and n_params >= 2:
     fig.suptitle(
         rf"\textbf{{{model_display_name} - 2D Loss Landscape Contours}}", y=0.98
     )
-    # fig.colorbar(cont, ax=axes[:n_pairs].tolist(), shrink=0.8, label="MSE", pad=0.02)
     plt.tight_layout()
 
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_2d_new.pdf")
@@ -636,7 +651,7 @@ if PLOT_3D and n_params == 3:
             th = theta_est.copy()
             th[i] = Grid_i[ii, jj]
             th[j] = Grid_j[ii, jj]
-            Z[ii, jj] = loss_function(y_obs, model(th, x_data))
+            Z[ii, jj] = obj(th)
 
     fig = plt.figure()
     ax = fig.add_subplot(111, projection="3d")
@@ -652,11 +667,11 @@ if PLOT_3D and n_params == 3:
         f"{model_display_name} | MSE({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
     )
 
-    z_est = loss_function(y_obs, model(theta_est, x_data))
+    z_est = obj(theta_est)
     th_true_proj = theta_est.copy()
     th_true_proj[i] = theta_true[i]
     th_true_proj[j] = theta_true[j]
-    z_true_proj = loss_function(y_obs, model(th_true_proj, x_data))
+    z_true_proj = obj(th_true_proj)
 
     ax.scatter(
         [theta_est[i]],
@@ -686,12 +701,16 @@ if PLOT_3D and n_params == 3:
 # =============================================================================
 # HESSIAN-BASED DIAGNOSTICS
 # =============================================================================
-# Compute numerical Hessian
-hess_func = nd.Hessian(lambda theta: loss_function(y_obs, model(theta, x_data)))
+# Compute numerical Hessian using the SAME objective as optimization
+hess_func = nd.Hessian(obj)
 H = hess_func(theta_est)
 
-# Parameter covariance estimation
-residuals = y_obs - model(theta_est, x_data)
+# Parameter covariance estimation — residuals in the same space as the objective
+if y_mean is not None:
+    y_pred_norm = (model(theta_est, x_data) - y_mean) / y_std
+    residuals = y_obs_norm - y_pred_norm
+else:
+    residuals = y_obs - model(theta_est, x_data)
 sigma_sq_est = np.var(residuals, ddof=n_params)
 
 # Use safe Hessian inversion with Tikhonov regularization
@@ -802,7 +821,6 @@ log_run(
     settings={
         "n_samples": n_samples if not IS_DCM_MODEL else y_obs.shape[0],
         "noise_sigma": noise_std_actual,
-        # "noise_tsnr": noise_tsnr if IS_DCM_MODEL else None,
     },
     params={
         "names": param_names,
