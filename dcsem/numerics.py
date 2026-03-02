@@ -14,7 +14,9 @@ def safe_hessian_inversion(
     hessian: np.ndarray,
     sigma_sq: float,
     regularization: float = 1e-6,
-    method: Literal["tikhonov", "eigenvalue", "raw"] = "tikhonov",
+    method: Literal[
+        "tikhonov", "eigenvalue", "raw", "pinvh", "adaptive_ridge"
+    ] = "tikhonov",
 ) -> tuple[np.ndarray, dict]:
     """
     Safely invert Hessian with regularization for ill-conditioned matrices.
@@ -24,12 +26,18 @@ def safe_hessian_inversion(
 
     Args:
         hessian: Hessian matrix (n_params x n_params)
-        sigma_sq: Estimated noise variance
-        regularization: Regularization strength (lambda for Tikhonov)
+        sigma_sq: Estimated noise variance.
+            For the canonical MLE formula Cov = H_NLL^{-1}, pass sigma_sq=1.0
+            and compute H as the Hessian of the NLL directly (so Cov = H_NLL^{-1}).
+            For MSE objectives, see the "canonical NLL" pattern in spdcm_noise_sweep.py.
+        regularization: Regularization strength (lambda for Tikhonov / epsilon floor)
         method: Regularization method:
-            - "tikhonov": (H + lambda*I)^-1 - adds regularization to diagonal
+            - "tikhonov": (H + lambda*I)^-1 — adds regularization to diagonal
             - "eigenvalue": Truncates near-zero eigenvalues before inversion
             - "raw": Direct inversion with no regularization (may fail)
+            - "pinvh": Moore-Penrose pseudoinverse via scipy.linalg.pinvh; zeros out
+              flat directions. Diagnostic tool for degeneracy, not a calibrated CI.
+            - "adaptive_ridge": Minimum ridge to restore PD, then inverts exactly.
 
     Returns:
         covariance: Parameter covariance matrix (sigma_sq * H^-1)
@@ -46,8 +54,11 @@ def safe_hessian_inversion(
     """
     n_params = hessian.shape[0]
 
+    # Symmetrize before any eigenvalue work or inversion
+    H_sym = 0.5 * (hessian + hessian.T)
+
     # Compute eigenvalue decomposition for diagnostics
-    eigvals = np.linalg.eigvalsh(hessian)
+    eigvals = np.linalg.eigvalsh(H_sym)
     eps = 1e-12
     eigvals_clipped = np.clip(eigvals, eps, None)
     condition_number = np.max(eigvals_clipped) / np.min(eigvals_clipped)
@@ -66,7 +77,7 @@ def safe_hessian_inversion(
 
     if method == "raw":
         # Direct inversion - may fail for ill-conditioned matrices
-        H_inv = np.linalg.inv(hessian)
+        H_inv = np.linalg.inv(H_sym)
         covariance = sigma_sq * H_inv
         return covariance, diagnostics
 
@@ -74,11 +85,11 @@ def safe_hessian_inversion(
         # Tikhonov regularization: (H + lambda*I)^-1
         # Apply regularization if needed (rank deficient or high condition number)
         if rank_deficient or condition_number > 1e6:
-            H_reg = hessian + regularization * np.eye(n_params)
+            H_reg = H_sym + regularization * np.eye(n_params)
             diagnostics["regularization_used"] = regularization
             diagnostics["regularized"] = True
         else:
-            H_reg = hessian
+            H_reg = H_sym
 
         H_inv = np.linalg.inv(H_reg)
         covariance = sigma_sq * H_inv
@@ -86,7 +97,7 @@ def safe_hessian_inversion(
 
     elif method == "eigenvalue":
         # Eigenvalue truncation: reconstruct matrix with truncated eigenvalues
-        eigvals_full, eigvecs = np.linalg.eigh(hessian)
+        eigvals_full, eigvecs = np.linalg.eigh(H_sym)
 
         # Truncate small eigenvalues
         min_eigval = regularization
@@ -101,9 +112,35 @@ def safe_hessian_inversion(
         covariance = sigma_sq * H_inv
         return covariance, diagnostics
 
+    elif method == "pinvh":
+        # Moore-Penrose pseudoinverse via scipy.linalg.pinvh.
+        # Zeros out flat directions (near-zero eigenvalues).
+        # Diagnostic / stable-inverse tool — not a calibrated CI generator.
+        # regularization is passed as atol to threshold near-zero eigenvalues.
+        from scipy.linalg import pinvh as _pinvh
+
+        H_inv = _pinvh(H_sym, lower=False, atol=regularization)
+        covariance = sigma_sq * H_inv
+        diagnostics["regularized"] = False
+        return covariance, diagnostics
+
+    elif method == "adaptive_ridge":
+        # Minimum ridge to restore positive definiteness, then exact inversion.
+        min_e = float(np.linalg.eigvalsh(H_sym)[0])
+        ridge = (
+            max(0.0, -min_e) + regularization
+        )  # regularization acts as epsilon floor
+        H_reg = H_sym + ridge * np.eye(n_params)
+        H_inv = np.linalg.inv(H_reg)
+        covariance = sigma_sq * H_inv
+        diagnostics["regularization_used"] = ridge
+        diagnostics["regularized"] = ridge > regularization
+        return covariance, diagnostics
+
     else:
         raise ValueError(
-            f"Unknown method: {method}. Use 'tikhonov', 'eigenvalue', or 'raw'"
+            f"Unknown method: {method}. "
+            "Use 'tikhonov', 'eigenvalue', 'raw', 'pinvh', or 'adaptive_ridge'"
         )
 
 
