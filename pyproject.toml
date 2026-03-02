@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "scikit-learn>=1.8.0",
     "scipy>=1.17.0",
+    "sdeint>=0.3.0",
     "seaborn>=0.13.2",
     "statsmodels>=0.14.6",
 ]

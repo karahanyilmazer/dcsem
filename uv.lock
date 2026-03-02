@@ -215,6 +215,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "scikit-learn" },
     { name = "scipy" },
+    { name = "sdeint" },
     { name = "seaborn" },
     { name = "statsmodels" },
 ]
@@ -235,6 +236,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "scikit-learn", specifier = ">=1.8.0" },
     { name = "scipy", specifier = ">=1.17.0" },
+    { name = "sdeint", specifier = ">=0.3.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "statsmodels", specifier = ">=0.14.6" },
 ]
@@ -1291,6 +1293,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/58/a8/a66a75c3d8f1fb2b83f66007d6455a06a6f6cf5618c3dc35bc9b69dd096e/scipy-1.17.0-cp314-cp314t-win_amd64.whl", hash = "sha256:1ff269abf702f6c7e67a4b7aad981d42871a11b9dd83c58d2d2ea624efbd1088", size = 37098574, upload-time = "2026-01-10T21:30:40.782Z" },
     { url = "https://files.pythonhosted.org/packages/56/a5/df8f46ef7da168f1bc52cd86e09a9de5c6f19cc1da04454d51b7d4f43408/scipy-1.17.0-cp314-cp314t-win_arm64.whl", hash = "sha256:031121914e295d9791319a1875444d55079885bbae5bdc9c5e0f2ee5f09d34ff", size = 25246266, upload-time = "2026-01-10T21:30:45.923Z" },
 ]
+
+[[package]]
+name = "sdeint"
+version = "0.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a0/6f/8b6eecefd4d5fba57f58edba98f0050a5823e5c42db918600f370274012d/sdeint-0.3.0.tar.gz", hash = "sha256:edee046344abc9350518cc4421e0cd983967cae150d382518bfd84e0306ca64a", size = 39961, upload-time = "2022-07-12T07:44:42.18Z" }
 
 [[package]]
 name = "seaborn"
