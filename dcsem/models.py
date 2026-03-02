@@ -404,8 +404,8 @@ class DCM(BaseModel):
         return self.get_p()
 
     def get_bounds(self):
-        LB = [-np.infty] * len(self.get_p())
-        UB = [np.infty] * len(self.get_p())
+        LB = [-np.inf] * len(self.get_p())
+        UB = [np.inf] * len(self.get_p())
         return LB, UB
 
     def fn_negloglik(self, p, y, tvec, u):
@@ -856,8 +856,8 @@ class SEM(BaseModel):
     def get_bounds(self):
         p = self.get_p()
         n = self.get_p_names()
-        UB = np.full(p.shape, np.infty)
-        LB = np.full(p.shape, -np.infty)
+        UB = np.full(p.shape, np.inf)
+        LB = np.full(p.shape, -np.inf)
         LB[n.index("sigma")] = 0
         return LB, UB
 
