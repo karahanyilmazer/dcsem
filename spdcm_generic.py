@@ -106,6 +106,7 @@ print(f"Plots will be saved to: {IMG_DIR}")
 # Plot toggles
 PLOT_2D_LANDSCAPE = False  # slow for spectral model
 PLOT_SPECTRAL = True
+PLOT_BOLD = True
 
 
 # =============================================================================
@@ -348,6 +349,60 @@ if PLOT_SPECTRAL:
             LATEX_DIR / f"{model_name}_cross_coherence.pdf", bbox_inches="tight"
         )
         plt.show()
+
+
+# %% ==========================================================================
+# BOLD TIME SERIES
+# =============================================================================
+
+BOLD_SEED = SEED + 1
+
+if PLOT_BOLD:
+    # Canonical ground truth: pin to BOLD_SEED once.
+    bold_true, tvec = _spdcm.simulate_bold(
+        theta_true, T=200, rng=np.random.default_rng(BOLD_SEED)
+    )
+    # Same seed → same noise realization; differences reflect only parameter mismatch.
+    bold_est, _ = _spdcm.simulate_bold(
+        theta_est, T=200, rng=np.random.default_rng(BOLD_SEED)
+    )
+
+    fig, axes = plt.subplots(
+        1, R, figsize=(width, height / 1.5), sharey=False, sharex=True
+    )
+    if R == 1:
+        axes = [axes]
+
+    for r in range(R):
+        ax = axes[r]
+        ax.plot(
+            tvec,
+            bold_true[:, r],
+            color=default_colors[1],
+            linestyle="--",
+            label="true",
+            lw=1.5,
+        )
+        ax.plot(tvec, bold_est[:, r], color=default_colors[2], label="fitted", lw=1.5)
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("BOLD (a.u.)")
+        ax.set_title(f"ROI {r + 1}")
+        ax.grid(True, alpha=0.3)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=2,
+        bbox_to_anchor=(0.5, -0.08),
+        frameon=True,
+    )
+    fig.suptitle(rf"\textbf{{{model_display_name} — BOLD Time Series}}", y=1.02)
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "bold_timeseries.png", bbox_inches="tight")
+    plt.savefig(LATEX_DIR / f"{model_name}_bold.pdf", bbox_inches="tight")
+    plt.show()
 
 
 # %% ==========================================================================

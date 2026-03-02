@@ -108,6 +108,7 @@ print(f"Plots will be saved to: {IMG_DIR}")
 
 PLOT_CORNER = True
 PLOT_POSTERIOR_BANDS = True
+PLOT_BOLD_BANDS = True
 
 
 # =============================================================================
@@ -429,6 +430,91 @@ if PLOT_POSTERIOR_BANDS:
             bbox_inches="tight",
         )
         plt.show()
+
+
+# %% ==========================================================================
+# BOLD POSTERIOR PREDICTIVE BANDS
+# =============================================================================
+
+# Ground truth: one canonical noise realization, pinned to BOLD_SEED.
+# Resimulating with the same seed + theta_true reproduces it exactly,
+# so theta_mean = theta_true → bold_mean overlaps bold_gt perfectly.
+BOLD_SEED = SEED + 1
+bold_gt, tvec = _spdcm.simulate_bold(
+    theta_true, T=200, rng=np.random.default_rng(BOLD_SEED)
+)
+
+if PLOT_BOLD_BANDS:
+    nsamp = min(50, chain.shape[0])
+    idx = rng.choice(chain.shape[0], size=nsamp, replace=False)
+    # Use a unique seed per sample so the band reflects genuine noise variation.
+    bolds = []
+    for i, th in enumerate(chain[idx]):
+        b, _ = _spdcm.simulate_bold(
+            th, T=200, rng=np.random.default_rng(BOLD_SEED + 10 + i)
+        )
+        bolds.append(b)
+    bolds = np.array(bolds)  # (nsamp, n_steps, R)
+
+    # Same seed as bold_gt → identical path when theta == theta_true.
+    bold_mean, _ = _spdcm.simulate_bold(
+        theta_mean, T=200, rng=np.random.default_rng(BOLD_SEED)
+    )
+    bold_true = bold_gt  # alias for clarity in the plot
+
+    R = _spdcm.n_rois
+    fig, axes = plt.subplots(
+        1, R, figsize=(width, height / 1.5), sharey=False, sharex=True
+    )
+    if R == 1:
+        axes = [axes]
+
+    for r in range(R):
+        ax = axes[r]
+        lo = np.percentile(bolds[:, :, r], 2.5, axis=0)
+        hi = np.percentile(bolds[:, :, r], 97.5, axis=0)
+        ax.fill_between(
+            tvec, lo, hi, color=default_colors[2], alpha=0.2, label="95% posterior band"
+        )
+        ax.plot(
+            tvec,
+            bold_mean[:, r],
+            color=default_colors[2],
+            label="posterior mean",
+            lw=1.5,
+        )
+        ax.plot(
+            tvec,
+            bold_true[:, r],
+            color=default_colors[1],
+            linestyle="--",
+            label="true",
+            lw=1.5,
+        )
+        ax.set_xlabel("Time (s)")
+        ax.set_ylabel("BOLD (a.u.)")
+        ax.set_title(f"ROI {r + 1}")
+        ax.grid(True, alpha=0.3)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, -0.08),
+        frameon=True,
+    )
+    fig.suptitle(
+        rf"\textbf{{{model_display_name} — Posterior Predictive BOLD ({opt_method})}}",
+        y=1.02,
+    )
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "posterior_bold.png", bbox_inches="tight")
+    plt.savefig(
+        LATEX_DIR / f"{model_name}_{opt_method}_posterior_bold.pdf", bbox_inches="tight"
+    )
+    plt.show()
 
 
 # %% ==========================================================================

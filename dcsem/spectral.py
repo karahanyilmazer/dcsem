@@ -304,6 +304,40 @@ class SpectralDCM:
         return self._vectorize_csd(S_noisy)
 
     # ------------------------------------------------------------------
+    # Time-domain simulation
+    # ------------------------------------------------------------------
+
+    def simulate_bold(self, theta, T=200, rng=None):
+        """Simulate resting-state BOLD using DCM stochastic mode (sdeint).
+
+        Parameters
+        ----------
+        theta : [a01, a10, log_sigma_e]
+        T     : simulation length in seconds (at TR resolution)
+        rng   : ignored (sdeint uses numpy random state; set np.random.seed before calling)
+
+        Returns
+        -------
+        bold : ndarray, shape (n_steps, R)
+        tvec : ndarray, shape (n_steps,)
+        """
+        a01, a10, log_sigma_e = theta
+        sigma_e = np.exp(log_sigma_e)
+        R = self.n_rois
+        A = np.array([[self.self_connection, a10],
+                      [a01,  self.self_connection]])
+
+        n_steps = int(T / self.TR)
+        tvec = np.arange(n_steps) * self.TR
+
+        if rng is None:
+            rng = np.random.default_rng()
+        dcm = DCM(R, params={'A': A, 'C': np.zeros(R)}, stochastic=True)
+        dcm.state_noise_std = sigma_e
+        bold, _ = dcm.simulate(tvec, u=None, generator=rng)   # u=None → no stimulus
+        return bold, tvec   # bold shape (n_steps, R)
+
+    # ------------------------------------------------------------------
     # Observed CSD from BOLD
     # ------------------------------------------------------------------
 
