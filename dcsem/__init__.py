@@ -12,6 +12,9 @@ from .config import NOISE_CONFIG, PARAM_BOUNDS, PATH_CONFIG
 # Core models
 from .models import DCM, SEM, MultiLayerDCM, MultiLayerSEM, TwoLayerDCM
 
+# Spectral DCM
+from .spectral import SpectralDCM
+
 # Numerical stability utilities
 from .numerics import (
     compute_confidence_intervals,
@@ -64,6 +67,7 @@ __all__ = [
     "MultiLayerDCM",
     "SEM",
     "MultiLayerSEM",
+    "SpectralDCM",
     # Numerical stability
     "safe_hessian_inversion",
     "compute_standard_errors",
