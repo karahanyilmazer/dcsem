@@ -9,11 +9,16 @@ L-BFGS-B optimization, MCMC, and BENCH.
 # Configuration - single source of truth for parameters
 from .config import NOISE_CONFIG, PARAM_BOUNDS, PATH_CONFIG
 
+# Diagnostic utilities
+from .diagnostics import (
+    compute_2d_loss_landscape,
+    compute_hessian_diagnostics,
+    parametric_bootstrap_uncertainty,
+    profile_likelihood_1d,
+)
+
 # Core models
 from .models import DCM, SEM, MultiLayerDCM, MultiLayerSEM, TwoLayerDCM
-
-# Spectral DCM
-from .spectral import SpectralDCM
 
 # Numerical stability utilities
 from .numerics import (
@@ -33,6 +38,9 @@ from .plotting import (
     set_style,
     to_latex_label,
 )
+
+# Spectral DCM
+from .spectral import SpectralDCM
 
 # Core utilities
 from .utils import (
@@ -73,6 +81,11 @@ __all__ = [
     "compute_standard_errors",
     "compute_correlation_matrix",
     "compute_confidence_intervals",
+    # Diagnostics
+    "compute_hessian_diagnostics",
+    "profile_likelihood_1d",
+    "compute_2d_loss_landscape",
+    "parametric_bootstrap_uncertainty",
     # Validation
     "ShapeError",
     "validate_bold_shape",
