@@ -456,12 +456,13 @@ class DCM(BaseModel):
 
         return F
 
-    def integrate(self, tvec, p0, u=None):
+    def integrate(self, tvec, p0, u=None, generator=None):
         """Integrate the ODE/SDE
 
         :param tvec: array
         :param p0: initial state
         :param u: input
+        :param generator: numpy.random.Generator for stochastic mode
         :return: 2D array (states x time), 1D array (x)
         """
         # if no input, set to zero
@@ -470,7 +471,7 @@ class DCM(BaseModel):
         # get main function
         F = self.get_func()
         # integrate to get x
-        x = self.integrate_x(tvec, u=u)
+        x = self.integrate_x(tvec, u=u, generator=generator)
         # create interpolator to get x(t) for all t
         from scipy.interpolate import CubicSpline
 
@@ -497,7 +498,7 @@ class DCM(BaseModel):
 
         return ivp, x
 
-    def integrate_x(self, tvec, x0=None, u=None):
+    def integrate_x(self, tvec, x0=None, u=None, generator=None):
         if u is None:
             u = lambda x: 0.0
         if x0 is None:
@@ -516,7 +517,7 @@ class DCM(BaseModel):
             def func(p, t):
                 return F(t, p, u)
 
-            x = itoint(f=func, G=G, y0=x0, tspan=tvec).T
+            x = itoint(f=func, G=G, y0=x0, tspan=tvec, generator=generator).T
         else:  # integrate ODE
             from scipy.integrate import solve_ivp
 
@@ -538,13 +539,14 @@ class DCM(BaseModel):
             ).y
         return x
 
-    def simulate(self, tvec, u=None, p=None, CNR=None):
+    def simulate(self, tvec, u=None, p=None, CNR=None, generator=None):
         """Generate BOLD+state time courses using ODE solver
         params:
         tvec (array)  - Times where states are evaluated
         p (array)     - The parameters used to simulate
         u (function)  - Input function u(t) should be scalar for t scalar
         CNR (float)   - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
+        generator     - numpy.random.Generator for stochastic mode (pass for reproducibility)
 
         returns:
         array (BOLD time course)
@@ -559,7 +561,7 @@ class DCM(BaseModel):
             # save a copy of the params
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        ivp, x = self.integrate(tvec, p0, u)
+        ivp, x = self.integrate(tvec, p0, u, generator=generator)
 
         if p is not None:
             # get params back
