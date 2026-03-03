@@ -91,8 +91,8 @@ param_bounds = spec.param_bounds
 
 n_params = len(theta_true)
 n_walkers = max(24, 2 * n_params)
-n_burn = 5000
-n_samples_mcmc = 10000
+n_burn = 250
+n_samples_mcmc = 3000
 opt_method = "MCMC"
 
 IMG_DIR = get_out_dir(

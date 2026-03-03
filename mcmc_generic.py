@@ -245,8 +245,8 @@ n_params = len(theta_true)
 
 # MCMC settings
 n_walkers = max(24, 2 * n_params)  # should be >= 2 * n_params
-n_burn = 5000
-n_samples_mcmc = 10000
+n_burn = 300
+n_samples_mcmc = 3000
 
 # Optimization method name
 opt_method = "MCMC"
