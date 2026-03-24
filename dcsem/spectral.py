@@ -23,6 +23,25 @@ from dcsem.utils import stim_boxcar
 logger = logging.getLogger(__name__)
 
 
+def _build_A_matrix(
+    theta_A: np.ndarray, R: int, self_connection: float
+) -> np.ndarray:
+    """Build R×R connectivity matrix from off-diagonal parameter vector.
+
+    Ordering: source-first — for i in 0..R-1, for j in 0..R-1 where j≠i.
+    aij (from ROI i to ROI j) is stored at A[j, i].
+    """
+    A = np.zeros((R, R))
+    np.fill_diagonal(A, self_connection)
+    k = 0
+    for i in range(R):
+        for j in range(R):
+            if i != j:
+                A[j, i] = theta_A[k]
+                k += 1
+    return A
+
+
 class SpectralDCM:
     """Forward model and CSD utilities for LS-spDCM.
 
@@ -182,10 +201,11 @@ class SpectralDCM:
 
         Parameters
         ----------
-        theta : array-like, [a01, a10, log_sigma_e]
-            a01       : ROI0→ROI1 connectivity
-            a10       : ROI1→ROI0 connectivity
-            log_sigma_e : log of neural noise std
+        theta : array-like
+            For R ROIs: [a01, a02, ..., a0(R-1), a10, a12, ..., log_sigma_e]
+            Off-diagonal A entries in source-first order (R*(R-1) values),
+            followed by log of neural noise std.
+            For R=2: [a01, a10, log_sigma_e] (backward-compatible).
 
         Returns
         -------
@@ -193,13 +213,10 @@ class SpectralDCM:
             Vectorized CSD (real-valued).  Returns np.inf array if A is
             unstable.
         """
-        a01, a10, log_sigma_e = theta
-        sigma_e = np.exp(log_sigma_e)
-
-        # A-matrix: self_connection is already negative (correct sign)
-        A = np.array(
-            [[self.self_connection, a10], [a01, self.self_connection]]
-        )
+        R = self.n_rois
+        n_A = R * (R - 1)
+        sigma_e = np.exp(theta[n_A])
+        A = _build_A_matrix(theta[:n_A], R, self.self_connection)
 
         try:
             self._check_stability(A)
@@ -321,11 +338,10 @@ class SpectralDCM:
         bold : ndarray, shape (n_steps, R)
         tvec : ndarray, shape (n_steps,)
         """
-        a01, a10, log_sigma_e = theta
-        sigma_e = np.exp(log_sigma_e)
         R = self.n_rois
-        A = np.array([[self.self_connection, a10],
-                      [a01,  self.self_connection]])
+        n_A = R * (R - 1)
+        sigma_e = np.exp(theta[n_A])
+        A = _build_A_matrix(theta[:n_A], R, self.self_connection)
 
         n_steps = int(T / self.TR)
         tvec = np.arange(n_steps) * self.TR
