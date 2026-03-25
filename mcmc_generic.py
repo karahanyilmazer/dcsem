@@ -195,10 +195,10 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         theta_true=np.array([0.4, 0.6, 0.9, 0.2]),
         theta_zero=np.array([0.1, 0.1, 0.1, 0.1]),
         priors=[
-            (0.0, 0.5),  # a01: centered at 0, wide range for excitatory/inhibitory
-            (0.0, 0.5),  # a10: centered at 0, wide range for excitatory/inhibitory
-            (0.75, 0.25),  # c0: centered at 0.75, moderate positive range
-            (0.75, 0.25),  # c1: centered at 0.75, moderate positive range
+            (0.0, 0.5),  # a01: shrinkage prior centred at 0 (Friston et al. 2003)
+            (0.0, 0.5),  # a10: shrinkage prior centred at 0
+            (0.5, 0.5),  # c0: weakly informative, centred at mid-range
+            (0.5, 0.5),  # c1: weakly informative, centred at mid-range
         ],
         is_dcm=True,
         param_bounds=_dcm_bounds,
@@ -246,7 +246,7 @@ n_params = len(theta_true)
 # MCMC settings
 n_walkers = max(24, 2 * n_params)  # should be >= 2 * n_params
 n_burn = 300
-n_samples_mcmc = 3000
+n_samples_mcmc = 10000  # Need >= 1000 effective samples for reliable posteriors
 
 # Optimization method name
 opt_method = "MCMC"
@@ -401,11 +401,30 @@ except Exception:
 
 acc_frac = np.mean(sampler.acceptance_fraction)
 
+# Gelman-Rubin R̂ — split each walker's chain in half and treat halves as
+# independent chains.  R̂ near 1 indicates convergence.
+_full_chain = sampler.get_chain()  # (n_steps, n_walkers, n_params)
+n_steps_half = _full_chain.shape[0] // 2
+_split = np.concatenate(
+    [_full_chain[:n_steps_half], _full_chain[n_steps_half : 2 * n_steps_half]], axis=1
+)  # (n_steps_half, 2*n_walkers, n_params)
+_M = _split.shape[1]  # number of "chains"
+_N = _split.shape[0]  # length of each chain
+_chain_means = _split.mean(axis=0)  # (M, n_params)
+_chain_vars = _split.var(axis=0, ddof=1)  # (M, n_params)
+_W = _chain_vars.mean(axis=0)  # within-chain variance
+_B = _N * _chain_means.var(axis=0, ddof=1)  # between-chain variance
+_var_est = (1 - 1 / _N) * _W + (1 / _N) * _B
+r_hat = np.sqrt(_var_est / (_W + 1e-30))
+
 print("\nDiagnostics:")
 print(f"  Acceptance fraction (mean): {acc_frac:.3f}")
 print(f"  Autocorr time (per param) : {tau_str}")
 if np.isfinite(eff_total):
     print(f"  Approx. effective samples : {int(eff_total)}")
+print(f"  Gelman-Rubin R̂ (per param): {np.round(r_hat, 3)}")
+if np.any(r_hat > 1.1):
+    print("  ⚠️  R̂ > 1.1 for some parameters — chain may not have converged!")
 
 if acc_frac < 0.05:
     print("  ⚠️  Low acceptance (<0.05) - walkers may be stuck!")
@@ -439,7 +458,7 @@ if not IS_DCM_MODEL:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
-    plt.show()
+    plt.show(block=False)
 
 else:
     # DCM BOLD model: plot each ROI's time series
@@ -494,7 +513,7 @@ else:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
-    plt.show()
+    plt.show(block=False)
 
 # %%
 # =============================================================================
@@ -534,7 +553,7 @@ if PLOT_POSTERIOR_BANDS:
         plt.tight_layout()
         plt.savefig(IMG_DIR / "posterior_predictive.png")
         plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
-        plt.show()
+        plt.show(block=False)
     else:
         # DCM BOLD model: plot each ROI with uncertainty bands
         time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
@@ -596,7 +615,7 @@ if PLOT_POSTERIOR_BANDS:
         plt.tight_layout()
         plt.savefig(IMG_DIR / "posterior_predictive.png")
         plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
-        plt.show()
+        plt.show(block=False)
 
 # %%
 # =============================================================================
@@ -624,7 +643,7 @@ if PLOT_CORNER:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "corner_plot.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_corner_plot.pdf")
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
@@ -668,7 +687,7 @@ ax.set_title(
 plt.tight_layout()
 plt.savefig(IMG_DIR / "correlation_matrix.png")
 plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_correlation_matrix.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 # =============================================================================
@@ -738,5 +757,5 @@ fig.suptitle(rf"\textbf{{MCMC Trace Plots - {model_display_name}}}")
 plt.tight_layout()
 plt.savefig(IMG_DIR / "trace_plots.png")
 plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_trace_plots.pdf")
-plt.show()
+plt.show(block=False)
 # %%
