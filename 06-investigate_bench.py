@@ -12,7 +12,7 @@ try:
     from IPython.display import Markdown, display
 except ImportError:
     display = print
-    Markdown = str
+    Markdown = lambda s: s
 from matplotlib import cm
 from matplotlib.colors import Normalize
 from tqdm import tqdm
@@ -159,7 +159,7 @@ tmp = axs[1].twinx()
 tmp.set_ylabel("ROI 2", rotation=0, labelpad=20)
 tmp.set_yticks([])
 
-plt.show()
+plt.show(block=False)
 
 # %%
 bold_base_comb = np.r_[bold_base[:, 0], bold_base[:, 1]]
@@ -179,7 +179,7 @@ ax.set_xlabel("Time")
 ax.set_ylabel("Amplitude")
 
 plt.legend()
-plt.show()
+plt.show(block=False)
 
 # %%
 comp1, comp2 = 3, 4
@@ -249,7 +249,7 @@ ax.set_ylabel(f"PC{comp2}")
 ax.legend()
 plt.savefig(IMG_DIR / f"arrow_plot-pc{comp1}and{comp2}.png")
 plt.savefig(LATEX_DIR / f"arrow_plot-pc{comp1}and{comp2}.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 display(Markdown("## Run the simulation"))
@@ -356,7 +356,7 @@ axs[3].set_ylabel("")
 plt.tight_layout()
 plt.savefig(IMG_DIR / f"change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.png")
 plt.savefig(LATEX_DIR / f"change_by_param-{method}_{comp_to_plot1}&{comp_to_plot2}.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 method = "PCA"
@@ -405,7 +405,7 @@ cbar.set_label(f"{param_labels[param_to_plot]} Value")
 
 plt.savefig(IMG_DIR / f"change_by_param_{param_to_plot}-{method}_pairplot.png")
 plt.savefig(LATEX_DIR / f"change_by_param_{param_to_plot}-{method}_pairplot.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 method = "PCA"
@@ -448,6 +448,6 @@ g.figure.suptitle(f"Effect of Parameter Changes on {method} Summary Measures", y
 
 plt.savefig(IMG_DIR / f"bench_param_change-{method}_pairplot.png")
 plt.savefig(LATEX_DIR / f"bench_param_change-{method}_pairplot.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%

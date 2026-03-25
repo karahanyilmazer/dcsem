@@ -11,7 +11,7 @@ try:
     from IPython.display import Markdown, display
 except ImportError:
     display = print
-    Markdown = str
+    Markdown = lambda s: s
 from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
@@ -99,7 +99,7 @@ axs[1].set_ylim(-0.003, 0.07)
 
 plt.savefig(IMG_DIR / "bold_signals.png")
 plt.savefig(LATEX_DIR / "bold_signals.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 display(Markdown("## Concatenated BOLD Signal"))
@@ -111,13 +111,13 @@ plt.ylabel("Amplitude (a.u.)")
 plt.grid()
 plt.savefig(IMG_DIR / "bold_concat.png")
 plt.savefig(LATEX_DIR / "bold_concat.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 display(Markdown("## Fitting PCA"))
 errors = []
 n_vals = np.arange(1, 21)
-elbow_pca = 3
+elbow_pca = max(4, 3)  # FIM analysis: need >= 4 for full parameter discriminability
 
 for n in n_vals:
     pca = PCA(n_components=n)
@@ -136,7 +136,7 @@ plt.legend()
 plt.grid()
 plt.savefig(IMG_DIR / "pca_elbow.png")
 plt.savefig(LATEX_DIR / "pca_elbow.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 pca = PCA(n_components=elbow_pca)
@@ -159,13 +159,13 @@ axs[1].set_ylabel("PCA Value")
 plt.tight_layout()
 plt.savefig(IMG_DIR / "pca_components.png")
 plt.savefig(LATEX_DIR / "pca_components.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 display(Markdown("## Fitting ICA"))
 errors = []
 n_vals = np.arange(1, 21)
-elbow_ica = 3
+elbow_ica = max(4, 3)  # FIM analysis: need >= 4 for full parameter discriminability
 
 for n in n_vals:
     ica = FastICA(n_components=n)
@@ -184,7 +184,7 @@ plt.legend()
 plt.grid()
 plt.savefig(IMG_DIR / "ica_elbow.png")
 plt.savefig(LATEX_DIR / "ica_elbow.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 ica = FastICA(n_components=elbow_ica)
@@ -219,7 +219,7 @@ ax3.set_ylabel("IC Value")
 plt.tight_layout()
 plt.savefig(IMG_DIR / "ica_components.png")
 plt.savefig(LATEX_DIR / "ica_components.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 display(Markdown("## Reconstruction"))
@@ -262,7 +262,7 @@ axs[1].legend()
 
 plt.tight_layout()
 
-plt.show()
+plt.show(block=False)
 
 print(f"PCA Reconstruction Error: {recon_error_pca}")
 print(f"ICA Reconstruction Error: {recon_error_ica}")

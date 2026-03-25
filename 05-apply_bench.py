@@ -141,7 +141,7 @@ plt.tick_params(axis="x", which="minor", bottom=False, top=False)
 plt.tick_params(axis="y", which="minor", left=False, right=False)
 plt.savefig(IMG_DIR / f"confusion_matrix_bench_{setting}.png")
 plt.savefig(LATEX_DIR / f"confusion_matrix_bench_{setting}.pdf")
-plt.show()
+plt.show(block=False)
 
 
 # %%
