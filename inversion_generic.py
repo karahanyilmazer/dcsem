@@ -283,25 +283,21 @@ def auto_span(value, default_factor=1.5, min_span=1.0):
     return default_factor * max(min_span, abs(value))
 
 
-def make_objective(model_func, y_obs, x_data, loss_fn, normalize=True):
-    """Define the objective once; reuse for optimization, Hessian, and landscapes."""
-    if normalize:
-        y_mean = y_obs.mean(axis=0, keepdims=True)
-        y_std = y_obs.std(axis=0, keepdims=True) + 1e-12
+def make_objective(model_func, y_obs, x_data, loss_fn, noise_sigma=None):
+    """Define the objective once; reuse for optimization, Hessian, and landscapes.
 
-        y_obs_norm = (y_obs - y_mean) / y_std
+    Uses raw MSE (no normalisation).  For multi-output models (DCM), each data
+    point is implicitly weighted equally — the MSE averages over all time points
+    and ROIs.  This keeps the loss geometry consistent with a Gaussian NLL so
+    that Hessian-based CIs are valid.
 
-        def objective(theta):
-            y_pred_norm = (model_func(theta, x_data) - y_mean) / y_std
-            return loss_fn(y_obs_norm, y_pred_norm)
+    Returns (objective, noise_sigma_used).
+    """
 
-        return objective, y_mean, y_std, y_obs_norm
-    else:
+    def objective(theta):
+        return loss_fn(y_obs, model_func(theta, x_data))
 
-        def objective(theta):
-            return loss_fn(y_obs, model_func(theta, x_data))
-
-        return objective, None, None, None
+    return objective, noise_sigma
 
 
 # =============================================================================
@@ -332,9 +328,9 @@ else:
 # =============================================================================
 loss_history = []
 
-# Build the single objective used everywhere
-obj, y_mean, y_std, y_obs_norm = make_objective(
-    model, y_obs, x_data, loss_function, normalize=True
+# Build the single objective used everywhere (raw MSE, no normalisation)
+obj, _noise_sigma_used = make_objective(
+    model, y_obs, x_data, loss_function, noise_sigma=noise_std_actual
 )
 
 
@@ -395,7 +391,7 @@ if not IS_DCM_MODEL:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
-    plt.show()
+    plt.show(block=False)
 
 else:
     # DCM BOLD model: plot each ROI's time series
@@ -453,7 +449,7 @@ else:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "data_fit.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
@@ -508,7 +504,7 @@ if PLOT_1D:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "loss_landscape_1d.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_1d_new.pdf")
-    plt.show()
+    plt.show(block=False)
 
 # %%
 # =============================================================================
@@ -623,7 +619,7 @@ if PLOT_2D and n_params >= 2:
 
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_2d_new.pdf")
     plt.savefig(IMG_DIR / "loss_landscape_2d.png")
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
@@ -695,7 +691,7 @@ if PLOT_3D and n_params == 3:
     ax.legend(loc="best")
     plt.tight_layout()
     plt.savefig(IMG_DIR / "loss_landscape_3d.png")
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
@@ -723,15 +719,10 @@ def _from_scaled_h(s):
     return s * _scales_h + _lowers_h
 
 
-# Build canonical NLL objective (0.5 * SSE / sigma2 in residual space)
-if y_mean is not None:
-    _r_est = (y_obs_norm - (model(theta_est, x_data) - y_mean) / y_std).ravel()
-    _resid_scale = 1.0  # already normalized; division is by sigma2_est below
-else:
-    _r_raw = (y_obs - model(theta_est, x_data)).ravel()
-    _resid_scale = float(np.std(_r_raw)) + 1e-12
-    _r_est = _r_raw / _resid_scale
-
+# Build canonical NLL objective: 0.5 * SSE / sigma2_est
+# Residuals are in original (un-normalised) space so that the Hessian and CIs
+# are directly interpretable in terms of the original parameters and data.
+_r_est = (y_obs - model(theta_est, x_data)).ravel()
 _sigma2_est = float(np.dot(_r_est, _r_est)) / max(_r_est.size - n_params, 1)
 
 
@@ -739,10 +730,7 @@ def _nll_obj(theta):
     y_pred = model(theta, x_data)
     if not np.all(np.isfinite(y_pred)):
         return 1e10
-    if y_mean is not None:
-        r = (y_obs_norm - (y_pred - y_mean) / y_std).ravel()
-    else:
-        r = ((y_obs - y_pred).ravel()) / _resid_scale
+    r = (y_obs - y_pred).ravel()
     return 0.5 * float(np.dot(r, r)) / _sigma2_est
 
 
@@ -767,8 +755,8 @@ try:
     # Hessian diagnostics using positive-spectrum condition number
     hess_diag = compute_hessian_diagnostics(H_nll)
 
-    # Cov = H_NLL^{-1} via pinvh (zeros flat/degenerate directions)
-    cov, _ = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="pinvh")
+    # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def)
+    cov, _ = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="adaptive_ridge")
     se = compute_standard_errors(cov, warn_negative=True)
     ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
     corr = compute_correlation_matrix(cov, handle_degenerate=True)
@@ -797,7 +785,7 @@ try:
     plt.tight_layout()
     plt.savefig(IMG_DIR / "correlation_matrix.png")
     plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf")
-    plt.show()
+    plt.show(block=False)
 
 except (np.linalg.LinAlgError, Exception) as _hess_err:
     print(f"⚠️  Hessian inversion failed: {type(_hess_err).__name__}: {_hess_err}")
