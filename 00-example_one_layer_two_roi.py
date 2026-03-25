@@ -80,6 +80,6 @@ axs[1].legend()
 
 plt.savefig(IMG_DIR / "2roi_input_output.png")
 plt.savefig(LATEX_DIR / "2roi_input_output.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%

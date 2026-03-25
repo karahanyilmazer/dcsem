@@ -76,5 +76,5 @@ axs[1].legend()
 plt.tight_layout()
 plt.savefig("img/five_roi")
 plt.savefig(BASE_DIR / "five_roi")
-plt.show()
+plt.show(block=False)
 # %%

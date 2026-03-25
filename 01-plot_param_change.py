@@ -92,7 +92,7 @@ def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
         plt.savefig(out_dir / "param_change.png")
         plt.savefig(LATEX_DIR / "param_change.pdf")
 
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
