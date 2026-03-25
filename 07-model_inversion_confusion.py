@@ -11,7 +11,7 @@ try:
     from IPython.display import Markdown, display
 except ImportError:
     display = print
-    Markdown = str
+    Markdown = lambda s: s  # pass through raw string
 from scipy.optimize import minimize
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix, mean_squared_error
@@ -86,16 +86,10 @@ def invert_model(y_obs, initial_guess, param_bounds, loss_function=mean_squared_
         theta_est: Estimated parameters
         loss_val: Final loss value
     """
-    # Apply z-score normalization (matching inversion_generic.py)
-    y_mean = y_obs.mean(axis=0, keepdims=True)
-    y_std = y_obs.std(axis=0, keepdims=True) + 1e-12  # avoid div by zero
-    y_obs_norm = (y_obs - y_mean) / y_std
-
-    # Define objective function with normalization
+    # Raw MSE objective (no normalisation — matching inversion_generic.py)
     def obj(th):
         y_pred = model(th, None)
-        y_pred_norm = (y_pred - y_mean) / y_std
-        return loss_function(y_obs_norm, y_pred_norm)
+        return loss_function(y_obs, y_pred)
 
     # Run optimization
     res = minimize(
@@ -119,8 +113,8 @@ def invert_model(y_obs, initial_guess, param_bounds, loss_function=mean_squared_
 display(Markdown("## Running Parameter Change Detection Simulation"))
 
 n_samples = 500
-change_amount = 0.1
-change_thr = 0.1  # Threshold for detecting change
+change_amount = 0.3  # Match BENCH test effect size (0.1 is below detection at 10% noise)
+change_thr = 0.15  # ~half the change amount
 
 true_change = []  # Ground truth: which parameter changed (0=none, 1-4=param index)
 inferred_change = []  # Inferred: which parameter changed
@@ -239,7 +233,7 @@ cbar.ax.tick_params(which="both", size=0)
 plt.tight_layout()
 plt.savefig(IMG_DIR / "confusion_matrix_model_inversion.png")
 plt.savefig(LATEX_DIR / "confusion_matrix_model_inversion.pdf")
-plt.show()
+plt.show(block=False)
 
 # %%
 # ======================================================================================
