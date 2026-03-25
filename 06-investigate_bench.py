@@ -7,11 +7,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from IPython.display import Markdown, display
+
+try:
+    from IPython.display import Markdown, display
+except ImportError:
+    display = print
+    Markdown = str
 from matplotlib import cm
 from matplotlib.colors import Normalize
 from tqdm import tqdm
 
+from dcsem import PARAM_BOUNDS
 from dcsem.utils import stim_boxcar
 from utils import (
     add_underscore,
@@ -47,13 +53,8 @@ param_colors = get_param_colors()
 # Parameters to set and estimate
 params_to_set = ["a01", "a10", "c0", "c1"]
 
-# Ground truth parameter values
-bounds = {
-    "a01": (0.0, 1.0),
-    "a10": (0.0, 1.0),
-    "c0": (0.0, 1.0),
-    "c1": (0.0, 1.0),
-}
+# Parameter bounds from central config
+bounds = PARAM_BOUNDS.get_bounds_dict()
 
 # Define the parameters
 params = {}
@@ -97,25 +98,25 @@ axs[0].plot(
     time,
     bold_a01[:, 0],
     color=param_colors["a01"],
-    label=f'Increased {param_labels["a01"]}',
+    label=f"Increased {param_labels['a01']}",
 )
 axs[0].plot(
     time,
     bold_a10[:, 0],
     color=param_colors["a10"],
-    label=f'Increased {param_labels["a10"]}',
+    label=f"Increased {param_labels['a10']}",
 )
 axs[0].plot(
     time,
     bold_c0[:, 0],
     color=param_colors["c0"],
-    label=f'Increased {param_labels["c0"]}',
+    label=f"Increased {param_labels['c0']}",
 )
 axs[0].plot(
     time,
     bold_c1[:, 0],
     color=param_colors["c1"],
-    label=f'Increased {param_labels["c1"]}',
+    label=f"Increased {param_labels['c1']}",
 )
 
 axs[1].plot(time, bold_base[:, 1], color="black", label="Base")
@@ -123,25 +124,25 @@ axs[1].plot(
     time,
     bold_a01[:, 1],
     color=param_colors["a01"],
-    label=f'Increased {param_labels["a01"]}',
+    label=f"Increased {param_labels['a01']}",
 )
 axs[1].plot(
     time,
     bold_a10[:, 1],
     color=param_colors["a10"],
-    label=f'Increased {param_labels["a10"]}',
+    label=f"Increased {param_labels['a10']}",
 )
 axs[1].plot(
     time,
     bold_c0[:, 1],
     color=param_colors["c0"],
-    label=f'Increased {param_labels["c0"]}',
+    label=f"Increased {param_labels['c0']}",
 )
 axs[1].plot(
     time,
     bold_c1[:, 1],
     color=param_colors["c1"],
-    label=f'Increased {param_labels["c1"]}',
+    label=f"Increased {param_labels['c1']}",
 )
 
 axs[0].set_title("DCM Simulation")
@@ -169,10 +170,10 @@ bold_c1_comb = np.r_[bold_c1[:, 0], bold_c1[:, 1]]
 
 fig, ax = plt.subplots()
 ax.plot(bold_base_comb, c="black", label="Base")
-ax.plot(bold_a01_comb, c=param_colors["a01"], label=f'Increased {param_labels["a01"]}')
-ax.plot(bold_a10_comb, c=param_colors["a10"], label=f'Increased {param_labels["a10"]}')
-ax.plot(bold_c0_comb, c=param_colors["c0"], label=f'Increased {param_labels["c0"]}')
-ax.plot(bold_c1_comb, c=param_colors["c1"], label=f'Increased {param_labels["c1"]}')
+ax.plot(bold_a01_comb, c=param_colors["a01"], label=f"Increased {param_labels['a01']}")
+ax.plot(bold_a10_comb, c=param_colors["a10"], label=f"Increased {param_labels['a10']}")
+ax.plot(bold_c0_comb, c=param_colors["c0"], label=f"Increased {param_labels['c0']}")
+ax.plot(bold_c1_comb, c=param_colors["c1"], label=f"Increased {param_labels['c1']}")
 ax.set_title("Concatenated BOLD Signals")
 ax.set_xlabel("Time")
 ax.set_ylabel("Amplitude")
@@ -193,28 +194,28 @@ ax.plot(
     summ_a01[0, comp2 - 1],
     "o",
     c=param_colors["a01"],
-    label=f'Increased {param_labels["a01"]}',
+    label=f"Increased {param_labels['a01']}",
 )
 ax.plot(
     summ_a10[0, comp1 - 1],
     summ_a10[0, comp2 - 1],
     "o",
     c=param_colors["a10"],
-    label=f'Increased {param_labels["a10"]}',
+    label=f"Increased {param_labels['a10']}",
 )
 ax.plot(
     summ_c0[0, comp1 - 1],
     summ_c0[0, comp2 - 1],
     "o",
     c=param_colors["c0"],
-    label=f'Increased {param_labels["c0"]}',
+    label=f"Increased {param_labels['c0']}",
 )
 ax.plot(
     summ_c1[0, comp1 - 1],
     summ_c1[0, comp2 - 1],
     "o",
     c=param_colors["c1"],
-    label=f'Increased {param_labels["c1"]}',
+    label=f"Increased {param_labels['c1']}",
 )
 
 ax.annotate(
@@ -282,18 +283,18 @@ for sample_i in tqdm(range(n_samples)):
     # summs_ica.append(summ_ica)
 
     for i, param in enumerate(params_to_set):
-        # Get the latest sample again
-        sample = param_vals[-1]
+        # Fresh copy each time — perturbations must be independent per parameter
+        perturbed = list(param_vals[-1])
 
-        # Introduce a change in one parameter
-        sample[i] = sample[i] + change_amount
+        # Introduce a change in one parameter only
+        perturbed[i] = perturbed[i] + change_amount
 
         # Check if the parameter is still within bounds
-        if sample[i] > bounds[param][1]:
-            sample[i] = bounds[param][1]
+        if perturbed[i] > bounds[param][1]:
+            perturbed[i] = bounds[param][1]
 
         # Create a new dictionary for the changed parameters
-        params = dict(zip(params_to_set, sample))
+        params = dict(zip(params_to_set, perturbed))
 
         # Get the summary measures after the change
         summ_pca_change = get_summary_measures(
@@ -363,10 +364,10 @@ param_to_plot = "c1"
 
 if method == "PCA":
     arr = np.array(summs_pca)
-    columns = [f"PC{i+1}" for i in range(arr.shape[1])]
+    columns = [f"PC{i + 1}" for i in range(arr.shape[1])]
 elif method == "ICA":
     arr = np.array(summs_ica)
-    columns = [f"IC{i+1}" for i in range(arr.shape[1])]
+    columns = [f"IC{i + 1}" for i in range(arr.shape[1])]
 
 df = pd.DataFrame(arr, columns=columns)
 df["a01"] = [val[0] for val in param_vals]
@@ -411,10 +412,10 @@ method = "PCA"
 
 if method == "PCA":
     data = summs_change_pca
-    columns = [f"PC{i+1}" for i in range(arr.shape[1])]
+    columns = [f"PC{i + 1}" for i in range(arr.shape[1])]
 elif method == "ICA":
     data = summs_change_ica
-    columns = [f"IC{i+1}" for i in range(arr.shape[1])]
+    columns = [f"IC{i + 1}" for i in range(arr.shape[1])]
 
 dfs = []
 for param, values in data.items():

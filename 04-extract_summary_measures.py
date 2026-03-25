@@ -6,10 +6,16 @@ import pickle
 
 import matplotlib.pyplot as plt
 import numpy as np
-from IPython.display import Markdown, display
+
+try:
+    from IPython.display import Markdown, display
+except ImportError:
+    display = print
+    Markdown = str
 from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
+from dcsem import PARAM_BOUNDS
 from dcsem.utils import stim_boxcar
 from utils import (
     get_out_dir,
@@ -42,13 +48,8 @@ u = stim_boxcar([[10, 20, 1]])  # Input stimulus
 # Parameters to set and estimate
 params_to_set = ["a01", "a10", "c0", "c1"]
 
-# Ground truth parameter values
-bounds = {
-    "a01": (0.0, 1.0),
-    "a10": (0.0, 1.0),
-    "c0": (0.0, 1.0),
-    "c1": (0.0, 1.0),
-}
+# Parameter bounds from central config
+bounds = PARAM_BOUNDS.get_bounds_dict()
 
 # ======================================================================================
 # %%

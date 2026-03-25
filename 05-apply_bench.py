@@ -10,10 +10,11 @@ from scipy.stats import uniform
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
-from dcsem import NOISE_CONFIG, get_colormap, set_style
+from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style
 from dcsem.utils import stim_boxcar
 from utils import (
     get_out_dir,
+    get_summary_measures,
     get_width_height_latex,
     simulate_bold,
 )
@@ -44,13 +45,8 @@ u = stim_boxcar([[10, 20, 1]])  # Input stimulus
 # Parameters to set and estimate
 params_to_set = ["a01", "a10", "c0", "c1"]
 
-# Ground truth parameter values
-bounds = {
-    "a01": (0.0, 1.0),
-    "a10": (0.0, 1.0),
-    "c0": (0.0, 1.0),
-    "c1": (0.0, 1.0),
-}
+# Parameter bounds from central config
+bounds = PARAM_BOUNDS.get_bounds_dict()
 
 METHOD = "PCA"
 if METHOD == "PCA":
@@ -64,60 +60,8 @@ elif METHOD == "ICA":
 # ======================================================================================
 # %%
 def calc_comps(method, **kwargs):
-    # Define the allowed parameters
-    allowed_keys = ["a01", "a10", "c0", "c1"]
-
-    # Find invalid keys
-    invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
-
-    # Assert that all keys are allowed
-    assert not invalid_keys, (
-        f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
-    )
-    # Filter all arguments that are not None
-    params = {}
-    for key, val in kwargs.items():
-        if key == "method":
-            continue
-        if val is not None:
-            # Convert the values to a numpy array
-            if not isinstance(val, (list, np.ndarray)):
-                val = [val]
-            if not isinstance(val, np.ndarray):
-                val = np.array(val)
-
-            params[key] = val
-
-    # Assert that all values have the same length
-    lengths = [len(v) for v in params.values()]
-    assert all(length == lengths[0] for length in lengths), (
-        "All values must have the same length!"
-    )
-
-    # Initialize the BOLD signals
-    bold_true = simulate_bold(
-        params,
-        time=time,
-        u=u,
-        num_rois=NUM_ROIS,
-    )
-    if setting == "no_noise":
-        bold_obsv = bold_true
-    else:
-        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(bold_true))
-        bold_obsv = bold_true + rng.normal(0, noise_sigma, size=bold_true.shape)
-
-    # Concatenate all ROIs along the last axis - handles any number of ROIs
-    # bold_obsv shape: (N, T, R) --> (N, T*R)
-    tmp_bold = bold_obsv.reshape(bold_obsv.shape[0], -1)
-    tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
-
-    if method == "PCA":
-        components = pca.transform(tmp_bold_c)
-    elif method == "ICA":
-        components = ica.transform(tmp_bold_c)
-
-    return components
+    """Thin wrapper around get_summary_measures for BENCH Trainer compatibility."""
+    return get_summary_measures(method, time, u, NUM_ROIS, MODEL_DIR, setting, **kwargs)
 
 
 # Check if the function works
@@ -141,19 +85,14 @@ tr = change_model.Trainer(
 mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
-if setting != "no_noise":
-    if METHOD == "PCA":
-        with open(MODEL_DIR / f"noise_sigmas_pca_{setting}.pkl", "rb") as f:
-            noise_sigmas = pickle.load(f)
-    elif METHOD == "ICA":
-        with open(MODEL_DIR / f"noise_sigmas_ica_{setting}.pkl", "rb") as f:
-            noise_sigmas = pickle.load(f)
-    noise_level = np.mean(noise_sigmas)
+if setting.startswith("no_noise"):
+    # No observation noise on summary measures; use a tiny floor for BENCH numerics
+    noise_level = 1e-4
 else:
-    noise_level = 0.0001
-
-
-noise_level = 0.0001
+    noise_sigma_path = MODEL_DIR / f"noise_sigmas_{METHOD.lower()}_{setting}.pkl"
+    with open(noise_sigma_path, "rb") as f:
+        noise_sigmas = pickle.load(f)  # noqa: S301 — trusted local artifact
+    noise_level = np.mean(noise_sigmas)
 n_test_samples = 2000
 effect_size = 0.3
 n_repeats = 50
