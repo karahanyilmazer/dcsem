@@ -32,39 +32,34 @@ IMG_DIR = get_out_dir(type="img", subfolder="wip", extra_subfolders="estimation"
 # =============================================================================
 
 
-def make_objective(model_func, y_obs, param_names, remaining_params, normalize=True):
-    """Build a scalar objective that matches inversion_generic's normalised MSE."""
-    if normalize:
-        y_mean = y_obs.mean(axis=0, keepdims=True)
-        y_std = y_obs.std(axis=0, keepdims=True) + 1e-12
-        y_obs_norm = (y_obs - y_mean) / y_std
+def make_objective(model_func, y_obs, param_names, remaining_params):
+    """Build a raw MSE objective (no normalisation) matching inversion_generic."""
 
-        def objective(theta):
-            params = dict(zip(param_names, theta))
-            params.update(remaining_params)
-            y_pred = model_func(params)
-            y_pred_norm = (y_pred - y_mean) / y_std
-            return mean_squared_error(y_obs_norm, y_pred_norm)
+    def objective(theta):
+        params = dict(zip(param_names, theta))
+        params.update(remaining_params)
+        y_pred = model_func(params)
+        return mean_squared_error(y_obs, y_pred)
 
-        return objective, y_mean, y_std
-    else:
-
-        def objective(theta):
-            params = dict(zip(param_names, theta))
-            params.update(remaining_params)
-            y_pred = model_func(params)
-            return mean_squared_error(y_obs, y_pred)
-
-        return objective, None, None
+    return objective
 
 
 def estimate_parameters(
     objective,
+    model_func,
+    y_obs,
+    param_names,
+    remaining_params,
     initial_values,
     bounds,
     n_params,
 ):
-    """Run L-BFGS-B then compute Hessian-based SE via safe_hessian_inversion."""
+    """Run L-BFGS-B then compute Hessian-based SE via proper NLL Hessian.
+
+    The MSE objective is used for optimisation (same minimum as NLL).
+    A separate canonical NLL is constructed for the Hessian so that
+    Cov = H_NLL^{-1} gives correctly scaled confidence intervals.
+    """
     from scipy.optimize import minimize
 
     res = minimize(
@@ -75,7 +70,24 @@ def estimate_parameters(
     )
     theta_est = res.x
 
-    # --- Hessian in scaled parameter space (matching inversion_generic) ------
+    # --- Build canonical NLL (matching inversion_generic.py) -----------------
+    # Estimate sigma^2 from residuals at the optimum
+    params_est = dict(zip(param_names, theta_est))
+    params_est.update(remaining_params)
+    y_pred_est = model_func(params_est)
+    r_est = (y_obs - y_pred_est).ravel()
+    sigma2_est = float(np.dot(r_est, r_est)) / max(r_est.size - n_params, 1)
+
+    def nll_obj(theta):
+        params = dict(zip(param_names, theta))
+        params.update(remaining_params)
+        y_pred = model_func(params)
+        r = (y_obs - y_pred).ravel()
+        if not np.all(np.isfinite(r)):
+            return 1e10
+        return 0.5 * float(np.dot(r, r)) / sigma2_est
+
+    # --- Hessian in scaled parameter space -----------------------------------
     if bounds is not None:
         lowers = np.array([b[0] for b in bounds])
         scales = np.array([b[1] - b[0] for b in bounds])
@@ -90,7 +102,7 @@ def estimate_parameters(
         return s * scales + lowers
 
     def nll_scaled(s):
-        return objective(from_scaled(s))
+        return nll_obj(from_scaled(s))
 
     theta_s = to_scaled(theta_est)
 
@@ -99,7 +111,7 @@ def estimate_parameters(
         H_s = 0.5 * (H_s + H_s.T)  # symmetrise
         H = H_s / np.outer(scales, scales)  # unscale
 
-        cov, _ = safe_hessian_inversion(H, 1.0, regularization=1e-6, method="pinvh")
+        cov, _ = safe_hessian_inversion(H, 1.0, regularization=1e-6, method="adaptive_ridge")
         se = compute_standard_errors(cov, warn_negative=False)
         ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
     except Exception:
@@ -119,7 +131,6 @@ def run_simulation(
     time_vec,
     u,
     num_rois,
-    normalize=True,
 ):
     """Generate noisy data, estimate params, return (se, error)."""
     # Simulate ground truth
@@ -135,12 +146,11 @@ def run_simulation(
     def model_func(params):
         return simulate_bold(params, time=time_vec, u=u, num_rois=num_rois)
 
-    obj, _, _ = make_objective(
-        model_func, bold_noisy, params_to_est, remaining_params, normalize=normalize
-    )
+    obj = make_objective(model_func, bold_noisy, params_to_est, remaining_params)
 
     theta_est, se, ci, cov = estimate_parameters(
-        obj, initial_values, est_bounds, len(params_to_est)
+        obj, model_func, bold_noisy, params_to_est, remaining_params,
+        initial_values, est_bounds, len(params_to_est)
     )
 
     # Estimation error
@@ -210,7 +220,6 @@ if __name__ == "__main__":
                     time_vec=time,
                     u=u,
                     num_rois=NUM_ROIS,
-                    normalize=True,
                 )
 
                 total_se = np.nansum(se)
@@ -264,6 +273,6 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.savefig(IMG_DIR / f"{'_'.join(sorted_names)}_estimation.png")
         # plt.close("all")
-        plt.show()
+        plt.show(block=False)
 
 # %%

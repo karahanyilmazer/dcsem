@@ -32,38 +32,45 @@ set_style()
 # =============================================================================
 
 
-def make_objective(model_func, y_obs, param_names, normalize=True):
-    """Build a scalar objective with optional z-score normalisation."""
-    if normalize:
-        y_mean = y_obs.mean(axis=0, keepdims=True)
-        y_std = y_obs.std(axis=0, keepdims=True) + 1e-12
-        y_obs_norm = (y_obs - y_mean) / y_std
+def make_objective(model_func, y_obs, param_names):
+    """Build a raw MSE objective (no normalisation) matching inversion_generic."""
 
-        def objective(theta):
-            params = dict(zip(param_names, theta))
-            y_pred = model_func(params)
-            y_pred_norm = (y_pred - y_mean) / y_std
-            return mean_squared_error(y_obs_norm, y_pred_norm)
+    def objective(theta):
+        params = dict(zip(param_names, theta))
+        y_pred = model_func(params)
+        return mean_squared_error(y_obs, y_pred)
 
-        return objective
-    else:
-
-        def objective(theta):
-            params = dict(zip(param_names, theta))
-            y_pred = model_func(params)
-            return mean_squared_error(y_obs, y_pred)
-
-        return objective
+    return objective
 
 
-def estimate_with_covariance(objective, initial_values, bounds, n_params):
-    """L-BFGS-B + Hessian-based covariance via safe_hessian_inversion."""
+def estimate_with_covariance(
+    objective, model_func, y_obs, param_names, initial_values, bounds, n_params
+):
+    """L-BFGS-B + Hessian-based covariance via proper NLL Hessian.
+
+    MSE is used for optimisation; a separate NLL is built for the Hessian
+    so that Cov = H_NLL^{-1} gives correctly scaled uncertainties.
+    """
     from scipy.optimize import minimize
 
     res = minimize(objective, x0=initial_values, bounds=bounds, method="L-BFGS-B")
     theta_est = res.x
 
-    # Scaled-space Hessian (matching inversion_generic.py)
+    # --- Build canonical NLL (matching inversion_generic.py) -----------------
+    params_est = dict(zip(param_names, theta_est))
+    y_pred_est = model_func(params_est)
+    r_est = (y_obs - y_pred_est).ravel()
+    sigma2_est = float(np.dot(r_est, r_est)) / max(r_est.size - n_params, 1)
+
+    def nll_obj(theta):
+        params = dict(zip(param_names, theta))
+        y_pred = model_func(params)
+        r = (y_obs - y_pred).ravel()
+        if not np.all(np.isfinite(r)):
+            return 1e10
+        return 0.5 * float(np.dot(r, r)) / sigma2_est
+
+    # --- Hessian in scaled parameter space -----------------------------------
     if bounds is not None:
         lowers = np.array([b[0] for b in bounds])
         scales = np.array([b[1] - b[0] for b in bounds])
@@ -78,7 +85,7 @@ def estimate_with_covariance(objective, initial_values, bounds, n_params):
         return s * scales + lowers
 
     def nll_scaled(s):
-        return objective(from_scaled(s))
+        return nll_obj(from_scaled(s))
 
     theta_s = to_scaled(theta_est)
 
@@ -87,7 +94,7 @@ def estimate_with_covariance(objective, initial_values, bounds, n_params):
         H_s = 0.5 * (H_s + H_s.T)
         H = H_s / np.outer(scales, scales)
 
-        cov, _ = safe_hessian_inversion(H, 1.0, regularization=1e-6, method="pinvh")
+        cov, _ = safe_hessian_inversion(H, 1.0, regularization=1e-6, method="adaptive_ridge")
         se = compute_standard_errors(cov, warn_negative=False)
     except Exception:
         cov = np.full((n_params, n_params), np.nan)
@@ -132,10 +139,11 @@ def run_simulation(
     def model_func(params):
         return simulate_bold(params, time=time_vec, u=u, num_rois=num_rois)
 
-    obj = make_objective(model_func, bold_noisy, params_to_est, normalize=True)
+    obj = make_objective(model_func, bold_noisy, params_to_est)
 
     theta_est, se, cov = estimate_with_covariance(
-        obj, initial_values, est_bounds, len(params_to_est)
+        obj, model_func, bold_noisy, params_to_est,
+        initial_values, est_bounds, len(params_to_est)
     )
 
     true_vals = np.array([true_params[p] for p in params_to_est])

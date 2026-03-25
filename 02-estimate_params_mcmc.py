@@ -140,16 +140,26 @@ print(f"95% CI: [{q025[0]:.4f}, {q975[0]:.4f}]")
 # =============================================================================
 # Corner plot
 # =============================================================================
-corner.corner(
-    samples,
-    labels=params_to_est,
-    truths=[true_params[p] for p in params_to_est],
-    show_titles=True,
-    title_fmt=".4f",
-    quantiles=[0.16, 0.5, 0.84],
-)
+if samples.shape[1] > 1:
+    corner.corner(
+        samples,
+        labels=params_to_est,
+        truths=[true_params[p] for p in params_to_est],
+        show_titles=True,
+        title_fmt=".4f",
+        quantiles=[0.16, 0.5, 0.84],
+    )
+else:
+    # corner library crashes with 1D data; use a simple histogram instead
+    fig, ax = plt.subplots()
+    ax.hist(samples[:, 0], bins=50, density=True, alpha=0.7, label="posterior")
+    ax.axvline(true_params[params_to_est[0]], color="red", ls="--", label="true")
+    ax.axvline(means[0], color="blue", ls="-", label="mean")
+    ax.set_xlabel(params_to_est[0])
+    ax.set_ylabel("Density")
+    ax.legend()
 plt.suptitle("MCMC Posterior — Single Parameter Estimation")
 plt.tight_layout()
-plt.close("all")
+plt.show(block=False)
 
 # %%
