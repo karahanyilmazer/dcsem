@@ -215,10 +215,11 @@ def stim_boxcar(stim):
 
     @np.vectorize
     def u(t, onsets=onsets, durations=durations, amplitudes=amplitudes):
+        total = 0.0
         for o, d, a in zip(onsets, durations, amplitudes):
             if o <= t <= o + d:
-                return a
-        return 0.0
+                total += a
+        return total
 
     return u
 
