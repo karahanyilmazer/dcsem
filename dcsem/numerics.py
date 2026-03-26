@@ -168,10 +168,10 @@ def compute_standard_errors(
             neg_indices = np.where(diag_cov < 0)[0]
             print(
                 f"⚠️  Negative variance detected at parameter indices {neg_indices.tolist()}. "
-                "Hessian may not be positive definite. Using absolute values."
+                "Hessian is not positive definite. SEs for those parameters set to NaN."
             )
-        # Use absolute value instead of clipping to zero
-        diag_cov = np.abs(diag_cov)
+        # Set negative variances to NaN — these SEs have no statistical validity
+        diag_cov = np.where(diag_cov > 0, diag_cov, np.nan)
 
     se = np.sqrt(diag_cov)
     return se

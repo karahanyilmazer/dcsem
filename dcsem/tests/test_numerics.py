@@ -119,14 +119,15 @@ class TestComputeStandardErrors:
         assert np.allclose(se, [0.2, 0.3])
 
     def test_negative_variance_handled(self, capsys):
-        """Test that negative variances are handled with warning."""
+        """Test that negative variances produce NaN SE with warning."""
         # Covariance with negative diagonal (invalid, but can happen numerically)
         cov = np.array([[0.04, 0.01], [0.01, -0.01]])
 
         se = compute_standard_errors(cov, warn_negative=True)
 
-        # Should use absolute value
-        assert np.allclose(se, [0.2, 0.1])
+        # Positive variance → valid SE; negative variance → NaN
+        assert se[0] == pytest.approx(0.2)
+        assert np.isnan(se[1])
         # Check warning was printed
         captured = capsys.readouterr()
         assert "Negative variance" in captured.out
