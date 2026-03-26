@@ -205,6 +205,12 @@ class BaseModel(object):
         :param p: list
         :return: None
         """
+        expected = len(self.get_p())
+        if len(p) != expected:
+            raise ValueError(
+                f"Parameter vector length mismatch: expected {expected}, got {len(p)}. "
+                "Did the A/C matrix structure change since get_p() was called?"
+            )
         idx = 0
         for param in self.p:
             if isinstance(self.p[param], (int, float)):
@@ -369,17 +375,17 @@ class DCM(BaseModel):
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change"""
+        v_safe = np.maximum(v, 1e-8)  # guard against division by zero
         return self.p.V0 * (
-            self.p.k1 * (1 - q) + self.p.k2 * (1 - q / v) + self.p.k3 * (1 - v)
+            self.p.k1 * (1 - q) + self.p.k2 * (1 - q / v_safe) + self.p.k3 * (1 - v_safe)
         )
 
     def init_states(self):
         zeros = np.full(self.num_rois, 0.0)
         ones = np.full(self.num_rois, 1.0)
-        s0, x0 = zeros, zeros
         s0 = zeros
         f0, v0, q0 = ones, ones, ones
-        return np.r_[s0, f0, v0, q0]  # , x0]
+        return np.r_[s0, f0, v0, q0]
 
     def collect_results(self, ivp, x_vec):
         BOLD_tc = []
@@ -389,8 +395,9 @@ class DCM(BaseModel):
             p = ivp[:, idx]
             s, f, v, q = np.array_split(p, num_state)
             x = x_vec.T[idx]
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
             BOLD_tc.append(self.calc_BOLD(q, v))
 
         # Turn to numpy arrays and add bold timecourse
@@ -668,8 +675,9 @@ class TwoLayerDCM(DCM):
             x = x_vec.T[idx]
             vs, qs = np.array_split(vqs, self.num_layers)
             BOLD_tc.append(self.calc_BOLD(q, v))
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x, "vs": vs, "qs": qs}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
 
         # Turn lists into numpy arrays and add BOLD
         state_tc = {key: np.asarray(state_tc[key]) for key in state_tc}
@@ -771,8 +779,9 @@ class MultiLayerDCM(DCM):
             s, f, v, q, vs, qs = self.split_p(p)
             x = x_vec.T[idx]
             BOLD_tc.append(self.calc_BOLD(q, v))
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x, "vs": vs, "qs": qs}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
 
         # Turn lists into numpy arrays and add BOLD
         state_tc = {key: np.asarray(state_tc[key]) for key in state_tc}
