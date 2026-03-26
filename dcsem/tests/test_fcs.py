@@ -138,6 +138,51 @@ def test_stim_boxcar():
     u = utils.stim_boxcar(stim_file)
 
 
+def test_stim_boxcar_overlapping():
+    """Overlapping stimuli should sum their amplitudes."""
+    u = utils.stim_boxcar([[0, 10, 1.0], [5, 10, 0.5]])
+    # t=3: only first stimulus active → 1.0
+    assert u(3.0) == 1.0
+    # t=7: both active → 1.0 + 0.5 = 1.5
+    assert u(7.0) == 1.5
+    # t=12: only second stimulus active → 0.5
+    assert u(12.0) == 0.5
+    # t=20: neither active → 0.0
+    assert u(20.0) == 0.0
+
+
+def test_calc_bold_v_near_zero():
+    """calc_BOLD should not produce inf/nan when v is near zero."""
+    dcm = models.DCM(2, params={"A": [[-1, 0], [0, -1]], "C": [1, 0]})
+    q = np.array([1.0, 1.0])
+    v_tiny = np.array([1e-10, 1e-10])
+    bold = dcm.calc_BOLD(q, v_tiny)
+    assert np.all(np.isfinite(bold)), f"BOLD contains non-finite values: {bold}"
+
+
+def test_hemodynamic_steady_state():
+    """With zero input, hemodynamic states should return to resting values."""
+    dcm = models.DCM(2, params={"A": [[-1, 0], [0, -1]], "C": [1, 0]})
+    tvec = np.arange(200)  # long enough for transient to decay
+    # No stimulus — system should stay at (or return to) resting state
+    bold, states = dcm.simulate(tvec, u=lambda t: 0)
+    # At resting state: f=1, v=1, q=1
+    assert np.allclose(states["f"][-1], 1.0, atol=0.01), f"f not at rest: {states['f'][-1]}"
+    assert np.allclose(states["v"][-1], 1.0, atol=0.01), f"v not at rest: {states['v'][-1]}"
+    assert np.allclose(states["q"][-1], 1.0, atol=0.01), f"q not at rest: {states['q'][-1]}"
+
+
+def test_set_p_length_validation():
+    """set_p should reject parameter vectors of wrong length."""
+    dcm = models.DCM(2, params={"A": [[-1, 0.2], [0.3, -1]], "C": [1, 0]})
+    p_correct = dcm.get_p()
+    # Wrong length should raise
+    import pytest
+
+    with pytest.raises(ValueError, match="length mismatch"):
+        dcm.set_p(np.zeros(len(p_correct) + 1))
+
+
 # test models
 def test_Parameters():
     p = models.Parameters({"x": 2, "y": 3})
