@@ -48,16 +48,17 @@ def map_fit(data, noise_cov, model, priors, x0=None):
     bounds = np.array([v.interval(1 - 1e-3) for v in priors.values()])
 
     def neg_log_posterior(params):
-
         params_dict = {k: v for k, v in zip(priors.keys(), params)}
         lp = np.sum([priors[k].logpdf(params_dict[k]) for k in params_dict.keys()])
         if np.isneginf(lp):
             return -np.inf
         expected = model(**params_dict)
-        llh = change_model.log_mvnpdf(mean=np.squeeze(expected), cov=np.squeeze(noise_cov), x=np.squeeze(data))
+        llh = change_model.log_mvnpdf(
+            mean=np.squeeze(expected), cov=np.squeeze(noise_cov), x=np.squeeze(data)
+        )
         return -(llh + lp).item()
 
-    p = optimize.minimize(neg_log_posterior, x0=x0, bounds=bounds, method='Nelder-Mead')
+    p = optimize.minimize(neg_log_posterior, x0=x0, bounds=bounds, method="Nelder-Mead")
 
     h = hessian(neg_log_posterior, p.x, bounds)
     std = 1 / np.sqrt(np.diag(h))

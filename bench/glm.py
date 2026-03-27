@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-    This module reads diffusion data and returns data in proper format for inference
+This module reads diffusion data and returns data in proper format for inference
 """
 
 import numpy as np
@@ -9,13 +9,12 @@ from fsl.data.featdesign import loadDesignMat
 import warnings
 
 
-
 def group_glm(data, design_mat, design_con):
     """
     Performs group glm on the given data
 
 
-    :param data: 3d numpy array (n_subj, n_vox, n_dim) 
+    :param data: 3d numpy array (n_subj, n_vox, n_dim)
     :param design_mat: path to design.mat file
     :param design_con: path to design.con file, the first contrast must be first group mean, the second the group difference
     3rd contrast is the difference between two groups.
@@ -27,10 +26,12 @@ def group_glm(data, design_mat, design_con):
     n_subj, n_vox, n_dim = data.shape
 
     if data.shape[0] == x.shape[0]:
-        print(f'running glm for {data.shape[0]} subjects')
+        print(f"running glm for {data.shape[0]} subjects")
     else:
-        raise ValueError(f'number of subjects in design matrix is {x.shape[0]} but'
-                         f' {data.shape[0]} summary measures were loaded.')
+        raise ValueError(
+            f"number of subjects in design matrix is {x.shape[0]} but"
+            f" {data.shape[0]} summary measures were loaded."
+        )
 
     y = np.transpose(data, [1, 2, 0])  # make it (n_vox, n_dim, n_subj)
     beta = y @ np.linalg.pinv(x).T
@@ -45,7 +46,9 @@ def group_glm(data, design_mat, design_con):
     sigma_n = varcopes[..., 1]
 
     if n_subj <= n_dim:
-        warnings.warn('fewer samples than features, regularising sigma_n with 0.1 on diagonals')
+        warnings.warn(
+            "fewer samples than features, regularising sigma_n with 0.1 on diagonals"
+        )
         sigma_n += 0.1 * np.eye(sigma_n.shape[-1])
 
     return data1, delta_data, sigma_n
@@ -65,7 +68,7 @@ def group_glm_paired(data):
 
     # sigma_n = np.array([np.cov(diffs[:, i, :].T) for i in range(diffs.shape[1])])
     offset = diffs - delta_data
-    sigma_n = np.einsum('kij,kil->ijl', offset, offset) / (n_subj - 1)
+    sigma_n = np.einsum("kij,kil->ijl", offset, offset) / (n_subj - 1)
     sigma_n = sigma_n / n_subj
 
     return data1, delta_data, sigma_n
@@ -80,21 +83,21 @@ def loadcontrast(design_con):
     :return: name of contrasts and the contrast vectors.
     """
     names = {}
-    with open(design_con, 'rt') as f:
+    with open(design_con, "rt") as f:
         while True:
             line = f.readline().strip()
-            if line.startswith('/ContrastName'):
+            if line.startswith("/ContrastName"):
                 tkns = line.split(None, 1)
                 num = [c for c in tkns[0] if c.isdigit()]
-                num = int(''.join(num))
+                num = int("".join(num))
                 if len(tkns) > 1:
                     name = tkns[1].strip()
                     names[num] = name
 
-            elif line.startswith('/NumContrasts'):
+            elif line.startswith("/NumContrasts"):
                 n_contrasts = int(line.split()[1])
 
-            elif line == '/Matrix':
+            elif line == "/Matrix":
                 break
 
         contrasts = np.loadtxt(f, ndmin=2)
@@ -104,7 +107,9 @@ def loadcontrast(design_con):
     return names, contrasts
 
 
-def voxelwise_group_glm(data, weights, design_con, equal_samples=False, baseline_sigman=False):
+def voxelwise_group_glm(
+    data, weights, design_con, equal_samples=False, baseline_sigman=False
+):
     """
     Performs voxel-wise group glm on the given data with weights
 
@@ -120,9 +125,9 @@ def voxelwise_group_glm(data, weights, design_con, equal_samples=False, baseline
     c_names, c = loadcontrast(design_con)
 
     if data.shape[:2] == weights.shape:
-        print(f'running glm for {data.shape[0]} subjects and {data.shape[1]} voxels.')
+        print(f"running glm for {data.shape[0]} subjects and {data.shape[1]} voxels.")
     else:
-        raise ValueError(f' glm weights and data are not matched')
+        raise ValueError(f" glm weights and data are not matched")
     if data.ndim == 2:
         data = data[..., np.newaxis]
 
@@ -150,7 +155,9 @@ def voxelwise_group_glm(data, weights, design_con, equal_samples=False, baseline
 
         r = y - beta @ x.T
         sigma_sq = np.cov(r)
-        varcopes[vox] = sigma_sq[..., np.newaxis] * np.diagonal(c @ np.linalg.inv(x.T @ x) @ c.T)
+        varcopes[vox] = sigma_sq[..., np.newaxis] * np.diagonal(
+            c @ np.linalg.inv(x.T @ x) @ c.T
+        )
 
     data1 = copes[:, :, 0]
     delta_data = copes[:, :, 1]

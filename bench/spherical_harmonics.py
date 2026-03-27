@@ -3,6 +3,7 @@
 """
 This module contains functions for fitting spherical harmonics to diffusion data.
 """
+
 import warnings
 
 import numpy as np
@@ -62,8 +63,10 @@ def fit_shm(signal, acq, sh_degree, log_l=Default_LOG_L):
         if this_shell.bvals >= acq.b0_threshold:
             y, l = normalised_shms(bvecs, sh_degree)
             if bvecs.shape[0] < y.shape[1]:
-                warnings.warn(f'{this_shell.bvals} shell directions is fewer than '
-                              f'required coefficients to estimate anisotropy.')
+                warnings.warn(
+                    f"{this_shell.bvals} shell directions is fewer than "
+                    f"required coefficients to estimate anisotropy."
+                )
 
             y_inv = np.linalg.pinv(y.T)
             coeffs = shell_signal @ y_inv
@@ -85,14 +88,18 @@ def shm_cov(sum_meas, acq, sph_degree, noise_sigma):
     s_idx = 0
     for shell_idx, this_shell in enumerate(acq.shells):
         ng = np.sum(acq.idx_shells == shell_idx)
-        variances[:, s_idx] = 1 / ng * (noise_sigma ** 2)
+        variances[:, s_idx] = 1 / ng * (noise_sigma**2)
         s_idx += 1
         if this_shell.lmax > 0:
-            y, l = normalised_shms(acq.bvecs[acq.idx_shells == shell_idx], this_shell.lmax)
+            y, l = normalised_shms(
+                acq.bvecs[acq.idx_shells == shell_idx], this_shell.lmax
+            )
             c = y[0].T @ y[0]
             for degree in np.arange(2, sph_degree + 1, 2):
-                f = (noise_sigma ** 2) / c
-                variances[:, s_idx] = f * (2 * sum_meas[:, s_idx] + f) / (2 * degree + 1)
+                f = (noise_sigma**2) / c
+                variances[:, s_idx] = (
+                    f * (2 * sum_meas[:, s_idx] + f) / (2 * degree + 1)
+                )
                 s_idx += 1
 
     sigma_n = np.array([np.diag(v) for v in variances])
@@ -112,7 +119,13 @@ def shm_jacobian(signal, bvecs, lmax=6, max_degree=4):
             if degree == 0:
                 return y_inv[..., l == 0]
             else:
-                return 2 * (signal.dot(y_inv[..., l == degree])).dot((y_inv[..., l == degree]).T) / np.sum(l == degree)
+                return (
+                    2
+                    * (signal.dot(y_inv[..., l == degree])).dot(
+                        (y_inv[..., l == degree]).T
+                    )
+                    / np.sum(l == degree)
+                )
 
     der = np.array([derivatives(deg) for deg in np.arange(0, max_degree + 1, 2)])
     return der
@@ -128,7 +141,7 @@ def cart2spherical(x, y, z):
     :return: tuple with (r, phi, theta)-coordinates
     """
     vectors = np.array([x, y, z])
-    r = np.sqrt(np.sum(vectors ** 2, 0))
+    r = np.sqrt(np.sum(vectors**2, 0))
     theta = np.arccos(vectors[2] / r)
     phi = np.arctan2(vectors[1], vectors[0])
     if vectors.ndim == 1:
@@ -150,7 +163,9 @@ def nan_mat(shape):
     return a
 
 
-def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names=[], log_l=Default_LOG_L):
+def normalise_summaries(
+    baseline: np.ndarray, change=None, noise_cov=None, names=[], log_l=Default_LOG_L
+):
     """
     Normalises summary measures for all subjects. (divide by average attenuation)
     :param names: name of summaries, is required for knowing how to normalise
@@ -160,22 +175,24 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
     :param log_l: flag for logarithm l2
     :return: normalised summaries
     """
-    assert len(names) == baseline.shape[-1], f'Number of summary measurements doesnt match. ' \
-                                       f'Expected {len(names)} measures but got {baseline.shape[-1]}.'
+    assert len(names) == baseline.shape[-1], (
+        f"Number of summary measurements doesnt match. "
+        f"Expected {len(names)} measures but got {baseline.shape[-1]}."
+    )
     y1 = np.array(baseline)
-    b0_idx = names.index('b0.0_mean')
-    summary_type = [l.split('_')[1] for l in names]
+    b0_idx = names.index("b0.0_mean")
+    summary_type = [l.split("_")[1] for l in names]
     mean_b0 = np.atleast_1d(y1[..., b0_idx])
     y1_norm = np.zeros_like(y1)
 
     for smm_idx, l in enumerate(summary_type):
-        if l == 'mean':
+        if l == "mean":
             y1_norm[..., smm_idx] = y1[..., smm_idx] / mean_b0
         else:
             if log_l:
                 y1_norm[..., smm_idx] = y1[..., smm_idx] - 2 * np.log(mean_b0)
             else:
-                y1_norm[..., smm_idx] = y1[..., smm_idx] / (mean_b0 ** 2)
+                y1_norm[..., smm_idx] = y1[..., smm_idx] / (mean_b0**2)
 
     y1_norm = np.delete(y1_norm, b0_idx, axis=-1)
 
@@ -183,13 +200,13 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
         dy = np.array(change)
         dy_norm = np.zeros_like(dy)
         for smm_idx, l in enumerate(summary_type):
-            if l == 'mean':
+            if l == "mean":
                 dy_norm[..., smm_idx] = dy[..., smm_idx] / mean_b0
             else:
                 if log_l:
                     dy_norm[..., smm_idx] = dy[..., smm_idx]
                 else:
-                    dy_norm[..., smm_idx] = dy[..., smm_idx] / (mean_b0 ** 2)
+                    dy_norm[..., smm_idx] = dy[..., smm_idx] / (mean_b0**2)
     else:
         dy_norm = None
 
@@ -197,13 +214,21 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
         sigma_n = np.array(noise_cov)
         sigma_n_norm = sigma_n.copy()
         for smm_idx, l in enumerate(summary_type):
-            if l == 'mean':
-                sigma_n_norm[..., smm_idx, :] = sigma_n_norm[..., smm_idx, :] / mean_b0[:, np.newaxis]
-                sigma_n_norm[..., :, smm_idx] = sigma_n_norm[..., :, smm_idx] / mean_b0[:, np.newaxis]
+            if l == "mean":
+                sigma_n_norm[..., smm_idx, :] = (
+                    sigma_n_norm[..., smm_idx, :] / mean_b0[:, np.newaxis]
+                )
+                sigma_n_norm[..., :, smm_idx] = (
+                    sigma_n_norm[..., :, smm_idx] / mean_b0[:, np.newaxis]
+                )
             else:
                 if not log_l:
-                    sigma_n_norm[..., smm_idx, :] = sigma_n_norm[..., smm_idx, :] / (mean_b0[:, np.newaxis] ** 2)
-                    sigma_n_norm[..., :, smm_idx] = sigma_n_norm[..., :, smm_idx] / (mean_b0[:, np.newaxis] ** 2)
+                    sigma_n_norm[..., smm_idx, :] = sigma_n_norm[..., smm_idx, :] / (
+                        mean_b0[:, np.newaxis] ** 2
+                    )
+                    sigma_n_norm[..., :, smm_idx] = sigma_n_norm[..., :, smm_idx] / (
+                        mean_b0[:, np.newaxis] ** 2
+                    )
 
     else:
         sigma_n_norm = None

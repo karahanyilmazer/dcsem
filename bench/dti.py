@@ -2,6 +2,7 @@
 """
 Summary metrics based on diffusion tensor fit
 """
+
 import numpy as np
 from scipy.linalg import block_diag
 
@@ -83,25 +84,34 @@ def summary_np(signal, gradients, bval, s0):
 
     signal /= s0
     if bval <= 0.05:
-        return {'b0.0_mean': s0[:, 0]}
+        return {"b0.0_mean": s0[:, 0]}
 
     g = g_mat(gradients)
-    d = - np.log(signal) @ np.linalg.pinv(g).T / bval
-    dt = np.array([[d[..., 0], d[..., 3], d[..., 4]],
-                   [d[..., 3], d[..., 1], d[..., 5]],
-                   [d[..., 4], d[..., 5], d[..., 2]]])
+    d = -np.log(signal) @ np.linalg.pinv(g).T / bval
+    dt = np.array(
+        [
+            [d[..., 0], d[..., 3], d[..., 4]],
+            [d[..., 3], d[..., 1], d[..., 5]],
+            [d[..., 4], d[..., 5], d[..., 2]],
+        ]
+    )
     dt = dt.transpose([*np.arange(2, dt.ndim), 0, 1])
     eigs = np.linalg.eigvalsh(dt)
 
-    smm = {'MD': np.mean(eigs, axis=-1),
-           'FA': 3 * np.sqrt(1 / 2) * np.std(eigs, axis=-1) / np.linalg.norm(eigs, axis=-1)}
+    smm = {
+        "MD": np.mean(eigs, axis=-1),
+        "FA": 3
+        * np.sqrt(1 / 2)
+        * np.std(eigs, axis=-1)
+        / np.linalg.norm(eigs, axis=-1),
+    }
 
     return smm
 
 
 def g_mat(gradients):
     x, y, z = gradients.T
-    return np.array([x ** 2, y ** 2, z ** 2, 2 * x * y, 2 * x * z, 2 * y * z]).T
+    return np.array([x**2, y**2, z**2, 2 * x * y, 2 * x * z, 2 * y * z]).T
 
 
 def summary(signal, gradients, bval, s0):
@@ -119,21 +129,25 @@ def summary(signal, gradients, bval, s0):
     dtype = torch.float64
     signal = signal / s0
     if bval == 0:
-        return {'MD': np.mean(signal, axis=-1), 'FA': None}
+        return {"MD": np.mean(signal, axis=-1), "FA": None}
 
     signal = torch.from_numpy(signal).to(dtype).requires_grad_(False)
     x, y, z = gradients.T
-    g = torch.tensor([x ** 2, 2 * x * y, y ** 2, 2 * x * z, 2 * y * z, z ** 2], dtype=dtype).requires_grad_(False)
-    d = - torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
+    g = torch.tensor(
+        [x**2, 2 * x * y, y**2, 2 * x * z, 2 * y * z, z**2], dtype=dtype
+    ).requires_grad_(False)
+    d = -torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
 
     dt = torch.zeros((*signal.shape[:-1], 3, 3), dtype=dtype)
     idx = torch.tril_indices(3, 3)
     dt[..., idx[0], idx[1]] = d
 
-    md = dt.diagonal(dim1=-1, dim2=-2).mean(axis=-1)  # torch doesnt have trace for nd arrays
+    md = dt.diagonal(dim1=-1, dim2=-2).mean(
+        axis=-1
+    )  # torch doesnt have trace for nd arrays
     r = dt / (md.view((*md.shape, 1, 1)) * 3)  # normalized tensor matrix
     fa = torch.sqrt(0.5 * (3 - 1 / (r @ r).diagonal(dim1=-1, dim2=-2).sum(axis=-1)))
-    smm = {'MD': md.detach().numpy(), 'FA': fa.detach().numpy()}
+    smm = {"MD": md.detach().numpy(), "FA": fa.detach().numpy()}
 
     return smm
 
@@ -157,14 +171,18 @@ def summary_jacobian(signal, gradients, bval, s0):
     else:
         signal = torch.from_numpy(signal).to(dtype).requires_grad_(True)
         x, y, z = gradients.T
-        g = torch.tensor([x ** 2, 2 * x * y, y ** 2, 2 * x * z, 2 * y * z, z ** 2], dtype=dtype).requires_grad_(False)
-        d = - torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
+        g = torch.tensor(
+            [x**2, 2 * x * y, y**2, 2 * x * z, 2 * y * z, z**2], dtype=dtype
+        ).requires_grad_(False)
+        d = -torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
 
         dt = torch.zeros((*signal.shape[:-1], 3, 3), dtype=dtype)
         idx = torch.tril_indices(3, 3)
         dt[..., idx[0], idx[1]] = d
 
-        md = dt.diagonal(dim1=-1, dim2=-2).mean(axis=-1)  # torch doesnt have trace for nd arrays
+        md = dt.diagonal(dim1=-1, dim2=-2).mean(
+            axis=-1
+        )  # torch doesnt have trace for nd arrays
 
         md.backward(retain_graph=True)
         j_md = signal.grad.detach().numpy()
@@ -195,7 +213,7 @@ def noise_variance(signal, gradients, bval, sigma_n, s0):
     else:
         j = j_md
     j = np.squeeze(j)
-    m = j @ j.T * (sigma_n ** 2)
+    m = j @ j.T * (sigma_n**2)
     return m
 
 
@@ -217,14 +235,18 @@ def md_jacobian(signal, gradients, bval, s0):
     else:
         signal = torch.from_numpy(signal).to(dtype).requires_grad_(True)
         x, y, z = gradients.T
-        g = torch.tensor([x ** 2, 2 * x * y, y ** 2, 2 * x * z, 2 * y * z, z ** 2], dtype=dtype).requires_grad_(False)
-        d = - torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
+        g = torch.tensor(
+            [x**2, 2 * x * y, y**2, 2 * x * z, 2 * y * z, z**2], dtype=dtype
+        ).requires_grad_(False)
+        d = -torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
 
         dt = torch.zeros((*signal.shape[:-1], 3, 3), dtype=dtype)
         idx = torch.tril_indices(3, 3)
         dt[..., idx[0], idx[1]] = d
 
-        md = dt.diagonal(dim1=-1, dim2=-2).mean(axis=-1)  # torch doesnt have trace for nd arrays
+        md = dt.diagonal(dim1=-1, dim2=-2).mean(
+            axis=-1
+        )  # torch doesnt have trace for nd arrays
         md.backward(retain_graph=True)
         j_md = signal.grad.detach().numpy()
     return j_md
@@ -248,14 +270,18 @@ def fa_jacobian(signal, gradients, bval, s0):
     else:
         signal = torch.from_numpy(signal).to(dtype).requires_grad_(True)
         x, y, z = gradients.T
-        g = torch.tensor([x ** 2, 2 * x * y, y ** 2, 2 * x * z, 2 * y * z, z ** 2], dtype=dtype).requires_grad_(False)
-        d = - torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
+        g = torch.tensor(
+            [x**2, 2 * x * y, y**2, 2 * x * z, 2 * y * z, z**2], dtype=dtype
+        ).requires_grad_(False)
+        d = -torch.log(torch.abs(signal)) @ torch.pinverse(g) / bval
 
         dt = torch.zeros((*signal.shape[:-1], 3, 3), dtype=dtype)
         idx = torch.tril_indices(3, 3)
         dt[..., idx[0], idx[1]] = d
 
-        md = dt.diagonal(dim1=-1, dim2=-2).mean(axis=-1)  # torch doesnt have trace for nd arrays
+        md = dt.diagonal(dim1=-1, dim2=-2).mean(
+            axis=-1
+        )  # torch doesnt have trace for nd arrays
         r = dt / (md.view((*md.shape, 1, 1)) * 3)  # normalized tensor matrix
         fa = torch.sqrt(0.5 * (3 - 1 / (r @ r).diagonal(dim1=-1, dim2=-2).sum(axis=-1)))
 
@@ -265,11 +291,17 @@ def fa_jacobian(signal, gradients, bval, s0):
 
 
 def volume_summary(eigs):
-    return (32 * np.pi / 945) * (2 * (eigs ** 3).sum(axis=-1) -
-                                 3 * (eigs[:, 0] ** 2 * (eigs[:, 1] + eigs[:, 2]) +
-                                      eigs[:, 1] ** 2 * (eigs[:, 0] + eigs[:, 2]) +
-                                      eigs[:, 2] ** 2 * (eigs[:, 0] + eigs[:, 1])) +
-                                 12 * eigs[:, 0] * eigs[:, 1] * eigs[:, 2])
+    return (32 * np.pi / 945) * (
+        2 * (eigs**3).sum(axis=-1)
+        - 3
+        * (
+            eigs[:, 0] ** 2 * (eigs[:, 1] + eigs[:, 2])
+            + eigs[:, 1] ** 2 * (eigs[:, 0] + eigs[:, 2])
+            + eigs[:, 2] ** 2 * (eigs[:, 0] + eigs[:, 1])
+        )
+        + 12 * eigs[:, 0] * eigs[:, 1] * eigs[:, 2]
+    )
+
 
 def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names=None):
     """
@@ -281,10 +313,12 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
     :param log_l: flag for logarithm l2
     :return: normalised summaries
     """
-    assert len(names) == baseline.shape[-1], f'Number of summary measurements doesnt match. ' \
-                                       f'Expected {len(names)} measures but got {baseline.shape[-1]}.'
+    assert len(names) == baseline.shape[-1], (
+        f"Number of summary measurements doesnt match. "
+        f"Expected {len(names)} measures but got {baseline.shape[-1]}."
+    )
 
-    b0_idx = names.index('b0.0_mean')
+    b0_idx = names.index("b0.0_mean")
     mean_b0 = np.atleast_1d(baseline[..., b0_idx])
     y1_norm = np.copy(baseline)
     y1_norm = np.delete(y1_norm, b0_idx, axis=-1)
@@ -297,8 +331,12 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
 
     if noise_cov is not None:
         sigma_n_norm = np.copy(noise_cov)
-        sigma_n_norm[..., b0_idx, :] = sigma_n_norm[..., b0_idx, :] / (mean_b0[:, np.newaxis])
-        sigma_n_norm[..., :, b0_idx] = sigma_n_norm[..., :, b0_idx] / (mean_b0[:, np.newaxis])
+        sigma_n_norm[..., b0_idx, :] = (
+            sigma_n_norm[..., b0_idx, :] / (mean_b0[:, np.newaxis])
+        )
+        sigma_n_norm[..., :, b0_idx] = (
+            sigma_n_norm[..., :, b0_idx] / (mean_b0[:, np.newaxis])
+        )
     else:
         sigma_n_norm = None
 

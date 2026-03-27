@@ -5,12 +5,14 @@ from bench import model_inversion as mi
 
 
 def toy_model(x, a, b, c):
-    return a * x ** 2 + b * x + c
+    return a * x**2 + b * x + c
 
 
-param_priors = {'a': st.norm(loc=1, scale=1),
-                'b': st.norm(loc=1, scale=1),
-                'c': st.norm(loc=1, scale=1)}
+param_priors = {
+    "a": st.norm(loc=1, scale=1),
+    "b": st.norm(loc=1, scale=1),
+    "c": st.norm(loc=1, scale=1),
+}
 
 
 def test_parameter_estimation():
@@ -36,11 +38,11 @@ def test_std_estimation():
 
     _, stde = mi.map_fit_sig(func, param_priors, noisy_data, noise_level)
 
-    a = np.array([[p ** 2, p, 1] for p in x[:, 0]])
+    a = np.array([[p**2, p, 1] for p in x[:, 0]])
     a_inv = np.linalg.inv(a)
     pe_a = np.squeeze(a_inv @ data)
 
-    cov = a_inv.dot(a_inv.T) * (noise_level ** 2)
+    cov = a_inv.dot(a_inv.T) * (noise_level**2)
     stda = np.sqrt(np.diagonal(cov))
 
     np.testing.assert_allclose(pe_a, actual_params, rtol=1e-3)
@@ -67,7 +69,7 @@ def test_confmats():
 
         data_2 = func(actual_p2) + noise_level * np.random.rand(*x.shape)
         pe2, std2 = mi.map_fit_sig(func, param_priors, data_2, noise_level)
-        z_vals.append(abs(pe2 - pe1) / np.sqrt(std1 ** 2 + std2 ** 2))
+        z_vals.append(abs(pe2 - pe1) / np.sqrt(std1**2 + std2**2))
 
     p_vals = st.norm.sf(np.array(z_vals))
     predicts = np.argmin(p_vals, axis=-1) + 1

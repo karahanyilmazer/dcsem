@@ -4,6 +4,7 @@
 This module contains functions to simulate diffusion signals using diffusion_models.py and compute summary measures
 using spherical_harmonics.py
 """
+
 import argparse
 from dataclasses import dataclass, fields
 import numpy as np
@@ -15,6 +16,7 @@ class ShellParameters:
     """
     Acquisition parameters for a single shell of diffusion MRI data
     """
+
     bvals: Optional[float] = None
     qval: Optional[float] = None
     diffusion_time: Optional[float] = None
@@ -22,14 +24,14 @@ class ShellParameters:
     TE: Optional[float] = None
     TR: Optional[float] = None
     TI: Optional[float] = None
-    b_delta: float = 1.
-    b_eta: float = 0.
+    b_delta: float = 1.0
+    b_eta: float = 0.0
     lmax: Optional[int] = 8
     anisotropy: Optional[bool] = False
 
     def __post_init__(self):
         if self.bvals is None:
-            self.bvals = self.qval ** 2 * self.diffusion_time
+            self.bvals = self.qval**2 * self.diffusion_time
         if self.no_anisotropy:
             self.lmax = 0
 
@@ -46,11 +48,11 @@ class ShellParameters:
         """
         group = parser.add_argument_group(
             "Acquisition parameters",
-            "Text files or floats defining the acquisition parameters of each volume. " +
-            "Text files should have a single row or single column and contain a single value per volume.",
+            "Text files or floats defining the acquisition parameters of each volume. "
+            + "Text files should have a single row or single column and contain a single value per volume.",
         )
         for var in fields(cls):
-            group.add_argument('--' + var.name)
+            group.add_argument("--" + var.name)
 
     @classmethod
     def from_parser_args(cls, args):
@@ -96,25 +98,29 @@ class ShellParameters:
                 nparams = len(params)
                 ref = name
             elif nparams != len(params):
-                raise ValueError("Found inconsistent number of volumes: " +
-                                 f"{nparams} for {ref} and {len(params)} for {name}")
+                raise ValueError(
+                    "Found inconsistent number of volumes: "
+                    + f"{nparams} for {ref} and {len(params)} for {name}"
+                )
         if nparams is None:
-            raise ValueError("None of the parameters vary between volumes, so can not define shells")
+            raise ValueError(
+                "None of the parameters vary between volumes, so can not define shells"
+            )
 
-        within_range = np.ones((nparams, nparams), dtype='bool')
+        within_range = np.ones((nparams, nparams), dtype="bool")
         for name, params in parameters.items():
             arr = np.array(params)
             if arr.size == 1:
                 continue
-            if name == 'bvals':
+            if name == "bvals":
                 within_range &= abs(arr[:, None] - arr[None, :]) < b0_thresh
             else:
                 within_range &= arr[:, None] == arr[None, :]
 
-        indices = -np.ones(nparams, dtype='int')
+        indices = -np.ones(nparams, dtype="int")
         while (indices == -1).any():
             nshell = 0
-            new_shell = np.zeros(within_range.shape[0], dtype='bool')
+            new_shell = np.zeros(within_range.shape[0], dtype="bool")
             new_shell[np.where(indices == -1)[0][0]] = True
             while nshell != new_shell.sum():
                 nshell = new_shell.sum()
@@ -150,20 +156,20 @@ def to_string(shells: Sequence[ShellParameters]):
 
     len_column = max(max(len(name) for name in used_fields) + 2, 8)
 
-    fmt = '{{:{}s}}'.format(len_column)
+    fmt = "{{:{}s}}".format(len_column)
     res = "|".join(fmt.format(name) for name in used_fields)
-    res = res + '\n' + '-' * len(res)
+    res = res + "\n" + "-" * len(res)
 
-    fmt = '{{:{}f}}'.format(len_column)
+    fmt = "{{:{}f}}".format(len_column)
     for shell in shells:
         parts = []
         for name in used_fields:
             value = getattr(shell, name)
             if value is None:
-                parts.append(' ' * len_column)
+                parts.append(" " * len_column)
             else:
                 parts.append(fmt.format(value))
-        res = res + '\n' + '|'.join(parts)
+        res = res + "\n" + "|".join(parts)
     return res
 
 
@@ -172,6 +178,7 @@ class Acquisition:
     """
     Class that contains acquisition protocol.
     """
+
     shells: List[ShellParameters]
     idx_shells: np.ndarray
     bvals: np.array
@@ -190,17 +197,17 @@ class Acquisition:
         each measurement, and gradient directions
         """
 
-        bvec_path = acq_path + '/' + name + '/bvecs'
-        bval_path = acq_path + '/' + name + '/bvals'
+        bvec_path = acq_path + "/" + name + "/bvecs"
+        bval_path = acq_path + "/" + name + "/bvals"
         args = argparse.Namespace(bvec=bvec_path, bval=bval_path)
 
         idx_shells, shells = ShellParameters.from_parser_args(args)
         bvals = read_bvals(args.bvals)
         bvecs = np.genfromtxt(args.bvecs).T
 
-        print('loaded input shells:')
+        print("loaded input shells:")
         print(to_string(shells))
-        print('')
+        print("")
         return cls(shells, idx_shells, bvals, bvecs, name, b0_threshold)
 
     @classmethod
@@ -219,8 +226,10 @@ class Acquisition:
         if isinstance(bvals, str):
             bvals = read_bvals(bvals)
 
-        idx_shells, shells = ShellParameters.create_shells(b0_thresh=b0_threshold, bvals=bvals)
-        return cls(shells, idx_shells, bvals, bvecs, ' ', b0_threshold)
+        idx_shells, shells = ShellParameters.create_shells(
+            b0_thresh=b0_threshold, bvals=bvals
+        )
+        return cls(shells, idx_shells, bvals, bvecs, " ", b0_threshold)
 
     @classmethod
     def generate(cls, n_b0=10, n_dir=64, bvals=(1, 2, 3), b0_thresh=0.1):
@@ -242,7 +251,7 @@ class Acquisition:
             bvecs = np.concatenate([bvecs, new_vecs[np.argsort(new_vecs[:, 2]), :]])
 
         idx_shells, shells = ShellParameters.create_shells(b0_thresh, bvals=all_b)
-        return cls(shells, idx_shells, all_b, bvecs, 'generated', b0_thresh)
+        return cls(shells, idx_shells, all_b, bvecs, "generated", b0_thresh)
 
 
 def read_bvals(fname, b0thresh=0.05, maxb=100, scale=1000):
@@ -270,10 +279,10 @@ def fibonacci_sphere(samples=1):
     Args:
         samples : int
     """
-    phi = np.pi * (3. - np.sqrt(5.))  # golden angle in radians
+    phi = np.pi * (3.0 - np.sqrt(5.0))  # golden angle in radians
 
     i = np.arange(samples)
-    y = 1 - 2. * (i / float(samples - 1))
+    y = 1 - 2.0 * (i / float(samples - 1))
     r = np.sqrt(1 - y * y)
     t = phi * i
     x = np.cos(t) * r

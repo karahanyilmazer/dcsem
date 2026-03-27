@@ -63,16 +63,29 @@ class NNMapping:
             self.rot_mats = np.tile(np.eye(3), (self.n_vox, 1, 1))
         else:
             warp_img = Image(xfm)
-            transform = fnirt.readFnirt(fname=warp_img, src=self.src_img, ref=self.mask_img, intent=2006)
-            self.src_coords = np.around(transform.transform(self.ref_coords, 'voxel', 'voxel')).astype(int)
-            self.valid_indices = np.all((self.src_coords < self.src_img.shape[:3]) & (self.src_coords > 0), axis=1)
+            transform = fnirt.readFnirt(
+                fname=warp_img, src=self.src_img, ref=self.mask_img, intent=2006
+            )
+            self.src_coords = np.around(
+                transform.transform(self.ref_coords, "voxel", "voxel")
+            ).astype(int)
+            self.valid_indices = np.all(
+                (self.src_coords < self.src_img.shape[:3]) & (self.src_coords > 0),
+                axis=1,
+            )
 
             dx, dy, dz, _ = warp_img.pixdim
-            grads = np.stack(np.gradient(warp_img.data, dx, dy, dz, axis=(0, 1, 2)), axis=-1)
-            self.rot_mats = np.zeros((self.n_vox, 3, 3)) + np.eye(3)  # set default vaules to eye(3)
-            self.rot_mats[self.valid_indices] = grads[tuple(self.ref_coords[self.valid_indices].T)]
+            grads = np.stack(
+                np.gradient(warp_img.data, dx, dy, dz, axis=(0, 1, 2)), axis=-1
+            )
+            self.rot_mats = np.zeros((self.n_vox, 3, 3)) + np.eye(
+                3
+            )  # set default vaules to eye(3)
+            self.rot_mats[self.valid_indices] = grads[
+                tuple(self.ref_coords[self.valid_indices].T)
+            ]
 
-            if transform.deformationType == 'relative':
+            if transform.deformationType == "relative":
                 self.rot_mats[self.valid_indices] += np.eye(3)
 
         self.valid_src_coords = self.src_coords[self.valid_indices]
@@ -92,7 +105,7 @@ class NNMapping:
         return data
 
     def restore(self, data):
-        """ gets cleaned data (n_valid_vox, ...) returns full version (n_vox)"""
+        """gets cleaned data (n_valid_vox, ...) returns full version (n_vox)"""
         if data.ndim == 1:
             shape = self.n_vox
         elif data.ndim == 2:
@@ -106,7 +119,7 @@ class NNMapping:
         return c
 
     def write_native(self, data, fname):
-        """ writes the data to the native space
+        """writes the data to the native space
         Args:
             data: must have n_unique_vox rows
             fname: name of the output file.
@@ -124,7 +137,9 @@ class NNMapping:
         write_nifti(self.restore(data), self.ref_coords, self.mask_img, fname)
 
 
-def read_summary_images(summary_dir: str, subject_list: list, mask: str, summary_names: list):
+def read_summary_images(
+    summary_dir: str, subject_list: list, mask: str, summary_names: list
+):
     """
     Reads summary measure images
     :param summary_dir: path to the summary measurements, assumes the summaries are all in the standard space
@@ -136,16 +151,16 @@ def read_summary_images(summary_dir: str, subject_list: list, mask: str, summary
 
     mask_img = np.nan_to_num(Image(mask).data)
     if summary_names is None:
-        summary_names = glob.glob(f'{summary_dir}/{subject_list[0]}/*.nii.gz')
+        summary_names = glob.glob(f"{summary_dir}/{subject_list[0]}/*.nii.gz")
         summary_names = [os.path.basename(s)[:-7] for s in summary_names]
 
     summaries = np.zeros((len(subject_list), (mask_img > 0).sum(), len(summary_names)))
     for i, sub in enumerate(subject_list):
         for j, m in enumerate(summary_names):
-            summary_file = f'{summary_dir}/{sub}/{m}.nii.gz'
+            summary_file = f"{summary_dir}/{sub}/{m}.nii.gz"
             summaries[i, :, j] = Image(summary_file).data[mask_img > 0]
 
-    print(f'loaded summaries from {len(subject_list)} subjects.')
+    print(f"loaded summaries from {len(subject_list)} subjects.")
     invalid_voxs = np.isnan(summaries).any(axis=(0, 2))
 
     return summaries, invalid_voxs, summary_names
@@ -167,7 +182,7 @@ def convert_warp_to_deformation_field(warp_field, std_image, def_field, overwrit
         convertwarp(def_field, std_image, warp1=warp_field)
         img = Image(def_field)
         new_hdr = img.header.copy()
-        new_hdr['intent_code'] = 2006  # for displacement field style warps
+        new_hdr["intent_code"] = 2006  # for displacement field style warps
         Image(img.data, header=new_hdr).save(def_field)
 
 
@@ -181,13 +196,17 @@ def transform_indices(native_image, std_mask, def_field):
     """
     std_indices = np.array(np.where(np.nan_to_num(std_mask.data) > 0)).T
     transform = fnirt.readFnirt(def_field, native_image, std_mask)
-    native_indices = np.around(transform.transform(std_indices, 'voxel', 'voxel')).astype(int)
+    native_indices = np.around(
+        transform.transform(std_indices, "voxel", "voxel")
+    ).astype(int)
 
-    valid_vox = [np.all([0 < native_indices[j, i] < native_image.shape[i] for i in range(3)])
-                 for j in range(native_indices.shape[0])]
+    valid_vox = [
+        np.all([0 < native_indices[j, i] < native_image.shape[i] for i in range(3)])
+        for j in range(native_indices.shape[0])
+    ]
 
     if not np.all(valid_vox):
-        warn('Some voxels in mask lie out of native diffusion space.')
+        warn("Some voxels in mask lie out of native diffusion space.")
 
     return native_indices, valid_vox
 
@@ -210,7 +229,9 @@ def sample_from_native_space(image, xfm, mask, def_field=None):
     return data_vox, valid_vox
 
 
-def write_glm_results(data, delta_data, sigma_n, summary_names, mask, invalid_vox, glm_dir):
+def write_glm_results(
+    data, delta_data, sigma_n, summary_names, mask, invalid_vox, glm_dir
+):
     """
     Writes the results of GLM into files,
     :param data: baseline measurement matrix (n_vox, n_sm)
@@ -228,14 +249,13 @@ def write_glm_results(data, delta_data, sigma_n, summary_names, mask, invalid_vo
     covariances = np.stack([s[tril_idx] for s in sigma_n], axis=0)
 
     os.makedirs(glm_dir, exist_ok=True)
-    coords = np.argwhere(Image(mask).data>0)[invalid_vox==0]
-    write_nifti(data, coords, mask, glm_dir + '/baseline.nii.gz')
-    write_nifti(delta_data, coords,  mask, glm_dir + '/change.nii.gz')
-    write_nifti(covariances, coords, mask, glm_dir + '/noise_cov.nii.gz')
+    coords = np.argwhere(Image(mask).data > 0)[invalid_vox == 0]
+    write_nifti(data, coords, mask, glm_dir + "/baseline.nii.gz")
+    write_nifti(delta_data, coords, mask, glm_dir + "/change.nii.gz")
+    write_nifti(covariances, coords, mask, glm_dir + "/noise_cov.nii.gz")
 
-
-    write_nifti(np.ones(coords.shape[0]), coords, mask, glm_dir + '/valid_mask.nii.gz')
-    with open(f'{glm_dir}/summary_names.txt', 'w') as f:
+    write_nifti(np.ones(coords.shape[0]), coords, mask, glm_dir + "/valid_mask.nii.gz")
+    with open(f"{glm_dir}/summary_names.txt", "w") as f:
         for t in summary_names:
             f.write("%s\n" % t)
         f.close()
@@ -250,12 +270,12 @@ def read_glm_results(glm_dir, mask=None):
     """
 
     if mask is None:
-        mask = glm_dir + '/valid_mask.nii.gz'
+        mask = glm_dir + "/valid_mask.nii.gz"
 
     mask_img = np.nan_to_num(Image(mask).data)
-    data = Image(f'{glm_dir}/baseline.nii.gz').data[mask_img > 0, :]
-    delta_data = Image(f'{glm_dir}/change.nii.gz').data[mask_img > 0, :]
-    variances = Image(f'{glm_dir}/noise_cov.nii.gz').data[mask_img > 0, :]
+    data = Image(f"{glm_dir}/baseline.nii.gz").data[mask_img > 0, :]
+    delta_data = Image(f"{glm_dir}/change.nii.gz").data[mask_img > 0, :]
+    variances = Image(f"{glm_dir}/noise_cov.nii.gz").data[mask_img > 0, :]
 
     coords = np.argwhere(mask_img)
     n_vox, n_dim = data.shape
@@ -267,13 +287,15 @@ def read_glm_results(glm_dir, mask=None):
         sigma_n[i] = sigma_n[i] + sigma_n[i].T
         sigma_n[i][diag_idx] /= 2
 
-    with open(f'{glm_dir}/summary_names.txt', 'r') as reader:
+    with open(f"{glm_dir}/summary_names.txt", "r") as reader:
         summary_names = [line.rstrip() for line in reader]
 
     return data, delta_data, sigma_n, summary_names, coords
 
 
-def read_glm_weights(data: List[str], xfm: List[str],  mask: str, save_xfm_path: str, parallel=True):
+def read_glm_weights(
+    data: List[str], xfm: List[str], mask: str, save_xfm_path: str, parallel=True
+):
     """
     reads voxelwise glm weights for each subject in an arbitrary space and a transformation from that space to standard,
     then takes voxels that lie within the mask (that is in standard space).
@@ -294,12 +316,13 @@ def read_glm_weights(data: List[str], xfm: List[str],  mask: str, save_xfm_path:
     n_vox = std_indices.shape[0]
     n_subj = len(data)
     weights = np.zeros((n_subj, n_vox)) + np.nan
-    print('Reading GLM weights:')
+    print("Reading GLM weights:")
 
     def func(s_idx):
         subjdata, valid_vox = sample_from_native_space(
-            data[s_idx], xfm[s_idx], mask, f"{save_xfm_path}/def_field_{s_idx}.nii.gz")
-        print('weights for', s_idx, 'loaded.')
+            data[s_idx], xfm[s_idx], mask, f"{save_xfm_path}/def_field_{s_idx}.nii.gz"
+        )
+        print("weights for", s_idx, "loaded.")
         return subjdata, valid_vox
 
     if parallel:
@@ -336,7 +359,9 @@ def write_nifti(data: np.ndarray, coords: np.ndarray, ref_img: str, fname: str):
     Image(img, header=mask.header).save(fname)
 
 
-def write_inference_results(path, model_names, predictions, posteriors, peaks, mask, coords):
+def write_inference_results(
+    path, model_names, predictions, posteriors, peaks, mask, coords
+):
     """
     Writes the results of inference to nifti files
     :param path: full path to write the files.
@@ -348,13 +373,27 @@ def write_inference_results(path, model_names, predictions, posteriors, peaks, m
     :return: Nothing.
     """
     os.makedirs(path, exist_ok=True)
-    write_nifti(predictions[:, np.newaxis], coords, mask, f'{path}/inferred_change.nii.gz')
+    write_nifti(
+        predictions[:, np.newaxis], coords, mask, f"{path}/inferred_change.nii.gz"
+    )
     for i, m in enumerate(model_names):
-        if m == '[]' or m == 'nochange':
-            write_nifti(posteriors[:, i][:, np.newaxis], coords, mask, f'{path}/nochange_probability.nii.gz')
+        if m == "[]" or m == "nochange":
+            write_nifti(
+                posteriors[:, i][:, np.newaxis],
+                coords,
+                mask,
+                f"{path}/nochange_probability.nii.gz",
+            )
         else:
-            write_nifti(posteriors[:, i][:, np.newaxis], coords, mask, f'{path}/{m}_probability.nii.gz')
-            write_nifti(peaks[:, i][:, np.newaxis], coords, mask, f'{path}/{m}_amount.nii.gz')
+            write_nifti(
+                posteriors[:, i][:, np.newaxis],
+                coords,
+                mask,
+                f"{path}/{m}_probability.nii.gz",
+            )
+            write_nifti(
+                peaks[:, i][:, np.newaxis], coords, mask, f"{path}/{m}_amount.nii.gz"
+            )
 
 
 def read_inference_results(maps_dir, mask=None):
@@ -366,19 +405,25 @@ def read_inference_results(maps_dir, mask=None):
     """
 
     if mask is None:
-        mask = maps_dir + '/valid_mask.nii.gz'
-    file_names = glob.glob(f'{maps_dir}/*probability*')
-    model_names = [f.split('/')[-1].replace('_probability.nii.gz', '') for f in file_names]
+        mask = maps_dir + "/valid_mask.nii.gz"
+    file_names = glob.glob(f"{maps_dir}/*probability*")
+    model_names = [
+        f.split("/")[-1].replace("_probability.nii.gz", "") for f in file_names
+    ]
     mask_img = np.nan_to_num(Image(mask).data)
     posteriors = dict()
     amounts = dict()
     for i, m in enumerate(model_names):
-        if m == 'nochange':
-            posteriors[m] = Image(f'{maps_dir}/nochange_probability.nii.gz').data[mask_img > 0]
+        if m == "nochange":
+            posteriors[m] = Image(f"{maps_dir}/nochange_probability.nii.gz").data[
+                mask_img > 0
+            ]
             amounts[m] = np.zeros_like(posteriors[m])
         else:
-            posteriors[m] = Image(f'{maps_dir}/{m}_probability.nii.gz').data[mask_img > 0]
-            amounts[m] = Image(f'{maps_dir}/{m}_amount.nii.gz').data[mask_img > 0]
+            posteriors[m] = Image(f"{maps_dir}/{m}_probability.nii.gz").data[
+                mask_img > 0
+            ]
+            amounts[m] = Image(f"{maps_dir}/{m}_amount.nii.gz").data[mask_img > 0]
 
     return posteriors, amounts
 
@@ -391,18 +436,18 @@ def read_pes(pe_dir, mask_add):
     :return:
     """
     mask_img = Image(mask_add)
-    n_subj = len(glob.glob(pe_dir + '/subj_*.nii.gz'))
+    n_subj = len(glob.glob(pe_dir + "/subj_*.nii.gz"))
     pes = list()
     for subj_idx in range(n_subj):
-        f = f'{pe_dir}/subj_{subj_idx}.nii.gz'
+        f = f"{pe_dir}/subj_{subj_idx}.nii.gz"
         pes.append(Image(f).data[mask_img.data > 0, :])
 
-    print(f'loaded summaries from {n_subj} subjects')
+    print(f"loaded summaries from {n_subj} subjects")
     pes = np.array(pes)
     invalids = np.any(np.isnan(pes), axis=(0, 2))
     pes = pes[:, invalids == 0, :]
     if invalids.sum() > 0:
-        warn(f'{invalids.sum()} voxels are dropped because of lying outside of brain mask in some subjects.')
+        warn(
+            f"{invalids.sum()} voxels are dropped because of lying outside of brain mask in some subjects."
+        )
     return pes, invalids
-
-
