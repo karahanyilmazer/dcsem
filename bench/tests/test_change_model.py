@@ -1,11 +1,11 @@
+import change_model
 import numpy as np
 import pytest
+import spherical_harmonics
 from dipy.data import default_sphere
 from numpy import testing
 from scipy.stats import distributions
 
-import change_model
-import spherical_harmonics
 from bench import acquisition, diffusion_models
 from bench.change_model import Trainer
 

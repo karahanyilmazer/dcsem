@@ -1,6 +1,6 @@
 import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
+import seaborn as sns
 
 plt.rcParams["font.size"] = 14
 plt.rcParams["figure.dpi"] = 300

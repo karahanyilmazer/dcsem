@@ -3,12 +3,11 @@
 import glob
 import os.path as op
 
-import wx
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.backends.backend_wxagg as wxagg
-
 import fsl.utils.settings as fslsettings
+import matplotlib.backends.backend_wxagg as wxagg
+import matplotlib.pyplot as plt
+import numpy as np
+import wx
 from fsl.data.image import Image
 from fsleyes.controls.controlpanel import ControlPanel
 from fsleyes.views.orthopanel import OrthoPanel

@@ -7,8 +7,9 @@ using spherical_harmonics.py
 
 import argparse
 from dataclasses import dataclass, fields
-import numpy as np
 from typing import List, Optional, Sequence
+
+import numpy as np
 
 
 @dataclass

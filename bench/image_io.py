@@ -6,13 +6,13 @@ This module contains functions for reading and writing to image files
 
 import glob
 import os
+from typing import List
 from warnings import warn
 
 import numpy as np
 from fsl.data.image import Image
 from fsl.transform import fnirt
 from fsl.wrappers import convertwarp
-from typing import List
 from joblib import Parallel, delayed
 
 

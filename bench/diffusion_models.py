@@ -3,10 +3,11 @@
 This module contains definition of some microstructural diffusion models and a prior distribution for their parameters.
 """
 
+import warnings
+
 import numba
 import numpy as np
 from scipy import stats
-import warnings
 
 # prior distributions:
 dif_coeff = 1.7  # unit: um^2/ms
@@ -583,8 +584,8 @@ def uniform_sampling_sphere(n_samples):
 
 def plot_response_function(response, shells, idx_shells, bvecs, res=40, maxs=5):
     import matplotlib.pyplot as plt
-    from scipy.interpolate import griddata
     from matplotlib import cm
+    from scipy.interpolate import griddata
 
     fig = plt.figure(figsize=(12, 8))
 

@@ -4,9 +4,10 @@
 This module reads diffusion data and returns data in proper format for inference
 """
 
+import warnings
+
 import numpy as np
 from fsl.data.featdesign import loadDesignMat
-import warnings
 
 
 def group_glm(data, design_mat, design_con):
@@ -127,7 +128,7 @@ def voxelwise_group_glm(
     if data.shape[:2] == weights.shape:
         print(f"running glm for {data.shape[0]} subjects and {data.shape[1]} voxels.")
     else:
-        raise ValueError(f" glm weights and data are not matched")
+        raise ValueError(" glm weights and data are not matched")
     if data.ndim == 2:
         data = data[..., np.newaxis]
 

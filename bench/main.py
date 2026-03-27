@@ -4,22 +4,24 @@ This module is to parse inputs from commandline and call the proper functions fr
 """
 
 import argparse
+import importlib.util
 import os
-from file_tree import FileTree
+
 import numpy as np
+from file_tree import FileTree
+from fsl.utils.fslsub import submit
 from scipy import stats as st
+
 from bench import (
-    change_model,
-    glm,
-    spherical_harmonics,
-    diffusion_models,
     acquisition,
+    change_model,
+    diffusion_models,
+    dti,
+    glm,
     image_io,
     model_inversion,
-    dti,
+    spherical_harmonics,
 )
-from fsl.utils.fslsub import submit
-import importlib.util
 
 
 def main(argv=None):
@@ -457,7 +459,7 @@ def summary_from_cli(args):
     for i, n in enumerate(names):
         xfm.write_std(all_summaries[:, i], f"{args.output}/{n}")
 
-    print(f"Summary measurements are computed.")
+    print("Summary measurements are computed.")
 
 
 def submit_summary(args):
@@ -498,9 +500,9 @@ def submit_summary(args):
             f"{args.output}/{subj}",
         )
         # main(cmd[1:])
-        subject_jobs.append(submit(cmd, logdir=args.logdir, job_name=f"bench.summary"))
+        subject_jobs.append(submit(cmd, logdir=args.logdir, job_name="bench.summary"))
 
-    print(f"Jobs for calculating summary measurements are submitted for all subjects.")
+    print("Jobs for calculating summary measurements are submitted for all subjects.")
 
 
 def glm_from_cli(args):
@@ -613,7 +615,7 @@ def inference_from_cli(args):
         for i, item in enumerate(ch_mdl.model_names):
             f.write(f"{i}:{item}\n")
 
-    print(f"Analysis completed successfully.")
+    print("Analysis completed successfully.")
 
 
 def submit_invert(args):
