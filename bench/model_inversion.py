@@ -52,7 +52,7 @@ def map_fit(data, noise_cov, model, priors, x0=None):
         params_dict = {k: v for k, v in zip(priors.keys(), params)}
         lp = np.sum([priors[k].logpdf(params_dict[k]) for k in params_dict.keys()])
         if np.isneginf(lp):
-            return -np.inf
+            return np.inf
         expected = model(**params_dict)
         llh = change_model.log_mvnpdf(
             mean=np.squeeze(expected), cov=np.squeeze(noise_cov), x=np.squeeze(data)
@@ -62,7 +62,10 @@ def map_fit(data, noise_cov, model, priors, x0=None):
     p = optimize.minimize(neg_log_posterior, x0=x0, bounds=bounds, method="Nelder-Mead")
 
     h = hessian(neg_log_posterior, p.x, bounds)
-    std = 1 / np.sqrt(np.diag(h))
+    diag_h = np.diag(h)
+    std = np.full(diag_h.shape, np.nan, dtype=float)
+    valid = np.isfinite(diag_h) & (diag_h > 0)
+    std[valid] = 1 / np.sqrt(diag_h[valid])
     return p.x, std
 
 
@@ -77,10 +80,14 @@ def infer_change(pe1, std_pe1, pe2, std_pe2, alpha=0.05):
     :param alpha:
     :return:
     """
-    zvals = (pe2 - pe1) / (std_pe1 + std_pe2)
+    denom = np.sqrt(std_pe1**2 + std_pe2**2)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        zvals = np.divide(
+            pe2 - pe1, denom, out=np.zeros_like(pe1, dtype=float), where=denom > 0
+        )
     pvals = st.norm.sf(abs(zvals)) * 2  # twosided
 
-    infered_change = np.argmax(zvals, axis=1)[:, np.newaxis]
+    infered_change = np.argmax(abs(zvals), axis=1)[:, np.newaxis]
     amount = np.take_along_axis(pe1 - pe2, infered_change, axis=1)
     idx = np.take_along_axis(pvals > alpha, infered_change, axis=1)
     infered_change += 1

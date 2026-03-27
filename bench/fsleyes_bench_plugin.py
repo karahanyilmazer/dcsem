@@ -134,7 +134,7 @@ class BenchPanel(ControlPanel):
         ax2.ticklabel_format(scilimits=(-2, 0))
 
         if overlay is None or (not isinstance(overlay, Image)):
-            canvas.darw()
+            canvas.draw()
             return
 
         # get voxel cooredinates of current cursor location

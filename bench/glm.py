@@ -10,6 +10,19 @@ import numpy as np
 from fsl.data.featdesign import loadDesignMat
 
 
+def _residual_covariance(residuals, n_regressors):
+    n_obs = residuals.shape[-1]
+    sigma_sq = np.cov(residuals, ddof=0)
+    dof = n_obs - n_regressors
+    if dof <= 0:
+        warnings.warn(
+            "GLM residual degrees of freedom are non-positive; "
+            "using the biased covariance estimate."
+        )
+        return sigma_sq
+    return sigma_sq * (n_obs / dof)
+
+
 def group_glm(data, design_mat, design_con):
     """
     Performs group glm on the given data
@@ -39,7 +52,7 @@ def group_glm(data, design_mat, design_con):
     copes = beta @ c.T
 
     r = y - beta @ x.T
-    sigma_sq = np.array([np.cov(i) for i in r])
+    sigma_sq = np.array([_residual_covariance(i, x.shape[1]) for i in r])
     varcopes = sigma_sq[..., np.newaxis] * np.diagonal(c @ np.linalg.inv(x.T @ x) @ c.T)
 
     data1 = copes[:, :, 0]
@@ -155,7 +168,7 @@ def voxelwise_group_glm(
         # shape of the covariance matrix estimated from healthy subjects, but divided by the number of patients
 
         r = y - beta @ x.T
-        sigma_sq = np.cov(r)
+        sigma_sq = _residual_covariance(r, x.shape[1])
         varcopes[vox] = sigma_sq[..., np.newaxis] * np.diagonal(
             c @ np.linalg.inv(x.T @ x) @ c.T
         )
