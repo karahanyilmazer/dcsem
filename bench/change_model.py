@@ -3,22 +3,24 @@
 """
 This module contains classes and functions to train a change model and make inference on new data.
 """
-import sys
 import inspect
+import itertools
 import os
-import dill
+import sys
 import warnings
 from dataclasses import dataclass
-import numpy as np
-from joblib import Parallel, delayed, cpu_count
-import scipy
-from typing import Callable, List, Any, Union, Sequence, Mapping
+from typing import Any, Callable, List, Mapping, Sequence, Union
+
+import dill
 import numba
-import itertools
+import numpy as np
+import scipy
+import tqdm
+from joblib import Parallel, cpu_count, delayed
 from scipy.optimize import curve_fit
 from scipy.stats import norm
-from bench import spherical_harmonics, dti, acquisition, main
-import tqdm
+
+from bench import acquisition, dti, main, spherical_harmonics
 
 BOUNDS = {'negative': (-np.inf, 0), 'positive': (0, np.inf), 'twosided': (-np.inf, np.inf)}
 INTEGRAL_LIMITS = list(BOUNDS.keys())
@@ -474,7 +476,7 @@ class NoChangeModel:
         :return:
         """
         y = np.atleast_2d(y)
-        return np.zeros((y.shape[0], y.shape[1])), np.zeros((y.shape[0], y.shape[1], y.shape[1]))
+        return np.zeros((y.shape[0], y.shape[1] + 1)), np.zeros((y.shape[0], y.shape[1] + 1, y.shape[1] + 1))
 
     def log_posterior(self, dv, y, dy, sigma_n):
         """
