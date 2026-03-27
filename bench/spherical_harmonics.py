@@ -7,7 +7,6 @@ This module contains functions for fitting spherical harmonics to diffusion data
 import warnings
 
 import numpy as np
-from dipy.reconst.shm import real_sym_sh_basis
 
 Default_LOG_L = True  # default flag to log transform l measures or not.
 
@@ -34,6 +33,8 @@ def summary_names(acq, b0_threshold=0.05, sh_degree=None, cg=False):
 
 
 def normalised_shms(bvecs, lmax):
+    from dipy.reconst.shm import real_sym_sh_basis
+
     _, phi, theta = cart2spherical(*bvecs.T)
     y, m, l = real_sym_sh_basis(lmax, theta, phi)
     y = y  # /y[0, 0]  # normalisation is required to make the first summary measure represent mean signal

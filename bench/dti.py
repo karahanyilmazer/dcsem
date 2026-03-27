@@ -324,8 +324,8 @@ def normalise_summaries(baseline: np.ndarray, change=None, noise_cov=None, names
     y1_norm = np.delete(y1_norm, b0_idx, axis=-1)
 
     if change is not None:
-        dy_norm = np.copy(baseline)
-        dy_norm[..., b0_idx] = baseline[..., b0_idx] / mean_b0
+        dy_norm = np.copy(change)
+        dy_norm[..., b0_idx] = change[..., b0_idx] / mean_b0
     else:
         dy_norm = None
 

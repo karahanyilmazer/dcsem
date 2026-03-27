@@ -6,6 +6,7 @@ This module is to parse inputs from commandline and call the proper functions fr
 import argparse
 import importlib.util
 import os
+import warnings
 
 import numpy as np
 from file_tree import FileTree
@@ -425,7 +426,9 @@ def summary_from_cli(args):
         names = spherical_harmonics.summary_names(acq, sh_degree=args.sh_degree)
         if args.normalise:
             print("Summary measures are normalised by b0_mean.")
-            summaries = spherical_harmonics.normalise_summaries(names, summaries)
+            summaries, _, _ = spherical_harmonics.normalise_summaries(
+                baseline=summaries, change=None, noise_cov=None, names=names
+            )
             names = [f"{n}/b0" for n in names[1:]]
 
     elif args.summarytype == "dt":
@@ -433,7 +436,9 @@ def summary_from_cli(args):
         names = dti.summary_names(acq)
         if args.normalise:
             print("Summary measures are normalised by b0_mean.")
-            summaries = dti.normalise_summaries(names, summaries)
+            summaries, _, _ = dti.normalise_summaries(
+                baseline=summaries, change=None, noise_cov=None, names=names
+            )
             names = [f"{n}_norm" for n in names[1:]]
 
     elif (
@@ -543,22 +548,32 @@ def glm_from_cli(args):
         y_norm, dy_norm, sigma_n_norm = dti.normalise_summaries(
             data, delta_data, sigma_n, names=summary_names
         )
-    elif any(["l2" in summary_names]):
+    elif any("l2" in x for x in summary_names):
         y_norm, dy_norm, sigma_n_norm = spherical_harmonics.normalise_summaries(
-            summary_names, data, delta_data, sigma_n
+            baseline=data, change=delta_data, noise_cov=sigma_n, names=summary_names
         )
     else:
         y_norm, dy_norm, sigma_n_norm = data, delta_data, sigma_n
 
-    image_io.write_glm_results(
-        y_norm,
-        dy_norm,
-        sigma_n_norm,
-        summary_names,
-        args.mask,
-        invalid_vox,
-        args.output + "/normalised",
-    )
+    if (
+        y_norm.shape[-1] == dy_norm.shape[-1]
+        and dy_norm.shape[-1] == sigma_n_norm.shape[-1]
+        and y_norm.shape[-1] == len(summary_names)
+    ):
+        image_io.write_glm_results(
+            y_norm,
+            dy_norm,
+            sigma_n_norm,
+            summary_names,
+            args.mask,
+            invalid_vox,
+            args.output + "/normalised",
+        )
+    else:
+        warnings.warn(
+            "Skipping writing normalised GLM results because the normaliser "
+            "returned incompatible baseline/change/covariance dimensions."
+        )
 
     print(f"GLM is done. Results are stored in {args.output}")
 
@@ -667,7 +682,7 @@ def submit_invert(args):
         varpe2 = fit_results[x[:, 1] == 1, :, : len(param_names)].var(axis=0)
 
         z_values = (pe2 - pe1) / np.sqrt(
-            varpe1 / np.sqrt(x[:, 0].sum()) + varpe2 / np.sqrt(x[:, 1].sum())
+            varpe1 / x[:, 0].sum() + varpe2 / x[:, 1].sum()
         )
         p_values = st.norm.sf(abs(z_values)) * 2  # two-sided
 

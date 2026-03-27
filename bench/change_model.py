@@ -21,7 +21,7 @@ from joblib import Parallel, cpu_count, delayed
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
-from bench import acquisition, dti, main, spherical_harmonics
+from bench import acquisition, dti
 
 BOUNDS = {
     "negative": (-np.inf, 0),
@@ -93,7 +93,7 @@ class Trainer:
         if np.isscalar(self.amount_priors):
             self.amount_priors = [self.amount_priors] * self.n_vecs
         elif len(self.amount_priors) != self.n_vecs:
-            raise (
+            raise ValueError(
                 "priors must be either a scalar (same for all change models) "
                 "or a sequence with size of number of change models."
             )
@@ -157,12 +157,22 @@ class Trainer:
         """
         print(f"Generating {n_samples} training samples...")
         y_1, y_2 = self.generate_train_samples(n_samples, dv0)
-        dy = (y_2 - y_1) / dv0
-        y, _, _ = self.normaliser(
-            baseline=y_1, change=None, noise_cov=None, names=self.measurement_names
+        y, dy, _ = self.normaliser(
+            baseline=y_1,
+            change=(y_2 - y_1) / dv0,
+            noise_cov=None,
+            names=self.measurement_names,
         )
+        if dy is None:
+            dy = (y_2 - y_1) / dv0
 
-        kde = scipy.stats.gaussian_kde(y.T)
+        try:
+            kde = scipy.stats.gaussian_kde(y.T)
+        except np.linalg.LinAlgError:
+            warnings.warn(
+                "Skipping baseline KDE because the training summaries are singular."
+            )
+            kde = None
         mean_y = y.mean(axis=0, keepdims=True)
 
         yf_mu = fit_transform(y - mean_y, mu_poly_degree)
@@ -580,6 +590,7 @@ class NoChangeModel:
     name: str = "No change"
     prior: float = 1.0
     scale: float = 1.0
+    n_dim: int = None
 
     def distribution(self, y):
         """
@@ -588,9 +599,8 @@ class NoChangeModel:
         :return:
         """
         y = np.atleast_2d(y)
-        return np.zeros((y.shape[0], y.shape[1] + 1)), np.zeros(
-            (y.shape[0], y.shape[1] + 1, y.shape[1] + 1)
-        )
+        n_dim = self.n_dim if self.n_dim is not None else y.shape[1]
+        return np.zeros((y.shape[0], n_dim)), np.zeros((y.shape[0], n_dim, n_dim))
 
     def log_posterior(self, dv, y, dy, sigma_n):
         """
@@ -617,7 +627,9 @@ class ChangeModel:
     normaliser: Callable = default_normaliser
 
     def __post_init__(self):
-        null_model = NoChangeModel(prior=1, name="nochange")
+        null_model = NoChangeModel(
+            prior=1, name="nochange", n_dim=len(self.measurement_names)
+        )
 
         self.models.insert(0, null_model)
 
@@ -1473,6 +1485,7 @@ def summary_decorator(model, bvals, bvecs, summary_type="sh", sh_degree=2):
     """
     acq = acquisition.Acquisition.from_bval_bvec(bvals, bvecs)
     if summary_type == "sh":
+        from bench import spherical_harmonics
 
         def func(noise_std=0.0, **params):
             sig = model(bvals, bvecs, **params)
