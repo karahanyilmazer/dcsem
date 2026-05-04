@@ -38,6 +38,7 @@ class BaseModel(object):
         self.Cnz = None  # non-zero entries of the input modulation matrix
         # Base class knows about T1s so it can generate IR-BOLD
         self.T1s = None
+        self.objective_kind = "loss"
 
     def __str__(self):
         """Print out model parameters"""
@@ -90,32 +91,128 @@ class BaseModel(object):
         return p
 
     def fit_NL(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
-        import lmfit
+        import numdifftools as nd
+        from scipy.optimize import minimize
 
-        params = lmfit.Parameters()
-        for idx, p in enumerate(self.get_p_names()):
-            params.add(
-                p,
-                value=p0[idx],
-                vary=True if fixed_vars is None else p not in fixed_vars,
+        from dcsem.diagnostics import compute_hessian_diagnostics
+        from dcsem.numerics import (
+            compute_correlation_matrix,
+            compute_standard_errors,
+            safe_hessian_inversion,
+        )
+
+        names = self.get_p_names()
+        p0 = np.asarray(p0, dtype=float)
+        LB, UB = self.get_bounds()
+        LB = np.asarray(LB, dtype=float)
+        UB = np.asarray(UB, dtype=float)
+
+        if fixed_vars is not None:
+            free_mask = np.array([name not in fixed_vars for name in names], dtype=bool)
+        else:
+            free_mask = np.ones(len(names), dtype=bool)
+        free_idx = np.flatnonzero(free_mask)
+        fixed_idx = np.flatnonzero(~free_mask)
+
+        if np.any((p0[fixed_idx] < LB[fixed_idx]) | (p0[fixed_idx] > UB[fixed_idx])):
+            raise ValueError("Fixed parameter initial values violate model bounds.")
+
+        p0 = np.clip(p0, LB, UB)
+        p_fixed = p0.copy()
+
+        def expand_free_params(p_free):
+            x_full = p_fixed.copy()
+            x_full[free_idx] = np.asarray(p_free, dtype=float)
+            return x_full
+
+        invalid_objective = 1e12
+
+        def fn_neglogpost_free(p_free):
+            x_full = expand_free_params(p_free)
+            try:
+                objective = fn_negloglik(x_full) + fn_neglogpr(x_full)
+            except Exception:
+                return invalid_objective
+            if not np.isfinite(objective):
+                return invalid_objective
+            return float(objective)
+
+        if free_idx.size == 0:
+            results = None
+            x_opt = p_fixed.copy()
+        else:
+            x0_free = p0[free_idx]
+            bounds_free = [(LB[idx], UB[idx]) for idx in free_idx]
+            results = minimize(
+                fn_neglogpost_free,
+                x0_free,
+                method="L-BFGS-B",
+                bounds=bounds_free,
             )
+            x_opt = expand_free_params(results.x)
 
-        def fn_neglogpost(params):
-            x = params
-            if type(x) == lmfit.parameter.Parameters:
-                x = [params[name] for name in self.get_p_names()]
-            return fn_negloglik(x) + fn_neglogpr(x)
-
-        results = lmfit.minimize(fn_neglogpost, params, method="nelder")
         p = Parameters()
-        p.x = np.array([results.params[name].value for name in self.get_p_names()])
-        if results.covar is None:
-            import numdifftools as nd
-
-            Hfun = nd.Hessian(fn_neglogpost)
-            p.hessian = Hfun(p.x)
-            p.cov = np.linalg.inv(p.hessian)
+        p.x = np.asarray(x_opt, dtype=float)
+        p.param_names = names
         p.samples = None
+        p.success = True if results is None else bool(results.success)
+        p.message = "All parameters fixed." if results is None else str(results.message)
+        p.nit = 0 if results is None else getattr(results, "nit", 0)
+        p.result = results
+
+        n_params = len(names)
+        if free_idx.size == 0:
+            p.hessian = np.zeros((n_params, n_params))
+            p.cov = np.zeros((n_params, n_params))
+            p.se = np.zeros(n_params)
+            p.corr = np.eye(n_params)
+            p.hessian_diagnostics = None
+            p.covariance_diagnostics = None
+            p.uncertainty_kind = None
+            p.cov_is_calibrated = False
+            p.at_bounds = np.zeros(n_params, dtype=bool)
+        else:
+            try:
+                Hfun = nd.Hessian(fn_neglogpost_free)
+                hessian_free = np.asarray(Hfun(results.x), dtype=float)
+                cov_free, cov_diag = safe_hessian_inversion(
+                    hessian_free,
+                    sigma_sq=1.0,
+                    method="adaptive_ridge",
+                )
+
+                p.hessian = np.zeros((n_params, n_params))
+                p.hessian[np.ix_(free_idx, free_idx)] = hessian_free
+
+                p.cov = np.zeros((n_params, n_params))
+                p.cov[np.ix_(free_idx, free_idx)] = cov_free
+
+                p.se = np.zeros(n_params)
+                p.se[free_idx] = compute_standard_errors(cov_free, warn_negative=False)
+
+                p.corr = np.eye(n_params)
+                p.corr[np.ix_(free_idx, free_idx)] = compute_correlation_matrix(cov_free)
+
+                p.hessian_diagnostics = compute_hessian_diagnostics(hessian_free)
+                p.covariance_diagnostics = cov_diag
+                p.uncertainty_kind = (
+                    "hessian_negloglik"
+                    if self.objective_kind == "negloglik"
+                    else "local_curvature"
+                )
+                p.cov_is_calibrated = self.objective_kind == "negloglik"
+            except Exception as exc:
+                p.hessian = np.full((n_params, n_params), np.nan)
+                p.cov = np.full((n_params, n_params), np.nan)
+                p.se = np.full(n_params, np.nan)
+                p.corr = np.full((n_params, n_params), np.nan)
+                p.hessian_diagnostics = None
+                p.covariance_diagnostics = {"error": str(exc)}
+                p.uncertainty_kind = None
+                p.cov_is_calibrated = False
+
+            p.at_bounds = np.isclose(p.x, LB) | np.isclose(p.x, UB)
+
         p.negloglik = fn_negloglik(p.x)
         p.neglogpr = fn_neglogpr(p.x)
         return p
@@ -131,6 +228,8 @@ class BaseModel(object):
         """
         if p0 is None:
             p0 = self.init_free_params(y)
+        if kwargs is None:
+            kwargs = {}
 
         fn_negloglik = lambda p: self.fn_negloglik(p, **kwargs)
         fn_neglogpr = self.fn_neglogpr
@@ -263,12 +362,21 @@ class BaseModel(object):
         Results = {}
         for v in self.state_vars:
             D = {}
-            if state_tc[v].shape[1] == self.num_rois:
+            width = state_tc[v].shape[1]
+            if width == self.num_rois:
+                # single-layer-shaped state (or one-entry-per-ROI inter-layer
+                # quantity in a 2-layer model)
                 for roi in range(self.num_rois):
                     name = f"R{roi}"
                     D[name] = state_tc[v][:, roi]
             else:
-                for layer in range(self.num_layers):
+                # multi-layer-shaped state. For 4-state-per-layer vars (s, f,
+                # v, q, x) this is num_rois * num_layers; for inter-layer
+                # delay vars (vs, qs in MultiLayerDCM) it is
+                # num_rois * (num_layers - 1). Derive from width to handle
+                # both cases.
+                effective_layers = width // self.num_rois
+                for layer in range(effective_layers):
                     for roi in range(self.num_rois):
                         idx = roi + layer * self.num_rois
                         name = f"R{roi}L{layer}"
@@ -328,8 +436,19 @@ class BaseModel(object):
 class DCM(BaseModel):
     def __init__(self, num_rois, params=None, stochastic=False):
         """Set default values for all parameters of Balloon model
+
         num_rois (int)
         params (dict) : use this to set up all or a subset of the parameters
+
+        Notes on Balloon-Windkessel BOLD weights (k1, k2, k3):
+        Defaults follow Friston 2003 (1.5 T convention): k1 = 7·E0,
+        k2 = 2.0, k3 = 2·E0 − 0.2. After construction these coefficients are
+        independent attributes — mutating ``self.p.E0`` does NOT update k1
+        or k3. If E0 is fitted while k1/k2/k3 are also fitted (as in the
+        default ``init_free_params``), the model is over-parameterised. For
+        scientific work, fix the haemodynamic parameters by passing them in
+        ``fixed_vars`` to ``fit``, or recompute k1/k3 explicitly when
+        changing E0.
         """
         super().__init__()
         # conn params
@@ -351,6 +470,7 @@ class DCM(BaseModel):
         self.p.k2 = 2.0
         self.p.k3 = 2.0 * self.p.E0 - 0.2
         self.p.V0 = 0.02  # Resting blood volume fraction
+        self.objective_kind = "negloglik"
         # Set user-specified parameters
         if params is not None:
             self.set_params(params)
@@ -362,7 +482,12 @@ class DCM(BaseModel):
         # Define default values for T1s
         from dcsem.utils import constants
 
-        self.T1s = (constants["LowerLayerT1"] + constants["UpperLayerT1"]) / 2.0
+        # Single-layer DCM: T1s is a 1-element array so get_Pmat / simulate_IR
+        # can iterate over layers uniformly across DCM, TwoLayerDCM, and
+        # MultiLayerDCM (which use np.linspace with num_layers).
+        self.T1s = np.array(
+            [(constants["LowerLayerT1"] + constants["UpperLayerT1"]) / 2.0]
+        )
         # SDE or ODE
         self.stochastic = stochastic
         self.state_noise_std = 0.05
@@ -411,24 +536,108 @@ class DCM(BaseModel):
         return self.get_p()
 
     def get_bounds(self):
-        LB = [-np.inf] * len(self.get_p())
-        UB = [np.inf] * len(self.get_p())
+        scalar_bounds = {
+            "kappa": (1e-3, 10.0),
+            "gamma": (1e-3, 10.0),
+            "alpha": (0.05, 2.0),
+            "E0": (1e-4, 0.99),
+            "tau": (0.05, 10.0),
+            "k1": (1e-4, 20.0),
+            "k2": (1e-4, 20.0),
+            "k3": (-5.0, 20.0),
+            "V0": (1e-4, 1.0),
+            "l_d": (0.0, 5.0),
+            "tau_d": (0.05, 10.0),
+        }
+
+        LB = []
+        UB = []
+        for name in self.get_p_names():
+            if name.startswith("a") and "_" in name:
+                row, col = [int(idx) for idx in name[1:].split("_")]
+                bounds = (-6.0, -1e-6) if row == col else (-4.0, 4.0)
+            elif name.startswith("c"):
+                bounds = (-4.0, 4.0)
+            else:
+                bounds = scalar_bounds.get(name, (-np.inf, np.inf))
+            LB.append(bounds[0])
+            UB.append(bounds[1])
         return LB, UB
 
-    def fn_negloglik(self, p, y, tvec, u):
+    @staticmethod
+    def _gaussian_negloglik(residuals, noise_std=None):
+        residuals = np.asarray(residuals, dtype=float)
+        if not np.all(np.isfinite(residuals)):
+            return np.inf
+
+        n_obs = residuals.size
+        if noise_std is None:
+            sigma_sq = max(np.mean(residuals**2), 1e-12)
+            return 0.5 * n_obs * (np.log(2 * np.pi * sigma_sq) + 1.0)
+
+        sigma_sq = float(noise_std) ** 2
+        if sigma_sq <= 0:
+            raise ValueError("noise_std must be positive.")
+        return 0.5 * (
+            n_obs * np.log(2 * np.pi * sigma_sq) + np.sum(residuals**2) / sigma_sq
+        )
+
+    def parameters_are_admissible(self, p):
+        table = self.p_to_table(p)
+        A = np.asarray(table["A"], dtype=float)
+
+        if not np.all(np.isfinite(A)):
+            return False
+        if A.size > 0:
+            if np.any(np.diag(A) >= 0):
+                return False
+            if np.any(np.linalg.eigvals(A).real >= 0):
+                return False
+
+        positive_scalars = ["kappa", "gamma", "alpha", "tau", "V0"]
+        for key in positive_scalars:
+            if key in table and (not np.isfinite(table[key]) or table[key] <= 0):
+                return False
+
+        if not (0 < table["E0"] < 1):
+            return False
+
+        if "l_d" in table and (not np.isfinite(table["l_d"]) or table["l_d"] < 0):
+            return False
+        if "tau_d" in table and (
+            not np.isfinite(table["tau_d"]) or table["tau_d"] <= 0
+        ):
+            return False
+
+        return True
+
+    def fn_negloglik(self, p, y, tvec, u, noise_std=None):
         if self.stochastic:
             raise (Exception("Fitting stochastic DCMs has not yet been implemented"))
-        # self.set_p(p)
-        y_pred, _ = self.simulate(tvec, p=p, u=u)
-        mse = np.mean((y - y_pred) ** 2)
-        return mse
+        if not self.parameters_are_admissible(p):
+            return 1e12
+
+        try:
+            y_pred, _ = self.simulate(tvec, p=p, u=u)
+        except (FloatingPointError, RuntimeError, ValueError, np.linalg.LinAlgError):
+            return 1e12
+
+        if not np.all(np.isfinite(y_pred)):
+            return 1e12
+
+        residuals = np.asarray(y, dtype=float) - np.asarray(y_pred, dtype=float)
+        return self._gaussian_negloglik(residuals, noise_std=noise_std)
 
     def fn_neglogpr(self, p):
         return 0
 
-    def fit(self, y, tvec, p0=None, u=None, method="MH", fixed_vars=None):
+    def fit(self, y, tvec, p0=None, u=None, method="MH", fixed_vars=None, noise_std=None):
         return super().fit(
-            y, p0, method, fixed_vars, kwargs={"y": y, "tvec": tvec, "u": u}
+            y,
+            p0,
+            method,
+            fixed_vars,
+            kwargs={"y": y, "tvec": tvec, "u": u, "noise_std": noise_std},
         )
 
     ####################################################
@@ -501,9 +710,16 @@ class DCM(BaseModel):
 
         ivp = solve_ivp(
             func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec, **solve_kwargs
-        ).y
+        )
 
-        return ivp, x
+        if not ivp.success:
+            raise RuntimeError(f"DCM hemodynamic integration failed: {ivp.message}")
+        if not np.all(np.isfinite(ivp.y)):
+            raise FloatingPointError(
+                "DCM hemodynamic integration produced non-finite states."
+            )
+
+        return ivp.y, x
 
     def integrate_x(self, tvec, x0=None, u=None, generator=None):
         if u is None:
@@ -541,9 +757,14 @@ class DCM(BaseModel):
             if getattr(self, "ode_max_step", None) is not None:
                 solve_kwargs["max_step"] = self.ode_max_step
 
-            x = solve_ivp(
+            ivp = solve_ivp(
                 func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec, **solve_kwargs
-            ).y
+            )
+            if not ivp.success:
+                raise RuntimeError(f"DCM neural integration failed: {ivp.message}")
+            x = ivp.y
+        if not np.all(np.isfinite(x)):
+            raise FloatingPointError("DCM neural integration produced non-finite states.")
         return x
 
     def simulate(self, tvec, u=None, p=None, CNR=None, generator=None):
@@ -689,7 +910,10 @@ class MultiLayerDCM(DCM):
         super().__init__(num_rois, params, stochastic)
         self.num_rois = num_rois
         self.num_layers = num_layers
-        self.num_states = 5 * num_rois * num_layers + 2 * num_rois * (num_layers - 1)
+        # Note: the haemodynamic ODE state is 4·num_rois·num_layers (s, f, v,
+        # q) plus 2·num_rois·(num_layers−1) inter-layer delay states (vs, qs).
+        # The neural state x is integrated separately via ``integrate_x`` and
+        # interpolated, so it is not part of this state vector.
         self.p.A = np.zeros(
             (self.num_rois * self.num_layers, self.num_rois * self.num_layers)
         )
@@ -793,6 +1017,7 @@ class MultiLayerDCM(DCM):
 class SEM(BaseModel):
     def __init__(self, num_rois, params=None):
         super().__init__()
+        self.objective_kind = "negloglik"
         self.num_rois = num_rois
         self.num_layers = 1
         self.num_states = num_rois * self.num_layers
