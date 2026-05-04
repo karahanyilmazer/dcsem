@@ -393,7 +393,11 @@ class MH(object):
                             e = olde
             # end loop over params
             samples[iter, :] = p
-            if iter % self.update == 0:
+            # Adaptive proposal scaling: only during burn-in to preserve
+            # detailed balance / Markov property in the sampling phase.
+            # Continuous adaptation across the full chain breaks ergodicity
+            # of the post-burn-in samples.
+            if iter < self.burnin and iter % self.update == 0:
                 if verbose:
                     print(".... >>> Update Proposal ")
                 prop *= np.sqrt((1 + acc) / (1 + rej))
