@@ -1,6 +1,6 @@
 # %% Imports and config
 from dataclasses import dataclass, field
-from typing import Callable, Literal, Optional
+from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 import numdifftools as nd
@@ -49,10 +49,8 @@ class RunConfig:
     theta_zero: np.ndarray = field(
         default_factory=lambda: np.array([0.2, 0.2, np.log(0.1)])
     )
-    param_names: list = field(default_factory=lambda: ["a01", "a10", "log_sigma_e"])
-    param_bounds: list = field(
-        default_factory=lambda: [(0.0, 1.0), (0.0, 1.0), (-10.0, 2.0)]
-    )
+    param_names: Optional[list] = None
+    param_bounds: Optional[list] = None
     # Data
     data_mode: Literal["synthetic_csd", "synthetic_bold", "empirical"] = "synthetic_csd"
     snr: float = 10.0  # used in synthetic_csd mode
@@ -79,6 +77,80 @@ def _load_bold_csv(path: str, time_col: str = "time_s") -> np.ndarray:
     if time_col in df.columns:
         df = df.drop(columns=[time_col])
     return df.to_numpy(dtype=np.float32)
+
+
+def _resolve_param_spec(
+    spdcm: SpectralDCM,
+    theta_true: np.ndarray,
+    theta_zero: np.ndarray,
+    param_names: Optional[list] = None,
+    param_bounds: Optional[list] = None,
+) -> tuple[list, np.ndarray, np.ndarray, list]:
+    """Resolve and validate spectral parameter metadata against the model."""
+    default_names = spdcm.get_param_names()
+    n_params = len(default_names)
+
+    theta_true = np.asarray(theta_true, dtype=float)
+    theta_zero = np.asarray(theta_zero, dtype=float)
+    param_names = default_names if param_names is None else list(param_names)
+    param_bounds = spdcm.get_bounds() if param_bounds is None else list(param_bounds)
+
+    if theta_true.shape != (n_params,):
+        raise ValueError(
+            f"theta_true has shape {theta_true.shape}, expected ({n_params},)."
+        )
+    if theta_zero.shape != (n_params,):
+        raise ValueError(
+            f"theta_zero has shape {theta_zero.shape}, expected ({n_params},)."
+        )
+    if len(param_names) != n_params:
+        raise ValueError(
+            f"param_names has length {len(param_names)}, expected {n_params}."
+        )
+    if len(param_bounds) != n_params:
+        raise ValueError(
+            f"param_bounds has length {len(param_bounds)}, expected {n_params}."
+        )
+    return param_names, theta_true, theta_zero, param_bounds
+
+
+def estimate_log_sigma_e(spdcm: SpectralDCM, y_obs: np.ndarray) -> float:
+    """Rough estimate of log(sigma_e) from observed CSD diagonal power.
+
+    Assumes A ≈ diag(self_connection), giving H_neural ≈ diag(1/(jω - λ)).
+    Uses the mean diagonal power across frequencies to back out sigma_e.
+
+    Parameters
+    ----------
+    spdcm : SpectralDCM
+        Fitted SpectralDCM instance (provides HRF spectrum and freqs).
+    y_obs : ndarray
+        Vectorized observed CSD from spdcm.observed_csd or generate_noisy_csd.
+
+    Returns
+    -------
+    float
+        log(sigma_e) estimate, clamped to [-8, 2].
+    """
+    S_stack = spdcm._unvectorize_csd(y_obs)  # (n_freqs, R, R)
+    lam = spdcm.self_connection  # negative diagonal eigenvalue
+
+    sigma2_estimates = []
+    for k, f in enumerate(spdcm.freqs):
+        omega = 2 * np.pi * f
+        h_neural_mag2 = 1.0 / (omega**2 + lam**2)  # |1/(jω - λ)|²
+        h_hrf_mag2 = abs(spdcm.hrf_spectrum[k]) ** 2
+        h_tot_mag2 = h_hrf_mag2 * h_neural_mag2
+        mean_diag = float(np.mean(S_stack[k].diagonal().real))
+        if mean_diag > 0 and h_tot_mag2 > 1e-20:
+            sigma2_estimates.append(mean_diag / h_tot_mag2)
+
+    if not sigma2_estimates:
+        return np.log(0.1)
+
+    sigma2 = float(np.median(sigma2_estimates))
+    log_sigma_e = 0.5 * np.log(max(sigma2, 1e-16))
+    return float(np.clip(log_sigma_e, -8.0, 2.0))
 
 
 def make_objective(model_func, y_obs, x_data, loss_fn, normalize=True):
@@ -125,12 +197,6 @@ def run_single(cfg: RunConfig = RunConfig()):
     opt_method = "L-BFGS-B"
     title_suffix = "Least Squares"
 
-    param_names = cfg.param_names
-    theta_true = cfg.theta_true
-    theta_zero = cfg.theta_zero
-    param_bounds = cfg.param_bounds
-    n_params = len(theta_zero)
-
     # --- SpectralDCM instance ---
     spdcm = SpectralDCM(
         n_rois=cfg.n_rois,
@@ -140,11 +206,21 @@ def run_single(cfg: RunConfig = RunConfig()):
         freq_hi=cfg.freq_hi,
         n_freqs=cfg.n_freqs,
     )
+    param_names, theta_true, theta_zero, param_bounds = _resolve_param_spec(
+        spdcm,
+        cfg.theta_true,
+        cfg.theta_zero,
+        cfg.param_names,
+        cfg.param_bounds,
+    )
+    n_params = len(theta_zero)
     model = lambda theta, _x: spdcm.predict_csd(theta)
     x_data = None
 
     # Fixed-parameter support: reduce the optimised vector to free params only
     _fixed = cfg.fixed_params or {}
+    if any(idx < 0 or idx >= n_params for idx in _fixed):
+        raise ValueError("fixed_params contains an out-of-range parameter index.")
     _free_indices = [i for i in range(n_params) if i not in _fixed]
     _theta_zero_full = theta_zero.copy()  # snapshot before any slicing
 
@@ -175,6 +251,8 @@ def run_single(cfg: RunConfig = RunConfig()):
 
     # Resolve profile param indices into the (possibly reduced) free-param space
     if cfg.profile_params is not None:
+        if any(idx < 0 or idx >= len(theta_zero) for idx in cfg.profile_params):
+            raise ValueError("profile_params contains an out-of-range parameter index.")
         _profile_idxs = [
             _free_indices.index(i) for i in cfg.profile_params if i in _free_indices
         ]
@@ -255,6 +333,12 @@ def run_single(cfg: RunConfig = RunConfig()):
         loss_history.append(loss)
         print(f"Iteration {len(loss_history)}: loss = {loss:.6e}")
 
+    theta_zero = np.clip(
+        theta_zero,
+        [b[0] for b in param_bounds],
+        [b[1] for b in param_bounds],
+    )
+
     res = minimize(
         obj,
         theta_zero,
@@ -306,6 +390,7 @@ def run_single(cfg: RunConfig = RunConfig()):
     # =============================================================================
 
     if PLOT_SPECTRAL:
+        print("\nGenerating spectral plots...")
         freqs = spdcm.freqs
 
         S_obs = spdcm._unvectorize_csd(y_obs)
@@ -363,7 +448,7 @@ def run_single(cfg: RunConfig = RunConfig()):
         plt.tight_layout()
         plt.savefig(IMG_DIR / "auto_spectra.png", bbox_inches="tight")
         plt.savefig(LATEX_DIR / f"{model_name}_autospectra.pdf", bbox_inches="tight")
-        plt.show()
+        # plt.close("all")
 
         # --- Cross-spectrum magnitude and coherence ---
         if R >= 2:
@@ -438,7 +523,8 @@ def run_single(cfg: RunConfig = RunConfig()):
             plt.savefig(
                 LATEX_DIR / f"{model_name}_cross_coherence.pdf", bbox_inches="tight"
             )
-            plt.show()
+            # plt.close("all")
+            # plt.show()
 
     # =============================================================================
     # BOLD TIME SERIES
@@ -447,6 +533,7 @@ def run_single(cfg: RunConfig = RunConfig()):
     BOLD_SEED = cfg.seed + 1
 
     if PLOT_BOLD:
+        print("\nGenerating BOLD time series plots...")
         if cfg.data_mode == "synthetic_csd":
             # Simulate with pinned seed so differences reflect only parameter mismatch
             bold_ref_display, tvec_display = spdcm.simulate_bold(
@@ -466,13 +553,15 @@ def run_single(cfg: RunConfig = RunConfig()):
             )
             bold_ref_label = "true"
         else:  # empirical
-            bold_ref_display = bold_ref
-            tvec_display = tvec_ref
-            T_emp = int(bold_ref.shape[0] * cfg.TR)
+            # Cap display simulation at 120 s to avoid slow sdeint with near-unstable params
+            T_display = min(int(bold_ref.shape[0] * cfg.TR), 120)
+            n_display = int(T_display / cfg.TR)
+            bold_ref_display = bold_ref[:n_display]
+            tvec_display = tvec_ref[:n_display]
             bold_est_display, _ = spdcm.simulate_bold(
-                _to_full(theta_est), T=T_emp, rng=np.random.default_rng(BOLD_SEED)
+                _to_full(theta_est), T=T_display, rng=np.random.default_rng(BOLD_SEED)
             )
-            # Align to shortest length in case of off-by-one from int()
+            # Align lengths
             T_min = min(bold_ref_display.shape[0], bold_est_display.shape[0])
             bold_ref_display = bold_ref_display[:T_min]
             bold_est_display = bold_est_display[:T_min]
@@ -520,12 +609,13 @@ def run_single(cfg: RunConfig = RunConfig()):
         plt.tight_layout()
         plt.savefig(IMG_DIR / "bold_timeseries.png", bbox_inches="tight")
         plt.savefig(LATEX_DIR / f"{model_name}_bold.pdf", bbox_inches="tight")
-        plt.show()
+        # plt.close("all")
 
     # =============================================================================
     # HESSIAN-BASED DIAGNOSTICS
     # =============================================================================
 
+    print("\nComputing Hessian-based diagnostics...")
     # Parameter scaling helpers (map param_bounds to [0,1]^n for numerical stability)
     _lowers_h = np.array([b[0] for b in param_bounds])
     _scales_h = np.array([b[1] - b[0] for b in param_bounds])
@@ -596,7 +686,7 @@ def run_single(cfg: RunConfig = RunConfig()):
         plt.tight_layout()
         plt.savefig(IMG_DIR / "correlation_matrix.png")
         plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix.pdf")
-        plt.show()
+        # plt.close("all")
 
     except np.linalg.LinAlgError:
         print("Failed to invert Hessian — matrix is singular!")
@@ -645,6 +735,7 @@ def run_single(cfg: RunConfig = RunConfig()):
     PLOT_PROFILE = True
 
     if PLOT_PROFILE:
+        print("\nGenerating profile likelihood plots...")
         from dcsem.diagnostics import profile_likelihood_1d
 
         profile_idxs = _profile_idxs
@@ -708,7 +799,7 @@ def run_single(cfg: RunConfig = RunConfig()):
             plt.savefig(
                 LATEX_DIR / f"{model_name}_profile_likelihood.pdf", bbox_inches="tight"
             )
-            plt.show()
+            # plt.close("all")
 
     # =============================================================================
     # NPZ ARTIFACT SAVE
@@ -719,9 +810,7 @@ def run_single(cfg: RunConfig = RunConfig()):
         y_obs=y_obs,
         y_pred=model(theta_est, None),
         theta_est=theta_est,
-        theta_true=cfg.theta_true
-        if has_ground_truth
-        else np.full_like(theta_est, np.nan),
+        theta_true=theta_true if has_ground_truth else np.full_like(theta_est, np.nan),
         se=se,
         ci=ci,
         cov=cov,
@@ -768,54 +857,35 @@ def run_single(cfg: RunConfig = RunConfig()):
 
 
 # %% Run
-_param_names_4roi = [
-    "a01",
-    "a02",
-    "a03",
-    "a10",
-    "a12",
-    "a13",
-    "a20",
-    "a21",
-    "a23",
-    "a30",
-    "a31",
-    "a32",
-    "log_sigma_e",
-]
-# Sparse ground truth: only a few strong connections
-_theta_true_4roi = np.array(
-    [
-        0.3,
-        0.0,
-        0.0,  # PCC  → mPFC, LIPC, RIPC
-        0.4,
-        0.0,
-        0.0,  # mPFC → PCC,  LIPC, RIPC
-        0.0,
-        0.0,
-        0.5,  # LIPC → PCC,  mPFC, RIPC
-        0.0,
-        0.0,
-        0.4,  # RIPC → PCC,  mPFC, LIPC
-        np.log(0.05),
-    ]
-)
-
-run_single(
-    RunConfig(
-        n_rois=4,
-        TR=0.8,
-        data_mode="synthetic_csd",
-        snr=10.0,
-        param_names=_param_names_4roi,
-        theta_true=_theta_true_4roi,
-        theta_zero=np.concatenate([np.zeros(12), [np.log(0.1)]]),
-        param_bounds=[(-1.0, 1.0)] * 12 + [(-10.0, 2.0)],
-        profile_params=list(range(12)),
-        # Fix sigma_e to true value to test connectivity identifiability
-        fixed_params={12: float(np.log(0.05))},
+if __name__ == "__main__":
+    _BOLD_PATH = "data/sub-karahan_run-01_DMN_timeseries.csv"
+    _TR = 0.8
+    _N_ROIS = 4
+    # Estimate log_sigma_e from data before building the RunConfig
+    _spdcm_init = SpectralDCM(n_rois=_N_ROIS, TR=_TR)
+    _bold_init = _load_bold_csv(_BOLD_PATH)
+    _y_obs_init = _spdcm_init.observed_csd(_bold_init)
+    _log_sigma_e_init = estimate_log_sigma_e(_spdcm_init, _y_obs_init)
+    print(
+        f"Estimated log_sigma_e from data: {_log_sigma_e_init:.3f}  (sigma_e ≈ {np.exp(_log_sigma_e_init):.4f})"
     )
-)
+
+    run_single(
+        RunConfig(
+            n_rois=_N_ROIS,
+            TR=_TR,
+            data_mode="empirical",
+            bold_path=_BOLD_PATH,
+            theta_true=np.concatenate(
+                [np.zeros(_N_ROIS * (_N_ROIS - 1)), [_log_sigma_e_init]]
+            ),
+            theta_zero=np.concatenate(
+                [np.zeros(_N_ROIS * (_N_ROIS - 1)), [_log_sigma_e_init]]
+            ),
+            param_bounds=_spdcm_init.get_bounds()[:-1]
+            + [(_log_sigma_e_init - 3.0, _log_sigma_e_init + 3.0)],
+            profile_params=list(range(_N_ROIS * (_N_ROIS - 1))),
+        )
+    )
 
 # %%

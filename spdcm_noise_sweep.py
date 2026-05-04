@@ -43,8 +43,8 @@ _spdcm = SpectralDCM(
 )
 theta_true = np.array([0.4, 0.6, np.log(0.05)])
 theta_zero = np.array([0.2, 0.2, np.log(0.1)])
-param_names = ["a01", "a10", "log_sigma_e"]
-param_bounds = [(0.0, 1.0), (0.0, 1.0), (-10.0, 2.0)]
+param_names = _spdcm.get_param_names()
+param_bounds = _spdcm.get_bounds()
 
 
 def model(theta, _x):
@@ -55,8 +55,8 @@ n_snrs = len(SNR_GRID)
 n_params = len(theta_true)
 
 # Parameter scaling helpers (map param_bounds to [0, 1]^n)
-_lowers = np.array([b[0] for b in param_bounds])  # [0, 0, -10]
-_scales = np.array([b[1] - b[0] for b in param_bounds])  # [1, 1, 12]
+_lowers = np.array([b[0] for b in param_bounds])
+_scales = np.array([b[1] - b[0] for b in param_bounds])
 
 
 def _to_scaled(theta):
@@ -895,7 +895,7 @@ def run_snr_sweep():
     print(f"Diagnostics summary written to {summary_path}")
 
     log_run(
-        model_name="spdcm_2roi",
+        model_name=f"spdcm_{_spdcm.n_rois}roi",
         method="noise_sweep_L-BFGS-B",
         seed=SEED,
         settings={
@@ -920,4 +920,5 @@ def run_snr_sweep():
 
 
 # %% Run
-run_snr_sweep()
+if __name__ == "__main__":
+    run_snr_sweep()
