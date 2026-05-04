@@ -10,6 +10,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from dcsem import models, utils
 
@@ -415,3 +416,52 @@ def test_state_tc_to_dict():
     state_tc = lsem.state_tc_to_dict(state_tc)
     assert len(state_tc["x"]) == 12
     assert len(state_tc["x"]["R0L3"]) == 300
+
+
+def test_state_tc_to_dict_multilayer_dcm():
+    """Regression test for B1 — MultiLayerDCM with num_layers >= 3.
+
+    Previously crashed with IndexError because the loop assumed every state
+    variable had width num_rois * num_layers, but vs/qs are inter-layer-only
+    (width num_rois * (num_layers - 1)). Now widths are derived per-variable.
+    """
+    tvec = np.linspace(0, 50, 100)
+    u = utils.stim_boxcar([[0, 5, 1]])
+    A = utils.create_A_matrix(2, 3, [], -1)
+    C = utils.create_C_matrix(2, 3, ["R0,L0=1"])
+    ldcm = models.MultiLayerDCM(2, 3, params={"A": A, "C": C})
+    _, state_tc = ldcm.simulate(tvec, u=u)
+
+    state_tc = ldcm.state_tc_to_dict(state_tc)
+
+    # 4-state-per-layer vars are full-width: num_rois * num_layers = 6
+    assert len(state_tc["q"]) == 6
+    assert "R0L2" in state_tc["q"]
+    # vs / qs are inter-layer-only: num_rois * (num_layers - 1) = 4
+    assert len(state_tc["vs"]) == 4
+    assert "R0L1" in state_tc["vs"]
+
+
+def test_dcm_simulate_IR_smoke():
+    """simulate_IR runs end-to-end on a single-layer DCM and returns finite
+    output of the right shape for each TI.
+
+    Regression test for B4 — DCM previously stored T1s as a scalar, which
+    broke get_Pmat's enumeration. Now T1s is np.array([...]) of length
+    num_layers consistently across DCM / TwoLayerDCM / MultiLayerDCM.
+    """
+    dcm = models.DCM(num_rois=2)
+    A = np.array([[-1.5, 0.0], [0.4, -1.5]])
+    C = np.array([1.0, 0.0])
+    dcm.set_params({"A": A, "C": C})
+    tvec = np.linspace(0, 30, 120)
+    u = utils.stim_boxcar([[0, 5, 1]])
+
+    TIs = [400, 800]
+    ir = dcm.simulate_IR(tvec, TIs, u=u)
+
+    assert isinstance(ir, list)
+    assert len(ir) == len(TIs)
+    for y in ir:
+        assert y.shape == (len(tvec), dcm.num_rois)
+        assert np.all(np.isfinite(y))
