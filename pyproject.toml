@@ -18,6 +18,7 @@ dependencies = [
     "palettable>=3.3.0",
     "pandas>=3.0.0",
     "pypalettes>=0.1.0",
+    "pytest>=9.0.2",
     "python-dotenv>=1.0.0",
     "scikit-learn>=1.8.0",
     "scipy>=1.17.0",

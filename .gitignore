@@ -270,11 +270,13 @@ $RECYCLE.BIN/
 
 # Project-specific ignores
 .claude/
-bench-master/
 img/
 logs/
 models/
 old-logs/
 results/
+data/
+.memsearch/
 *.pkl
-
+calculate_condition_number.py
+final_confusions.py
