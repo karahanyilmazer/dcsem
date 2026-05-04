@@ -19,6 +19,7 @@ from scipy import signal as scipy_signal
 
 from dcsem.models import DCM
 from dcsem.utils import stim_boxcar
+from dcsem.validation import validate_bold_shape
 
 logger = logging.getLogger(__name__)
 
@@ -78,22 +79,67 @@ class SpectralDCM:
         self.hrf_spectrum: np.ndarray  # complex, shape (n_freqs,)
         self._compute_hrf_spectrum()
 
+    def _theta_size(self) -> int:
+        """Expected parameter count for [off-diagonal A entries, log_sigma_e]."""
+        return self.n_rois * (self.n_rois - 1) + 1
+
+    def get_param_names(self) -> list[str]:
+        """Return source-first parameter names followed by log_sigma_e."""
+        names = []
+        for src in range(self.n_rois):
+            for dst in range(self.n_rois):
+                if src != dst:
+                    names.append(f"a{src}{dst}")
+        names.append("log_sigma_e")
+        return names
+
+    def get_bounds(self) -> list[tuple[float, float]]:
+        """Default bounds for numerical optimisation in LS-spDCM."""
+        bounds = [(-4.0, 4.0)] * (self._theta_size() - 1)
+        bounds.append((-10.0, 2.0))
+        return bounds
+
+    def _validate_theta(self, theta: np.ndarray) -> np.ndarray:
+        theta = np.asarray(theta, dtype=float)
+        if theta.ndim != 1:
+            raise ValueError(f"theta must be 1D. Got shape {theta.shape}.")
+        if theta.size != self._theta_size():
+            raise ValueError(
+                f"theta has length {theta.size}, expected {self._theta_size()} "
+                f"for {self.n_rois} ROIs."
+            )
+        if not np.all(np.isfinite(theta)):
+            raise ValueError("theta contains non-finite values.")
+        return theta
+
     # ------------------------------------------------------------------
     # HRF spectrum
     # ------------------------------------------------------------------
 
     def _compute_hrf_spectrum(self) -> None:
-        """Compute HRF spectrum via Balloon-model impulse simulation.
+        """Compute the pure haemodynamic transfer function (BOLD per unit
+        neural-state perturbation), to be composed with the multi-ROI neural
+        transfer H_neural = (jωI − A)⁻¹ inside predict_csd.
 
-        Uses T=300 s to reliably resolve freq_lo ≥ 0.01 Hz (1/0.01=100 s,
-        with 3× margin).  Zero-pads to 4× length to reduce spectral leakage,
-        then interpolates to self.freqs.
+        The 1-ROI DCM is driven by a 1-second unit boxcar **input** through
+        C = 1.  Its output BOLD therefore carries an implicit 1-ROI neural
+        filter (jω − self_connection)⁻¹ on top of the haemodynamic kernel:
+
+            H_input→BOLD(ω) = (jω − self_connection)⁻¹ · H_haemo(ω)
+
+        We strip the input-to-state filter analytically so the stored
+        ``hrf_spectrum`` represents H_haemo(ω) alone.  Without this correction
+        predict_csd would multiply by (jωI − A)⁻¹ a *second* time, double-
+        counting the diagonal dynamics (~30 % attenuation by f = 0.1 Hz).
+
+        Uses T = 300 s to resolve freq_lo ≥ 0.01 Hz with margin, zero-pads to
+        4× length to reduce spectral leakage, then interpolates to self.freqs.
         """
         t_hrf = np.arange(0, 300, self.TR)  # 300 s at TR resolution
         u_impulse = stim_boxcar([[0, 1, 1]])  # unit impulse at t=0, width=1 s
         dcm_1roi = DCM(1, params={"A": [[self.self_connection]], "C": [1.0]})
         bold_hrf, _ = dcm_1roi.simulate(t_hrf, u=u_impulse)  # (300, 1)
-        h = bold_hrf[:, 0]  # HRF time course
+        h = bold_hrf[:, 0]  # input→BOLD time course
 
         # Zero-pad to 4× length to reduce spectral leakage
         n_fft = 4 * len(h)
@@ -101,9 +147,14 @@ class SpectralDCM:
         freqs_full = np.fft.rfftfreq(n_fft, d=self.TR)
 
         # Interpolate to self.freqs (avoids issues at non-integer cycles)
-        self.hrf_spectrum = np.interp(
+        h_input_to_bold = np.interp(
             self.freqs, freqs_full, H_full.real
         ) + 1j * np.interp(self.freqs, freqs_full, H_full.imag)
+
+        # Strip the implicit 1-ROI neural filter (jω − self_connection)⁻¹
+        # so the stored spectrum is the haemodynamic kernel alone.
+        omega = 2 * np.pi * self.freqs
+        self.hrf_spectrum = h_input_to_bold * (1j * omega - self.self_connection)
         # shape (n_freqs,) complex
 
     # ------------------------------------------------------------------
@@ -213,6 +264,7 @@ class SpectralDCM:
             Vectorized CSD (real-valued).  Returns np.inf array if A is
             unstable.
         """
+        theta = self._validate_theta(theta)
         R = self.n_rois
         n_A = R * (R - 1)
         sigma_e = np.exp(theta[n_A])
@@ -282,6 +334,8 @@ class SpectralDCM:
         ndarray, shape (_output_dim(),)
             Vectorized noisy CSD.
         """
+        if snr <= 0:
+            raise ValueError("snr must be positive.")
         if rng is None:
             rng = np.random.default_rng()
 
@@ -327,17 +381,31 @@ class SpectralDCM:
     def simulate_bold(self, theta, T=200, rng=None):
         """Simulate resting-state BOLD using DCM stochastic mode (sdeint).
 
+        Generates a *high-fidelity, fully nonlinear* realisation: the neural
+        state evolves under the linear Itô SDE ``dx = A·x dt + sigma_e dW``
+        but the haemodynamic mapping is the **full nonlinear Balloon ODE**.
+        This is intentionally NOT bit-equivalent to ``predict_csd``, which
+        uses the *linearised* haemodynamic kernel around the operating point
+        (q = v = f = 1, s = 0). Fitting linearised parameters to data
+        produced by this simulator therefore carries a bounded bias from the
+        linearisation gap. The bias magnitude is pinned by
+        ``test_spectral_simulate_bold_fit_bias_within_documented_bounds``.
+
+        For self-consistent end-to-end tests use ``generate_noisy_csd``,
+        which samples directly from the linearised forward model.
+
         Parameters
         ----------
         theta : [a01, a10, log_sigma_e]
         T     : simulation length in seconds (at TR resolution)
-        rng   : ignored (sdeint uses numpy random state; set np.random.seed before calling)
+        rng   : numpy.random.Generator for reproducible stochastic simulation
 
         Returns
         -------
         bold : ndarray, shape (n_steps, R)
         tvec : ndarray, shape (n_steps,)
         """
+        theta = self._validate_theta(theta)
         R = self.n_rois
         n_A = R * (R - 1)
         sigma_e = np.exp(theta[n_A])
@@ -390,9 +458,19 @@ class SpectralDCM:
         Welch parameters are logged at DEBUG level for reproducibility.
         Hermitian structure is enforced post-estimation.
         """
+        validate_bold_shape(bold, expected_rois=self.n_rois, name="BOLD")
+
         T, R = bold.shape
         nperseg = nperseg or T // 4
         noverlap = noverlap or nperseg // 2
+        if nperseg <= 1 or nperseg > T:
+            raise ValueError(
+                f"nperseg must be in [2, {T}] for observed_csd; got {nperseg}."
+            )
+        if noverlap < 0 or noverlap >= nperseg:
+            raise ValueError(
+                f"noverlap must satisfy 0 <= noverlap < nperseg; got {noverlap}."
+            )
         fs = 1.0 / self.TR
 
         logger.debug(
