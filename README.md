@@ -111,6 +111,19 @@ import matplotlib.pyplot as plt
 plt.plot(tvec, bold)
 ```
 
+#### Fitting a DCM
+
+For deterministic DCMs, `method="NL"` now uses bounded `L-BFGS-B` rather than unconstrained Nelder-Mead. The fit objective is a Gaussian negative log-likelihood on the BOLD residuals. If `noise_std` is omitted, the residual variance is estimated from the current residual energy.
+
+```python
+res = dcm.fit(bold, tvec=tvec, u=u, method="NL", noise_std=0.02)
+print(res.x)                  # fitted parameters
+print(res.se)                 # local standard errors from Hessian curvature
+print(res.cov_is_calibrated)  # True for proper neg-log-likelihood fits
+```
+
+The nonlinear fitter enforces negative self-connections and positive hemodynamic parameters. If a parameter set is unstable or produces invalid trajectories, it is penalized rather than treated as a valid fit.
+
 Below is how you can generate data for layer DCM. We generate a 1 ROI layer DCM, and we change the value of the blood draining parameter $\lambda_d$ (see theory section) and examine its effect on the activity in the two layers (replicating the result from Heinzle et al, figure 2c).
 
 ```python
@@ -245,6 +258,27 @@ $$
 \end{array}
 $$
 
+## Spectral DCM
+
+The package also includes a simplified linear stochastic spectral DCM implementation in `dcsem.spectral.SpectralDCM`. This is an LS-spDCM approximation, not a full SPM-style spectral DCM. Its key assumptions are:
+
+- linear neural dynamics with white, ROI-independent innovations
+- a shared fixed HRF across ROIs
+- stationarity of the observed BOLD signal
+- Welch-estimated cross-spectral density as the observation target
+
+The public helpers `get_param_names()` and `get_bounds()` expose the expected parameter layout for a given number of ROIs:
+
+```python
+from dcsem import SpectralDCM
+
+spdcm = SpectralDCM(n_rois=2, TR=1.0)
+print(spdcm.get_param_names())  # ['a01', 'a10', 'log_sigma_e']
+print(spdcm.get_bounds())       # default optimization bounds
+```
+
+The standalone scripts `spdcm_generic.py`, `spdcm_mcmc_generic.py`, and `spdcm_noise_sweep.py` use the same parameter metadata. When fitting empirical BOLD, the safest workflow is to check that the time series is approximately stationary and that the fitted `A` matrix remains stable.
+
 
 ## SEM and Layer SEM
 
@@ -267,5 +301,4 @@ where $\{P_k\}$ are partial volume matrices that combine signals from different 
 $y_k = P_k (I-A)^{-1}(u)$
 
 and therefore $C_k = \sigma^2  P_k(I-A)^{-1}(I-A)^{-T} P_k^T$. These model convariances are compared to the observed covariances in order to fit the free parameters (again, these are the non-zero elements of $A$ and the noise variance).
-
 
