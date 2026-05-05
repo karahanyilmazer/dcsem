@@ -1,5 +1,6 @@
 # %% Imports and config
 import itertools
+import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -205,16 +206,19 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
 # UNPACK SELECTED MODEL
 # =============================================================================
 
-ACTIVE_MODEL = {
-    1: "quadratic",
-    2: "product_degen",
-    3: "product_reparam",
-    4: "sum_of_exponentials",
-    5: "michaelis_menten",
-    6: "logistic_sigmoid",
-    7: "power_law",
-    8: "dcm_2roi",
-}[1]
+ACTIVE_MODEL = os.environ.get(
+    "DCSEM_ACTIVE_MODEL",
+    {
+        1: "quadratic",
+        2: "product_degen",
+        3: "product_reparam",
+        4: "sum_of_exponentials",
+        5: "michaelis_menten",
+        6: "logistic_sigmoid",
+        7: "power_law",
+        8: "dcm_2roi",
+    }[1],
+)
 
 spec = MODEL_REGISTRY[ACTIVE_MODEL]
 model = spec.func
@@ -746,9 +750,11 @@ theta_s = _to_scaled_h(theta_est)
 # Initialise fallback values
 se = np.full(n_params, np.nan)
 ci = np.full((n_params, 2), np.nan)
+cov = np.full((n_params, n_params), np.nan)
 corr = None
 max_offdiag_corr = np.nan
 hess_diag = {}
+cov_is_calibrated = False
 
 try:
     H_nll_s = nd.Hessian(_nll_scaled_h, step=HESS_STEP)(theta_s)
@@ -758,8 +764,23 @@ try:
     # Hessian diagnostics using positive-spectrum condition number
     hess_diag = compute_hessian_diagnostics(H_nll)
 
-    # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def)
-    cov, _ = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="adaptive_ridge")
+    # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def).
+    # The diagnostics dict surfaces ``regularization_warning`` whenever the
+    # ridge had to lift indefiniteness beyond the epsilon floor — that case
+    # means the reported covariance is regularised, not the asymptotic
+    # inverse-Hessian, and CIs are not calibrated.
+    cov, cov_diag = safe_hessian_inversion(
+        H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
+    )
+    cov_is_calibrated = not (
+        cov_diag.get("regularization_warning", False)
+        or hess_diag.get("is_near_singular", False)
+    )
+    if not cov_is_calibrated:
+        print(
+            "⚠️  Covariance is regularised (adaptive_ridge lifted indefinite "
+            "Hessian); reported CIs are diagnostic, not asymptotic."
+        )
     se = compute_standard_errors(cov, warn_negative=True)
     ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
     corr = compute_correlation_matrix(cov, handle_degenerate=True)
@@ -792,6 +813,7 @@ try:
 
 except (np.linalg.LinAlgError, Exception) as _hess_err:
     print(f"⚠️  Hessian inversion failed: {type(_hess_err).__name__}: {_hess_err}")
+    cov_is_calibrated = False
 
 # Print diagnostics
 cond = hess_diag.get("condition_number", np.inf)
@@ -826,6 +848,34 @@ if not rank_deficient:
 
 # %%
 # =============================================================================
+# NPZ ARTIFACT SAVE
+# =============================================================================
+# Mirrors spdcm_generic.py:873-889 so stage-3 sweep harnesses can ingest
+# time-domain and spectral runs through a single loader. ``cov_is_calibrated``
+# distinguishes asymptotic CIs from regularised / diagnostic ones.
+
+np.savez(
+    IMG_DIR / "run_results.npz",
+    y_obs=y_obs,
+    y_pred=model(theta_est, x_data),
+    theta_est=theta_est,
+    theta_true=theta_true,
+    theta_zero=theta_zero,
+    se=se,
+    ci=ci,
+    cov=cov,
+    hess_cond=np.array([float(cond) if np.isfinite(cond) else np.nan]),
+    cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
+    hess_is_near_singular=np.array(
+        [bool(hess_diag.get("is_near_singular", True))]
+    ),
+    converged=np.array([bool(res.success)]),
+)
+print(f"\nArtifacts saved to: {IMG_DIR}")
+
+
+# %%
+# =============================================================================
 # LOGGING
 # =============================================================================
 
@@ -850,6 +900,8 @@ log_run(
         "eigval_min": hess_diag.get("eigvals_min", float("nan")),
         "eigval_max": hess_diag.get("eigvals_max", float("nan")),
         "n_negative": hess_diag.get("n_negative_eigvals", 0),
+        "cov_is_calibrated": bool(cov_is_calibrated),
+        "converged": bool(res.success),
     },
     performance={"mse": float(mse_est)},
     correlation=corr.tolist() if corr is not None else None,

@@ -486,3 +486,38 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
             k = k + 1
 
     return fig
+
+
+def is_chain_converged(
+    acc_frac: float,
+    eff_total: float,
+    n_params: int,
+    *,
+    acc_lo: float = 0.15,
+    acc_hi: float = 0.80,
+    ess_factor: int = 50,
+) -> bool:
+    """Return True iff the emcee chain looks converged.
+
+    Mirrors the criterion used in ``spdcm_mcmc_generic.py``: acceptance
+    fraction inside a healthy band AND total effective sample size strictly
+    larger than ``ess_factor * n_params``. Asymptotic-Gaussian credible
+    intervals are reliable only when both pass.
+
+    Parameters
+    ----------
+    acc_frac : float
+        Mean acceptance fraction across walkers.
+    eff_total : float
+        Approximate total effective sample size (``n_samples / tau`` summed
+        across walkers); pass ``np.nan`` when autocorr estimation failed.
+    n_params : int
+        Number of free parameters in the chain.
+    acc_lo, acc_hi : float
+        Acceptance band; defaults match spdcm_mcmc_generic.
+    ess_factor : int
+        Multiplicative factor for ESS threshold.
+    """
+    acc_ok = acc_lo <= acc_frac <= acc_hi
+    ess_ok = bool(np.isfinite(eff_total)) and eff_total > ess_factor * n_params
+    return bool(acc_ok and ess_ok)

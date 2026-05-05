@@ -1,4 +1,5 @@
 # %% Imports and config
+import os
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -13,7 +14,7 @@ from sklearn.metrics import mean_squared_error
 
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS
 from dcsem.numerics import compute_correlation_matrix, compute_standard_errors
-from dcsem.utils import stim_boxcar
+from dcsem.utils import is_chain_converged, stim_boxcar
 from utils import (
     get_colormap,
     get_out_dir,
@@ -213,16 +214,19 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
 # UNPACK SELECTED MODEL
 # =============================================================================
 
-ACTIVE_MODEL = {
-    1: "quadratic",
-    2: "product_degen",
-    3: "product_reparam",
-    4: "sum_of_exponentials",
-    5: "michaelis_menten",
-    6: "logistic_sigmoid",
-    7: "power_law",
-    8: "dcm_2roi",
-}[8]
+ACTIVE_MODEL = os.environ.get(
+    "DCSEM_ACTIVE_MODEL",
+    {
+        1: "quadratic",
+        2: "product_degen",
+        3: "product_reparam",
+        4: "sum_of_exponentials",
+        5: "michaelis_menten",
+        6: "logistic_sigmoid",
+        7: "power_law",
+        8: "dcm_2roi",
+    }[8],
+)
 
 spec = MODEL_REGISTRY[ACTIVE_MODEL]
 model = spec.func
@@ -243,10 +247,12 @@ param_bounds = spec.param_bounds
 # Auto-detect number of parameters
 n_params = len(theta_true)
 
-# MCMC settings
-n_walkers = max(24, 2 * n_params)  # should be >= 2 * n_params
-n_burn = 300
-n_samples_mcmc = 10000  # Need >= 1000 effective samples for reliable posteriors
+# MCMC settings (env-var overrides for fast smoke / regression runs)
+n_walkers = int(os.environ.get("DCSEM_N_WALKERS", max(24, 2 * n_params)))
+n_burn = int(os.environ.get("DCSEM_N_BURN", 300))
+n_samples_mcmc = int(
+    os.environ.get("DCSEM_N_SAMPLES_MCMC", 10000)
+)  # Need >= 1000 effective samples for reliable posteriors
 
 # Optimization method name
 opt_method = "MCMC"
@@ -274,8 +280,29 @@ PLOT_POSTERIOR_BANDS = True
 # =============================================================================
 
 
+def _in_bounds(theta):
+    """Hard-bounds check.  Mirrors ``spdcm_mcmc_generic.py:235-239``: returns
+    True iff every component of ``theta`` lies within ``param_bounds``. When
+    the model registry has no bounds (analytical 1D models), the check
+    passes through.
+    """
+    if param_bounds is None:
+        return True
+    for val, (low, high) in zip(theta, param_bounds):
+        if val < low or val > high:
+            return False
+    return True
+
+
 def log_prior(theta):
-    """Independent Normal priors specified in priors list."""
+    """Independent Normal priors specified in priors list, gated by bounds.
+
+    Returning ``-np.inf`` outside the feasible box stops emcee walkers from
+    wandering into unstable A-matrix territory and wasting samples on
+    rejections.  Mirrors ``spdcm_mcmc_generic.py:241-249``.
+    """
+    if not _in_bounds(theta):
+        return -np.inf
     logp = 0.0
     for i, (mu, sigma) in enumerate(priors):
         z = (theta[i] - mu) / sigma
@@ -436,6 +463,28 @@ if acc_frac < 0.05:
     print("  ⚠️  Low acceptance (<0.05) - walkers may be stuck!")
 elif acc_frac > 0.8:
     print("  ⚠️  High acceptance (>0.8) - proposal may be too narrow!")
+
+# Real convergence flag (mirrors spdcm_mcmc_generic.py:374-390): acceptance in
+# healthy band AND enough effective samples.  Asymptotic-Gaussian credible
+# intervals are reliable only when the chain has actually converged, so
+# cov_is_calibrated tracks the same criterion.
+acc_ok = 0.15 <= acc_frac <= 0.80
+ess_ok = bool(np.isfinite(eff_total)) and eff_total > 50 * n_params
+converged = is_chain_converged(acc_frac, eff_total, n_params)
+cov_is_calibrated = converged
+if not converged:
+    reasons = []
+    if not acc_ok:
+        reasons.append(f"acceptance={acc_frac:.3f} outside [0.15, 0.80]")
+    if not ess_ok:
+        reasons.append(
+            f"ESS={'n/a' if not np.isfinite(eff_total) else int(eff_total)} "
+            f"≤ 50 × n_params={50 * n_params}"
+        )
+    print(
+        "⚠️  MCMC chain not converged ({}); credible intervals are not "
+        "calibrated.".format("; ".join(reasons))
+    )
 
 # %%
 # =============================================================================
@@ -697,6 +746,34 @@ plt.show(block=False)
 
 # %%
 # =============================================================================
+# NPZ ARTIFACT SAVE
+# =============================================================================
+# Mirrors spdcm_mcmc_generic.py:777-795 so stage-3 sweep harnesses can ingest
+# time-domain and spectral runs through a single loader. ``cov_is_calibrated``
+# tracks the convergence criterion (acceptance band + ESS).
+
+np.savez(
+    IMG_DIR / "run_results.npz",
+    y_obs=y_obs,
+    y_pred=model(theta_mean, x_data),
+    theta_mean=theta_mean,
+    theta_median=theta_median,
+    theta_map=theta_est_post,
+    theta_true=theta_true,
+    theta_zero=theta_zero,
+    se=se,
+    ci=np.stack([q025, q975], axis=1),
+    cov=cov,
+    converged=np.array([bool(converged)]),
+    cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
+    acceptance_fraction=np.array([float(acc_frac)]),
+    ess_total=np.array([float(eff_total) if np.isfinite(eff_total) else np.nan]),
+)
+print(f"\nArtifacts saved to: {IMG_DIR}")
+
+
+# %%
+# =============================================================================
 # LOGGING
 # =============================================================================
 
@@ -730,6 +807,8 @@ log_run(
         "acceptance_fraction": float(acc_frac),
         "autocorr_time": tau_str if isinstance(tau_str, str) else tau_str.tolist(),
         "eff_samples": float(eff_total) if np.isfinite(eff_total) else None,
+        "converged": bool(converged),
+        "cov_is_calibrated": bool(cov_is_calibrated),
     },
     performance={
         "mse_mean": float(mean_squared_error(y_obs, model(theta_mean, x_data))),
