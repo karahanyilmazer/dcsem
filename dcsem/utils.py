@@ -356,8 +356,11 @@ class MH(object):
         e = self.loglik(p) + self.logpr(p)
         acc = np.zeros(p.size)
         rej = np.zeros(p.size)
-        prop = np.abs(p0) / 10  # np.ones(p.size)
-        prop[prop == 0] = 1
+        # Initial proposal scale: max(|p0|/10, floor) so very small but
+        # nonzero p0 components do not collapse to a near-zero proposal.
+        # Burn-in adaptation will tune from here.
+        prop_floor = 0.1
+        prop = np.maximum(np.abs(p0) / 10, prop_floor)
 
         samples = np.zeros((self.njumps + self.burnin, p.size))
 
