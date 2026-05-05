@@ -188,7 +188,10 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
         ),
         param_names=_dcm_param_names,
         theta_true=np.array([0.4, 0.6, 0.9, 0.2]),
-        theta_zero=np.array([rng.uniform(low, high) for (low, high) in _dcm_bounds]),
+        # Fixed initial guess (was rng.uniform(...) over bounds, which made
+        # initialisation depend on RNG-state advancement and was inconsistent
+        # with mcmc_generic.py for the same model).
+        theta_zero=np.array([0.1, 0.1, 0.1, 0.1]),
         is_dcm=True,
         param_bounds=_dcm_bounds,
         num_rois=2,
