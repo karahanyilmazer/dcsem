@@ -79,6 +79,53 @@ def _load_bold_csv(path: str, time_col: str = "time_s") -> np.ndarray:
     return df.to_numpy(dtype=np.float32)
 
 
+def _resolve_effective_tr(cfg: "RunConfig") -> tuple[float, Optional[np.ndarray]]:
+    """Resolve the effective TR for SpectralDCM construction.
+
+    For empirical-mode runs, an NPZ ``"TR"`` key overrides ``cfg.TR`` so the
+    Welch sampling rate inside ``observed_csd`` and the HRF FFT scaling inside
+    ``predict_csd`` use the data's actual TR. A warning is printed when the
+    config and file disagree, so the override is never silent.
+
+    Returns
+    -------
+    tr_effective : float
+        TR to pass to ``SpectralDCM(...)``.
+    bold_loaded : np.ndarray or None
+        Pre-loaded BOLD time series for empirical mode (avoids loading twice);
+        ``None`` for synthetic modes.
+    """
+    if cfg.data_mode != "empirical":
+        return float(cfg.TR), None
+
+    if cfg.bold_path is None:
+        raise ValueError("data_mode='empirical' requires cfg.bold_path to be set.")
+
+    bold_path_str = str(cfg.bold_path)
+    if bold_path_str.endswith(".csv"):
+        # CSV format carries no TR metadata; fall back to cfg.TR.
+        bold = _load_bold_csv(bold_path_str)
+        return float(cfg.TR), bold
+
+    data = np.load(bold_path_str)
+    if "bold" not in data.files:
+        raise KeyError(
+            f"NPZ at {bold_path_str!r} is missing required key 'bold'; "
+            f"available keys: {list(data.files)}"
+        )
+    bold = data["bold"]
+    if "TR" not in data.files:
+        return float(cfg.TR), bold
+
+    tr_loaded = float(data["TR"])
+    if not np.isclose(tr_loaded, cfg.TR, rtol=1e-6):
+        print(
+            f"⚠️  Empirical NPZ TR={tr_loaded:.4g} overrides cfg.TR={cfg.TR:.4g} "
+            f"(observed_csd and HRF FFT now use TR={tr_loaded:.4g})."
+        )
+    return tr_loaded, bold
+
+
 def _resolve_param_spec(
     spdcm: SpectralDCM,
     theta_true: np.ndarray,
@@ -197,10 +244,16 @@ def run_single(cfg: RunConfig = RunConfig()):
     opt_method = "L-BFGS-B"
     title_suffix = "Least Squares"
 
+    # --- Resolve TR before constructing SpectralDCM ---
+    # Empirical NPZ files may specify their own TR; the Welch sampling rate
+    # in observed_csd and the HRF FFT scaling in predict_csd both depend on
+    # spdcm.TR, so we must build the model with the data's actual TR.
+    tr_effective, _bold_pre_loaded = _resolve_effective_tr(cfg)
+
     # --- SpectralDCM instance ---
     spdcm = SpectralDCM(
         n_rois=cfg.n_rois,
-        TR=cfg.TR,
+        TR=tr_effective,
         self_connection=cfg.self_connection,
         freq_lo=cfg.freq_lo,
         freq_hi=cfg.freq_hi,
@@ -293,15 +346,11 @@ def run_single(cfg: RunConfig = RunConfig()):
         has_ground_truth = True
 
     elif cfg.data_mode == "empirical":
-        if str(cfg.bold_path).endswith(".csv"):
-            bold_ref = _load_bold_csv(cfg.bold_path)
-            TR_data = cfg.TR
-        else:
-            data = np.load(cfg.bold_path)
-            bold_ref = data["bold"]  # shape (T, R)
-            TR_data = float(data["TR"]) if "TR" in data else cfg.TR
+        # _resolve_effective_tr already loaded the BOLD and resolved TR;
+        # spdcm.TR is now correct, so observed_csd uses the right fs.
+        bold_ref = _bold_pre_loaded
         y_obs = spdcm.observed_csd(bold_ref, nperseg=cfg.nperseg, noverlap=cfg.noverlap)
-        tvec_ref = np.arange(bold_ref.shape[0]) * TR_data
+        tvec_ref = np.arange(bold_ref.shape[0]) * spdcm.TR
         has_ground_truth = False
 
     else:
@@ -554,8 +603,8 @@ def run_single(cfg: RunConfig = RunConfig()):
             bold_ref_label = "true"
         else:  # empirical
             # Cap display simulation at 120 s to avoid slow sdeint with near-unstable params
-            T_display = min(int(bold_ref.shape[0] * cfg.TR), 120)
-            n_display = int(T_display / cfg.TR)
+            T_display = min(int(bold_ref.shape[0] * spdcm.TR), 120)
+            n_display = int(T_display / spdcm.TR)
             bold_ref_display = bold_ref[:n_display]
             tvec_display = tvec_ref[:n_display]
             bold_est_display, _ = spdcm.simulate_bold(
@@ -656,7 +705,22 @@ def run_single(cfg: RunConfig = RunConfig()):
     eigvals_H = np.linalg.eigvalsh(H_nll)
 
     try:
-        cov, _ = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="pinvh")
+        # pinvh is a *diagnostic* inverse — it zeros near-singular directions
+        # rather than ridging them. CIs are calibrated only when the Hessian is
+        # itself well-conditioned; otherwise they signal parameter degeneracy
+        # (which is the whole point of stage-3 BENCH coupling).
+        cov, cov_diag = safe_hessian_inversion(
+            H_nll, 1.0, regularization=1e-6, method="pinvh"
+        )
+        cov_is_calibrated = not (
+            cov_diag.get("rank_deficient", False)
+            or hess_diag.get("is_near_singular", False)
+        )
+        if not cov_is_calibrated:
+            print(
+                "⚠️  Covariance is regularised (pinvh zeroed near-singular "
+                "directions); reported CIs are diagnostic, not asymptotic."
+            )
         se = compute_standard_errors(cov, warn_negative=True)
         ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
         corr = compute_correlation_matrix(cov, handle_degenerate=True)
@@ -696,6 +760,7 @@ def run_single(cfg: RunConfig = RunConfig()):
         corr = None
         cov = np.full((n_params, n_params), np.nan)
         rank_deficient = True
+        cov_is_calibrated = False
 
     print("\nHessian diagnostics:")
     print(f"  Eigenvalues: {np.round(eigvals_H, 4)}")
@@ -815,7 +880,12 @@ def run_single(cfg: RunConfig = RunConfig()):
         ci=ci,
         cov=cov,
         hess_cond=np.array([hess_diag.get("condition_number", np.nan)]),
+        # Stage-2 additions: downstream analyses can filter on cov_is_calibrated
+        # to know whether reported CIs are asymptotic or diagnostic-only.
+        cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
+        hess_is_near_singular=np.array([bool(hess_diag.get("is_near_singular", False))]),
         converged=np.array([res.success]),
+        tr=np.array([float(spdcm.TR)]),
     )
     print(f"\nArtifacts saved to: {IMG_DIR}")
 
