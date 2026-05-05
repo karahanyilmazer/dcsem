@@ -5,8 +5,12 @@ Provides Hessian diagnostics, profile likelihood, 2D loss landscapes,
 and parametric bootstrap uncertainty quantification.
 """
 
+import logging
+
 import numpy as np
 from scipy.optimize import minimize
+
+logger = logging.getLogger(__name__)
 
 
 def compute_hessian_diagnostics(H, near_singular_threshold=1e8):
@@ -86,7 +90,22 @@ def profile_likelihood_1d(obj, theta_est, fixed_idx, param_grid, free_bounds):
             return obj(theta_full)
 
         res = minimize(f, theta_est[free_idx], method="L-BFGS-B", bounds=free_bounds)
-        profile.append(res.fun)
+        # Only trust the result if the optimiser converged AND the value is
+        # finite. Otherwise the profile entry is NaN — better than recording
+        # a spike from a failed sub-problem and pretending it is a real
+        # likelihood drop.
+        if res.success and np.isfinite(res.fun):
+            profile.append(float(res.fun))
+        else:
+            logger.debug(
+                "profile_likelihood_1d: sub-optimisation failed at fixed=%g "
+                "(success=%s, fun=%s, message=%s)",
+                val,
+                res.success,
+                res.fun,
+                getattr(res, "message", ""),
+            )
+            profile.append(np.nan)
 
     return np.asarray(param_grid), np.asarray(profile)
 
