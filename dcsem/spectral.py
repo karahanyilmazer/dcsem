@@ -71,7 +71,10 @@ class SpectralDCM:
         freq_hi: float = 0.1,
         n_freqs: int = 32,
     ):
-        assert self_connection < 0, "Self-connection must be negative for stability"
+        if not (self_connection < 0):
+            raise ValueError(
+                f"self_connection must be negative for stability, got {self_connection}."
+            )
         self.n_rois = n_rois
         self.TR = TR
         self.self_connection = self_connection
@@ -132,6 +135,13 @@ class SpectralDCM:
         predict_csd would multiply by (jωI − A)⁻¹ a *second* time, double-
         counting the diagonal dynamics (~30 % attenuation by f = 0.1 Hz).
 
+        The DFT is scaled by ``TR`` so it approximates the continuous-time
+        Fourier transform ``H(ω) = ∫ h(t) e^{-jωt} dt`` rather than the raw
+        ``sum_n h[n] exp(-jωn)``.  Without this factor the stored spectrum is
+        too small by ``1/TR`` (and predict_csd is off by ``1/TR²``), which
+        would propagate as a TR-dependent units mismatch when fitting against
+        ``observed_csd`` (a Welch density in [BOLD]²/Hz).
+
         Uses T = 300 s to resolve freq_lo ≥ 0.01 Hz with margin, zero-pads to
         4× length to reduce spectral leakage, then interpolates to self.freqs.
         """
@@ -141,9 +151,10 @@ class SpectralDCM:
         bold_hrf, _ = dcm_1roi.simulate(t_hrf, u=u_impulse)  # (300, 1)
         h = bold_hrf[:, 0]  # input→BOLD time course
 
-        # Zero-pad to 4× length to reduce spectral leakage
+        # Zero-pad to 4× length to reduce spectral leakage; multiply by TR so
+        # the DFT approximates the continuous-time Fourier transform.
         n_fft = 4 * len(h)
-        H_full = np.fft.rfft(h, n=n_fft)
+        H_full = self.TR * np.fft.rfft(h, n=n_fft)
         freqs_full = np.fft.rfftfreq(n_fft, d=self.TR)
 
         # Interpolate to self.freqs (avoids issues at non-integer cycles)
@@ -280,10 +291,9 @@ class SpectralDCM:
 
         for k, f in enumerate(self.freqs):
             omega = 2 * np.pi * f
+            M = 1j * omega * np.eye(R) - A
             # Neural transfer function: (jωI - A)^{-1}
-            H_neural = np.linalg.solve(
-                1j * omega * np.eye(R) - A, np.eye(R)
-            )
+            H_neural = np.linalg.solve(M, np.eye(R))
             # HRF applied per ROI (all ROIs share the same HRF)
             H_hrf = np.diag([self.hrf_spectrum[k]] * R)
             H_tot = H_hrf @ H_neural
@@ -293,14 +303,12 @@ class SpectralDCM:
             # Enforce Hermitian (numerical symmetrization)
             S_stack[k] = 0.5 * (S + S.conj().T)
 
-        # Optional: log high condition numbers
-        for k, f in enumerate(self.freqs):
-            omega = 2 * np.pi * f
-            cond = np.linalg.cond(1j * omega * np.eye(R) - A)
-            if cond > 1e6:
-                logger.debug(
-                    "High condition number %.2e at f=%.4f Hz", cond, f
-                )
+            if logger.isEnabledFor(logging.DEBUG):
+                cond = np.linalg.cond(M)
+                if cond > 1e6:
+                    logger.debug(
+                        "High condition number %.2e at f=%.4f Hz", cond, f
+                    )
 
         return self._vectorize_csd(S_stack)
 
@@ -481,8 +489,10 @@ class SpectralDCM:
 
         S_stack = np.zeros((len(self.freqs), R, R), dtype=complex)
 
+        # csd(x, y) and csd(y, x) are conjugates: only compute upper triangle
+        # (and diagonals), then reflect.
         for i in range(R):
-            for j in range(R):
+            for j in range(i, R):
                 freqs_welch, Sij = scipy_signal.csd(
                     bold[:, i],
                     bold[:, j],
@@ -492,12 +502,14 @@ class SpectralDCM:
                     noverlap=noverlap,
                     detrend=detrend,
                 )
-                # Interpolate real and imaginary parts to self.freqs
-                S_stack[:, i, j] = np.interp(
+                S_ij_interp = np.interp(
                     self.freqs, freqs_welch, Sij.real
                 ) + 1j * np.interp(self.freqs, freqs_welch, Sij.imag)
+                S_stack[:, i, j] = S_ij_interp
+                if i != j:
+                    S_stack[:, j, i] = np.conj(S_ij_interp)
 
-        # Enforce Hermitian structure post-estimation
+        # Enforce Hermitian structure post-estimation (diagonals real)
         for k in range(len(self.freqs)):
             S = S_stack[k]
             S_stack[k] = 0.5 * (S + S.conj().T)
