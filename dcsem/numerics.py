@@ -5,9 +5,12 @@ This module provides functions for safely inverting Hessian matrices and computi
 standard errors, handling ill-conditioned matrices that commonly arise in DCM models.
 """
 
+import logging
 from typing import Literal
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 
 def safe_hessian_inversion(
@@ -135,6 +138,17 @@ def safe_hessian_inversion(
         covariance = sigma_sq * H_inv
         diagnostics["regularization_used"] = ridge
         diagnostics["regularized"] = ridge > regularization
+        # Flag *significant* ridge (i.e. eigenvalue lift, not just the
+        # epsilon floor). Warn callers because the resulting covariance is
+        # not the asymptotic inverse-Hessian — it is regularised.
+        diagnostics["regularization_warning"] = ridge > 10 * regularization
+        if diagnostics["regularization_warning"]:
+            logger.warning(
+                "adaptive_ridge applied %.2e to indefinite Hessian "
+                "(min_eig=%.2e); covariance is regularised, not asymptotic.",
+                ridge,
+                min_e,
+            )
         return covariance, diagnostics
 
     else:
@@ -149,31 +163,36 @@ def compute_standard_errors(
     warn_negative: bool = True,
 ) -> np.ndarray:
     """
-    Compute standard errors from covariance matrix, handling negative variances.
+    Compute standard errors from covariance matrix, handling non-positive variances.
 
-    Instead of simply clipping negative values (which hides the problem),
-    this function uses absolute values and optionally warns the user.
+    Policy: variances strictly > 0 yield finite SEs; non-positive variances
+    (zero or negative) become NaN. This matches ``compute_correlation_matrix``
+    so the two helpers never disagree on which entries are valid.
+
+    Note: ``fit_NL`` writes a literal 0.0 SE for parameters fixed in
+    ``fixed_vars`` without going through this helper, so the "fixed param has
+    zero variance and zero SE" sentinel is preserved at the fit level.
 
     Args:
         covariance: Parameter covariance matrix (n_params x n_params)
         warn_negative: If True, prints warning when negative variances detected
 
     Returns:
-        se: Standard errors for each parameter (sqrt of diagonal)
+        se: Standard errors for each parameter (sqrt of diagonal); NaN where
+            the diagonal is non-positive.
     """
-    diag_cov = np.diag(covariance)
+    diag_cov = np.asarray(np.diag(covariance), dtype=float)
 
-    if np.any(diag_cov < 0):
-        if warn_negative:
-            neg_indices = np.where(diag_cov < 0)[0]
-            print(
-                f"⚠️  Negative variance detected at parameter indices {neg_indices.tolist()}. "
-                "Hessian is not positive definite. SEs for those parameters set to NaN."
-            )
-        # Set negative variances to NaN — these SEs have no statistical validity
-        diag_cov = np.where(diag_cov > 0, diag_cov, np.nan)
+    if warn_negative and np.any(diag_cov < 0):
+        neg_indices = np.where(diag_cov < 0)[0]
+        print(
+            f"⚠️  Negative variance detected at parameter indices {neg_indices.tolist()}. "
+            "Hessian is not positive definite. SEs for those parameters set to NaN."
+        )
 
-    se = np.sqrt(diag_cov)
+    # Non-positive variances → NaN (no defined SE).
+    valid = diag_cov > 0
+    se = np.where(valid, np.sqrt(np.where(valid, diag_cov, 1.0)), np.nan)
     return se
 
 
@@ -184,6 +203,11 @@ def compute_correlation_matrix(
     """
     Compute correlation matrix from covariance with proper handling of degenerate cases.
 
+    For parameters with non-positive variance (numerical artifact of an
+    indefinite Hessian), the corresponding row, column, and diagonal entry
+    are set to NaN — matching the policy of ``compute_standard_errors``,
+    so the two helpers never disagree on which entries are valid.
+
     Args:
         covariance: Parameter covariance matrix (n_params x n_params)
         handle_degenerate: If True, handles zero/negative variances gracefully
@@ -191,18 +215,25 @@ def compute_correlation_matrix(
     Returns:
         corr: Correlation matrix (n_params x n_params)
     """
-    se = np.sqrt(np.abs(np.diag(covariance)))
+    diag_cov = np.diag(covariance)
+
+    if not handle_degenerate:
+        se = np.sqrt(diag_cov)
+        denom = np.outer(se, se)
+        return covariance / denom
+
+    valid = diag_cov > 0
+    se = np.where(valid, np.sqrt(np.where(valid, diag_cov, 1.0)), np.nan)
     denom = np.outer(se, se)
 
-    if handle_degenerate:
-        # Avoid division by zero
-        with np.errstate(invalid="ignore", divide="ignore"):
-            corr = np.where(denom > 0, covariance / denom, 0)
-        # Set diagonal to 1 (by definition)
-        np.fill_diagonal(corr, 1.0)
-    else:
+    with np.errstate(invalid="ignore", divide="ignore"):
         corr = covariance / denom
 
+    # Force valid self-correlation to exactly 1 (avoid float drift).
+    diag_idx = np.arange(len(diag_cov))
+    corr[diag_idx[valid], diag_idx[valid]] = 1.0
+    # Zero-variance entries (valid==False but diag==0) get NaN by the
+    # division above; that is the consistent policy.
     return corr
 
 

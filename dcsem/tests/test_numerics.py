@@ -106,6 +106,43 @@ class TestSafeHessianInversion:
         # Should detect rank deficiency and apply regularization
         assert diagnostics["rank_deficient"] or diagnostics["condition_number"] > 1e6
 
+    def test_adaptive_ridge_flags_significant_ridge_on_indefinite_hessian(self, caplog):
+        """``adaptive_ridge`` on an indefinite Hessian must flag the ridge as
+        significant (covariance is *not* asymptotic) and log a warning.
+        """
+        import logging
+
+        # H with one negative eigenvalue (indefinite). min_eig ≈ -2.
+        H = np.array([[1.0, 0.0], [0.0, -2.0]])
+
+        with caplog.at_level(logging.WARNING, logger="dcsem.numerics"):
+            cov, diag = safe_hessian_inversion(
+                H, sigma_sq=1.0, regularization=1e-6, method="adaptive_ridge"
+            )
+
+        assert diag["regularized"] is True
+        assert diag.get("regularization_warning") is True
+        assert diag["regularization_used"] >= 2.0  # |min_eig| + epsilon
+        # Logger should have issued a warning
+        assert any(
+            "adaptive_ridge" in rec.message.lower() and rec.levelno >= logging.WARNING
+            for rec in caplog.records
+        )
+
+    def test_adaptive_ridge_does_not_flag_pd_hessian(self):
+        """For a positive-definite Hessian, the ridge stays at the user's
+        ``regularization`` floor and no warning flag is set.
+        """
+        H = np.array([[2.0, 0.5], [0.5, 1.0]])
+
+        cov, diag = safe_hessian_inversion(
+            H, sigma_sq=1.0, regularization=1e-6, method="adaptive_ridge"
+        )
+
+        # PD ⇒ ridge equals only the regularization floor (no eigenvalue lift).
+        assert diag["regularization_used"] == pytest.approx(1e-6)
+        assert diag.get("regularization_warning", False) is False
+
 
 class TestComputeStandardErrors:
     """Tests for compute_standard_errors function."""
@@ -142,13 +179,19 @@ class TestComputeStandardErrors:
         assert "Negative variance" not in captured.out
 
     def test_zero_variance(self):
-        """Test handling of zero variance."""
+        """Zero variance has no valid SE — return NaN, matching the policy
+        of ``compute_correlation_matrix``.
+
+        Fixed parameters (which legitimately have zero variance) are
+        injected with literal 0.0 SE by ``fit_NL`` without passing through
+        this helper.
+        """
         cov = np.array([[0.04, 0.0], [0.0, 0.0]])
 
         se = compute_standard_errors(cov)
 
         assert se[0] == 0.2
-        assert se[1] == 0.0
+        assert np.isnan(se[1])
 
 
 class TestComputeCorrelationMatrix:
@@ -179,26 +222,70 @@ class TestComputeCorrelationMatrix:
         assert np.allclose(corr[0, 1], 0.5)
 
     def test_degenerate_variance_handled(self):
-        """Test handling of zero variance (degenerate case)."""
+        """Test handling of zero variance: NaN row/col, matching the SE
+        policy (``compute_standard_errors`` already NaN-s zero variances).
+
+        Fixed parameters with strictly-zero covariance are inserted directly
+        by ``fit_NL`` without going through this helper, so we don't need to
+        preserve a special "diagonal=1" convention here.
+        """
         cov = np.array([[1.0, 0.0], [0.0, 0.0]])
 
         corr = compute_correlation_matrix(cov, handle_degenerate=True)
 
-        # Diagonal should still be 1
+        # Valid variance ⇒ self-correlation = 1
         assert corr[0, 0] == 1.0
-        assert corr[1, 1] == 1.0
-        # Off-diagonal with degenerate should be 0
-        assert corr[0, 1] == 0.0
+        # Zero-variance parameter ⇒ NaN row/col/diag
+        assert np.isnan(corr[1, 1])
+        assert np.isnan(corr[0, 1])
+        assert np.isnan(corr[1, 0])
 
     def test_negative_variance_handled(self):
-        """Test handling of negative variance."""
+        """Test handling of negative variance: NaN-out invalid rows/cols.
+
+        For non-positive diagonals, the parameter has no valid SE, so neither
+        does any correlation involving it. The diagonal entry for the invalid
+        parameter is NaN (consistent with ``compute_standard_errors`` which
+        returns NaN for the SE there).
+        """
         cov = np.array([[1.0, 0.1], [0.1, -0.01]])
 
         corr = compute_correlation_matrix(cov, handle_degenerate=True)
 
-        # Should not raise and diagonal should be 1
-        assert corr[0, 0] == 1.0
-        assert corr[1, 1] == 1.0
+        assert corr[0, 0] == 1.0  # valid variance ⇒ self-correlation = 1
+        assert np.isnan(corr[1, 1])  # invalid variance ⇒ NaN
+        assert np.isnan(corr[0, 1])  # involving the invalid param ⇒ NaN
+        assert np.isnan(corr[1, 0])
+
+    def test_consistent_with_compute_standard_errors_on_negative_variance(self):
+        """``compute_standard_errors`` and ``compute_correlation_matrix`` must
+        agree on which entries are invalid when the covariance has a negative
+        diagonal.
+        """
+        cov = np.array(
+            [
+                [0.04, 0.01, 0.0],
+                [0.01, -0.02, 0.0],  # invalid
+                [0.0, 0.0, 0.09],
+            ]
+        )
+
+        se = compute_standard_errors(cov, warn_negative=False)
+        corr = compute_correlation_matrix(cov, handle_degenerate=True)
+
+        # SE: positions 0 and 2 finite, position 1 is NaN
+        assert np.isfinite(se[0]) and np.isfinite(se[2])
+        assert np.isnan(se[1])
+        # Correlation: every entry involving position 1 is NaN; the others
+        # form a valid sub-correlation matrix.
+        assert np.isnan(corr[1, 1])
+        for j in range(3):
+            if j == 1:
+                continue
+            assert np.isnan(corr[1, j]) and np.isnan(corr[j, 1])
+        # The valid 2x2 sub-matrix has 1s on diagonal and finite off-diagonal.
+        assert corr[0, 0] == 1.0 and corr[2, 2] == 1.0
+        assert np.isfinite(corr[0, 2])
 
 
 class TestComputeConfidenceIntervals:
