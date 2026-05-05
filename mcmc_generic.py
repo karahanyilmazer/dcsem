@@ -351,6 +351,12 @@ else:
 theta_est = map_estimate(theta_zero, x_data, y_obs, noise_sigma)
 scale = np.maximum(0.05 * np.ones(n_params), 0.05 * np.abs(theta_est))
 p0 = theta_est + rng.normal(0.0, scale, size=(n_walkers, n_params))
+# Clip out-of-bounds initial walkers so emcee does not waste burn-in
+# rejecting them (only matters when bounds are specified for this model).
+if param_bounds is not None:
+    _lb = np.array([b[0] for b in param_bounds])
+    _ub = np.array([b[1] for b in param_bounds])
+    p0 = np.clip(p0, _lb, _ub)
 
 # Run sampler
 sampler = emcee.EnsembleSampler(
