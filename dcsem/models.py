@@ -173,8 +173,22 @@ class BaseModel(object):
             p.at_bounds = np.zeros(n_params, dtype=bool)
         else:
             try:
-                Hfun = nd.Hessian(fn_neglogpost_free)
-                hessian_free = np.asarray(Hfun(results.x), dtype=float)
+                # Tighten ODE tolerances during Hessian evaluation only.
+                # Default rtol=1e-3 introduces integration noise ~O(1e-3);
+                # numdifftools uses steps ~O(1e-5), so noise amplification for
+                # second differences is O(ε/h²) ≈ O(1e7) — above Hessian
+                # eigenvalues of O(100). Tight tolerances reduce noise to
+                # O(1e-8/1e-10) = O(100), yielding PD Hessians at the MLE.
+                _orig_rtol = getattr(self, "ode_rtol", None)
+                _orig_atol = getattr(self, "ode_atol", None)
+                self.ode_rtol = 1e-8
+                self.ode_atol = 1e-10
+                try:
+                    Hfun = nd.Hessian(fn_neglogpost_free)
+                    hessian_free = np.asarray(Hfun(results.x), dtype=float)
+                finally:
+                    self.ode_rtol = _orig_rtol
+                    self.ode_atol = _orig_atol
                 cov_free, cov_diag = safe_hessian_inversion(
                     hessian_free,
                     sigma_sq=1.0,
@@ -200,7 +214,14 @@ class BaseModel(object):
                     if self.objective_kind == "negloglik"
                     else "local_curvature"
                 )
-                p.cov_is_calibrated = self.objective_kind == "negloglik"
+                # Calibrated only if (a) the objective is true NLL and (b) the
+                # Hessian inversion did not require a significant ridge to
+                # restore positive definiteness. A significant ridge means the
+                # covariance is regularised, not the asymptotic inverse-Hessian.
+                p.cov_is_calibrated = (
+                    self.objective_kind == "negloglik"
+                    and not cov_diag.get("regularization_warning", False)
+                )
             except Exception as exc:
                 p.hessian = np.full((n_params, n_params), np.nan)
                 p.cov = np.full((n_params, n_params), np.nan)
@@ -784,16 +805,16 @@ class DCM(BaseModel):
         # initialise
         p0 = self.init_states()
 
-        # run solver
+        # run solver — try/finally ensures self.p is restored even if
+        # integrate() raises (e.g., solve_ivp failure or non-finite states).
         if p is not None:
-            # save a copy of the params
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        ivp, x = self.integrate(tvec, p0, u, generator=generator)
-
-        if p is not None:
-            # get params back
-            self.p = Parameters(p_copy)
+        try:
+            ivp, x = self.integrate(tvec, p0, u, generator=generator)
+        finally:
+            if p is not None:
+                self.p = Parameters(p_copy)
 
         # create results dict
         bold, state_tc = self.collect_results(ivp, x)
@@ -1041,14 +1062,16 @@ class SEM(BaseModel):
         if p is not None:
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        u = np.random.normal(
-            loc=0.0, scale=self.p.sigma, size=(self.num_states, len(tvec))
-        )
-        I = np.identity(self.num_states)
-        A = self.p.A
-        x = np.dot(np.linalg.inv(I - A), u).T
-        if p is not None:
-            self.p = Parameters(p_copy)
+        try:
+            u = np.random.normal(
+                loc=0.0, scale=self.p.sigma, size=(self.num_states, len(tvec))
+            )
+            I = np.identity(self.num_states)
+            A = self.p.A
+            x = np.dot(np.linalg.inv(I - A), u).T
+        finally:
+            if p is not None:
+                self.p = Parameters(p_copy)
 
         return x, x
 
@@ -1078,7 +1101,7 @@ class SEM(BaseModel):
         if y is None:
             return self.p_from_A_sigma(self.p.A, self.p.sigma)
         else:
-            return self.p_from_A_sigma(self.p.A * 0.0, np.std(y))
+            return self.p_from_A_sigma(np.zeros_like(self.p.A), np.std(y))
 
     def A_sigma_from_p(self, p):
         D = self.p_to_table(p)
@@ -1086,7 +1109,7 @@ class SEM(BaseModel):
         return A, sigma
 
     def p_from_A_sigma(self, A, sigma):
-        return self.get_p({"A": self.p.A * 0, "sigma": sigma})
+        return self.get_p({"A": np.asarray(A, dtype=float), "sigma": sigma})
 
     #
     def get_bounds(self):
