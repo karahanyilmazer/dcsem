@@ -12,6 +12,7 @@ from scipy import optimize
 from sklearn.metrics import mean_squared_error
 
 from dcsem import SpectralDCM, get_colormap, set_style, to_latex_label
+from spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e
 from utils import get_out_dir, get_width_height_latex, log_run
 
 set_style()
@@ -120,10 +121,16 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
     model_display_name = f"{cfg.n_rois}-ROI Spectral DCM (LS-spDCM)"
     opt_method = "MCMC"
 
+    # --- Resolve TR before constructing SpectralDCM ---
+    # Empirical NPZ files may specify their own TR; the Welch sampling rate
+    # in observed_csd and the HRF FFT scaling in predict_csd both depend on
+    # spdcm.TR, so we must build the model with the data's actual TR.
+    tr_effective, _bold_pre_loaded = _resolve_effective_tr(cfg)
+
     # --- SpectralDCM instance ---
     spdcm = SpectralDCM(
         n_rois=cfg.n_rois,
-        TR=cfg.TR,
+        TR=tr_effective,
         self_connection=cfg.self_connection,
         freq_lo=cfg.freq_lo,
         freq_hi=cfg.freq_hi,
@@ -178,11 +185,11 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
         has_ground_truth = True
 
     elif cfg.data_mode == "empirical":
-        data = np.load(cfg.bold_path)
-        bold_ref = data["bold"]  # shape (T, R)
-        TR_data = float(data["TR"]) if "TR" in data else cfg.TR
+        # _resolve_effective_tr already loaded the BOLD and resolved TR;
+        # spdcm.TR is now correct, so observed_csd uses the right fs.
+        bold_ref = _bold_pre_loaded
         y_obs = spdcm.observed_csd(bold_ref, nperseg=cfg.nperseg, noverlap=cfg.noverlap)
-        tvec_ref = np.arange(bold_ref.shape[0]) * TR_data
+        tvec_ref = np.arange(bold_ref.shape[0]) * spdcm.TR
         has_ground_truth = False
 
     else:
@@ -206,6 +213,20 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
     if has_ground_truth:
         print(f"Noise std (obs - true): {noise_std_actual:.4e}")
     print(f"Likelihood sigma: {noise_sigma:.4e}")
+
+    # Data-driven log_sigma_e prior: replace the default theta_zero-centred
+    # prior with one centred on a moment estimator of log(sigma_e) from the
+    # observed CSD diagonal. This avoids biasing the posterior toward a poor
+    # initial guess and matches the L-BFGS-B script's data-driven approach.
+    # Only applies when the user did not supply explicit priors.
+    if cfg.priors is None and "log_sigma_e" in param_names:
+        log_sigma_e_data = estimate_log_sigma_e(spdcm, y_obs)
+        sigma_idx = param_names.index("log_sigma_e")
+        priors[sigma_idx] = (float(log_sigma_e_data), 2.0)
+        print(
+            f"log_sigma_e prior: data-driven, centred at "
+            f"{log_sigma_e_data:.3f} (was theta_zero[-1])."
+        )
 
     # =============================================================================
     # MCMC HELPER FUNCTIONS
@@ -346,6 +367,27 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
         print("  WARNING: Low acceptance (<0.05) — walkers may be stuck!")
     elif acc_frac > 0.8:
         print("  WARNING: High acceptance (>0.8) — proposal may be too narrow!")
+
+    # Real convergence flag: acceptance in healthy band AND enough effective samples.
+    # Asymptotic-Gaussian credible intervals are reliable only when the chain has
+    # actually converged, so cov_is_calibrated tracks the same criterion.
+    acc_ok = 0.15 <= acc_frac <= 0.80
+    ess_ok = np.isfinite(eff_total) and eff_total > 50 * n_params
+    converged = bool(acc_ok and ess_ok)
+    cov_is_calibrated = converged
+    if not converged:
+        reasons = []
+        if not acc_ok:
+            reasons.append(f"acceptance={acc_frac:.3f} outside [0.15, 0.80]")
+        if not ess_ok:
+            reasons.append(
+                f"ESS={'n/a' if not np.isfinite(eff_total) else int(eff_total)} "
+                f"≤ 50 × n_params={50 * n_params}"
+            )
+        print(
+            "⚠️  MCMC chain not converged ({}); credible intervals are not "
+            "calibrated.".format("; ".join(reasons))
+        )
 
     # =============================================================================
     # PLOT: POSTERIOR PREDICTIVE SPECTRAL BANDS
@@ -549,7 +591,7 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
             bold_ref_label = "observed"
 
         T_bold = bold_true.shape[0]
-        T_sim_bold = int(T_bold * cfg.TR)
+        T_sim_bold = int(T_bold * spdcm.TR)
 
         nsamp = min(50, chain.shape[0])
         idx = rng.choice(chain.shape[0], size=nsamp, replace=False)
@@ -745,8 +787,11 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
         se=se_post,
         ci=np.stack([q025, q975], axis=1),
         cov=cov_post,
-        converged=np.array([True]),  # MCMC always "converges" (check acceptance/ESS)
+        converged=np.array([converged]),
+        cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
         acceptance_fraction=np.array([acc_frac]),
+        ess_total=np.array([float(eff_total)]),
+        tr=np.array([float(spdcm.TR)]),
     )
     print(f"\nArtifacts saved to: {IMG_DIR}")
 
