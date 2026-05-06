@@ -39,7 +39,7 @@ from dcsem.numerics import (  # noqa: E402
     compute_standard_errors,
     safe_hessian_inversion,
 )
-from pipelines.inversion_generic import (  # noqa: E402
+from scripts.pipelines.inversion_generic import (  # noqa: E402
     MODEL_REGISTRY,
     RunConfig,
     auto_span,

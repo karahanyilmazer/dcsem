@@ -34,7 +34,7 @@ from dcsem.numerics import (  # noqa: E402
     compute_standard_errors,
     safe_hessian_inversion,
 )
-from pipelines.spdcm_generic import (  # noqa: E402
+from scripts.pipelines.spdcm_generic import (  # noqa: E402
     RunConfig,
     _resolve_effective_tr,
     _resolve_param_spec,

@@ -13,7 +13,7 @@ from sklearn.metrics import mean_squared_error
 
 from dcsem import SpectralDCM, get_colormap, set_style, to_latex_label
 from dcsem.utils import is_chain_converged
-from pipelines.spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e
+from scripts.pipelines.spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e
 from utils import get_out_dir, get_width_height_latex, log_run
 
 set_style()

@@ -31,7 +31,7 @@ from dcsem.numerics import (  # noqa: E402
     compute_standard_errors,
 )
 from dcsem.utils import is_chain_converged  # noqa: E402
-from pipelines.mcmc_generic import MODEL_REGISTRY, RunConfig  # noqa: E402
+from scripts.pipelines.mcmc_generic import MODEL_REGISTRY, RunConfig  # noqa: E402
 from utils import get_out_dir  # noqa: E402
 
 # %% Pick model + unpack
