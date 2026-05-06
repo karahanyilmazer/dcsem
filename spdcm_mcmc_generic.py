@@ -787,6 +787,7 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
         theta_true=cfg.theta_true
         if has_ground_truth
         else np.full_like(theta_mean, np.nan),
+        theta_zero=theta_zero,
         se=se_post,
         ci=np.stack([q025, q975], axis=1),
         cov=cov_post,

@@ -213,6 +213,8 @@ def test_spdcm_artifact_schema_includes_calibration_flag(tmp_path, monkeypatch):
         "hess_is_near_singular",
         "tr",
         "theta_est",
+        "theta_true",
+        "theta_zero",
         "se",
         "ci",
         "cov",
@@ -225,3 +227,6 @@ def test_spdcm_artifact_schema_includes_calibration_flag(tmp_path, monkeypatch):
     assert artifact["cov_is_calibrated"].dtype == bool
     assert artifact["hess_is_near_singular"].dtype == bool
     assert artifact["tr"].shape == (1,)
+    # theta_zero must match theta_est dimensionality so downstream tooling
+    # can reproduce the run from the artifact alone.
+    assert artifact["theta_zero"].shape == artifact["theta_est"].shape

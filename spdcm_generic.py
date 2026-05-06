@@ -876,6 +876,7 @@ def run_single(cfg: RunConfig = RunConfig()):
         y_pred=model(theta_est, None),
         theta_est=theta_est,
         theta_true=theta_true if has_ground_truth else np.full_like(theta_est, np.nan),
+        theta_zero=theta_zero,
         se=se,
         ci=ci,
         cov=cov,
