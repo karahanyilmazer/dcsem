@@ -277,7 +277,7 @@ print(spdcm.get_param_names())  # ['a01', 'a10', 'log_sigma_e']
 print(spdcm.get_bounds())       # default optimization bounds
 ```
 
-The standalone scripts `spdcm_generic.py`, `spdcm_mcmc_generic.py`, and `spdcm_noise_sweep.py` use the same parameter metadata. When fitting empirical BOLD, the safest workflow is to check that the time series is approximately stationary and that the fitted `A` matrix remains stable.
+The standalone scripts `pipelines/spdcm_generic.py`, `pipelines/spdcm_mcmc_generic.py`, and `experimentation/spdcm_noise_sweep.py` use the same parameter metadata. When fitting empirical BOLD, the safest workflow is to check that the time series is approximately stationary and that the fitted `A` matrix remains stable.
 
 
 ## SEM and Layer SEM
