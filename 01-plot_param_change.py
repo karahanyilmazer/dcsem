@@ -10,12 +10,14 @@ from utils import (
     add_underscore,
     get_out_dir,
     get_param_colors,
+    get_width_height_latex,
     set_style,
     simulate_bold,
 )
 
 set_style()
-IMG_DIR = get_out_dir(type="img", subfolder="wip")
+IMG_DIR = get_out_dir(type="img", subfolder="dcm")
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
 
 
 # %%
@@ -40,11 +42,11 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
 
     # Define the title of the legend
     if param_name in ["alpha", "gamma", "kappa"]:
-        title = rf"$\{param_name}$"
+        title = rf"$\mathbf{{\{param_name}}}$"
     else:
         # title = param_name.split('_')
         # title = fr'${title[0]}_{{{title[1]}}}$'
-        title = add_underscore(param_name)
+        title = add_underscore(param_name, bold=True)
 
     # Create legend and place it outside the plot to the right
     legend = axs[row, 1].legend(
@@ -62,7 +64,7 @@ def plot_bold(axs, bold_tcs, param_name, param_values, row, base_color):
 
 def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
     # Create the plot
-    _, axs = plt.subplots(len(params), num_rois, figsize=figsize)
+    fig, axs = plt.subplots(len(params), num_rois, figsize=figsize)
 
     # Get the default color cycle (tab10 colormap has 10 distinct colors)
     param_colors = get_param_colors()
@@ -73,8 +75,10 @@ def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
         plot_bold(axs, bold_tcs[param], param, values, i, base_color)
 
     # Set titles and labels
+    fig.suptitle(r"\textbf{Effect of Model Parameters on Simulated BOLD Responses}")
+
     for i in range(num_rois):
-        axs[0, i].set_title(f"ROI {i}")
+        axs[0, i].set_title(f"ROI {i + 1}")
         axs[len(params) - 1, i].set_xlabel("Time (s)")
 
     for i in range(len(params)):
@@ -85,9 +89,10 @@ def plot_param_change(figsize=(10, 12), save=False, out_dir=None):
 
     if save:
         out_dir = out_dir or get_out_dir(type="img", subfolder="tmp")
-        plt.savefig(f"{out_dir}/param_change.png")
+        plt.savefig(out_dir / "param_change.png")
+        plt.savefig(LATEX_DIR / "param_change.pdf")
 
-    plt.show()
+    plt.show(block=False)
 
 
 # %%
@@ -95,7 +100,18 @@ if __name__ == "__main__":
     # Input
     time = np.arange(100)  # Time vector (seconds)
     # Stimulus function (onset, duration, amplitude)
-    u = stim_boxcar([[0, 30, 1]])
+    u = stim_boxcar([[10, 20, 1]])
+    # u = stim_boxcar(
+    #     [
+    #         [5, 10, 1],
+    #         [20, 10, 0.5],
+    #         [25, 20, 0.8],
+    #         [70, 10, 0.7],
+    #         [80, 5, 0.2],
+    #         # [100, 30, 0.3],
+    #         # [120, 30, 0.1],
+    #     ]
+    # )
 
     # Connectivity parameters
     num_rois = 2
@@ -103,10 +119,10 @@ if __name__ == "__main__":
 
     # Parameters to vary
     params = {
-        "a01": np.linspace(0, 1, 9),
-        "a10": np.linspace(0, 1, 9),
-        "c0": np.linspace(0, 1, 9),
-        "c1": np.linspace(0, 1, 9),
+        "a01": np.linspace(-1.5, 1.5, 9),
+        "a10": np.linspace(-1.5, 1.5, 9),
+        "c0": np.linspace(0.0, 1.5, 9),
+        "c1": np.linspace(0.0, 1.5, 9),
     }
 
     # Run simulations for each parameter set
@@ -115,6 +131,8 @@ if __name__ == "__main__":
         for param, values in params.items()
     }
 
-    plot_param_change((14, 8), save=True, out_dir=IMG_DIR)
+    # Plot the results
+    width, height = get_width_height_latex()
+    plot_param_change((width, height * 2), save=True, out_dir=IMG_DIR)
 
 # %%

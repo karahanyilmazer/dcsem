@@ -1,9 +1,0 @@
-numpy
-scipy
-matplotlib
-tqdm
-pytest
-pandas
-lmfit
-numdifftools
-sdeint

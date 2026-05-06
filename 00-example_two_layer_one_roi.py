@@ -54,5 +54,5 @@ axs[1].set_ylim([0, 0.1])
 axs[1].grid()
 axs[1].legend()
 
-plt.show()
+plt.show(block=False)
 # %%

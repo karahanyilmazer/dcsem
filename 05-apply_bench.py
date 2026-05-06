@@ -6,21 +6,32 @@ import pickle
 import matplotlib.pyplot as plt
 import numpy as np
 from bench import change_model
-from palettable.cmocean import sequential as cmo
-from palettable.colorbrewer import diverging as cbd
-from palettable.colorbrewer import sequential as cbs
-from palettable.scientific import sequential as sci
 from scipy.stats import uniform
 from seaborn import heatmap
 from sklearn.metrics import confusion_matrix
 
+from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style
 from dcsem.utils import stim_boxcar
-from utils import get_out_dir, set_style, simulate_bold
+from utils import (
+    get_out_dir,
+    get_summary_measures,
+    get_width_height_latex,
+    simulate_bold,
+)
+
+n_comps = 4
+setting = f"no_noise_{n_comps}"
+# setting = f"with_noise_{n_comps}"
 
 set_style()
-IMG_DIR = get_out_dir(type="img", subfolder="wip")
-MODEL_DIR = get_out_dir(type="model", subfolder="wip")
+IMG_DIR = get_out_dir(type="img", subfolder=f"bench_final_{setting}")
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+MODEL_DIR = get_out_dir(type="model", subfolder=f"bench_{setting}")
+cmap = get_colormap("YlGnBu")
+width, height = get_width_height_latex()
 
+SEED = 42
+rng = np.random.default_rng(SEED)
 
 # %%
 # ======================================================================================
@@ -28,77 +39,29 @@ MODEL_DIR = get_out_dir(type="model", subfolder="wip")
 NUM_LAYERS = 1
 NUM_ROIS = 2
 time = np.arange(100)
-u = stim_boxcar([[0, 30, 1]])  # Input stimulus
+u = stim_boxcar([[10, 20, 1]])  # Input stimulus
 # u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
 
 # Parameters to set and estimate
 params_to_set = ["a01", "a10", "c0", "c1"]
 
-# Ground truth parameter values
-bounds = {
-    "a01": (0.0, 1.0),
-    "a10": (0.0, 1.0),
-    "c0": (0.0, 1.0),
-    "c1": (0.0, 1.0),
-}
+# Parameter bounds from central config
+bounds = PARAM_BOUNDS.get_bounds_dict()
 
 METHOD = "PCA"
 if METHOD == "PCA":
-    pca = pickle.load(open(MODEL_DIR / "pca.pkl", "rb"))
+    with open(MODEL_DIR / f"pca_{setting}.pkl", "rb") as f:
+        pca = pickle.load(f)
 elif METHOD == "ICA":
-    ica = pickle.load(open(MODEL_DIR / "ica.pkl", "rb"))
+    with open(MODEL_DIR / f"ica_{setting}.pkl", "rb") as f:
+        ica = pickle.load(f)
 
 
 # ======================================================================================
 # %%
 def calc_comps(method, **kwargs):
-    # Define the allowed parameters
-    allowed_keys = ["a01", "a10", "c0", "c1"]
-
-    # Find invalid keys
-    invalid_keys = [key for key in kwargs.keys() if key not in allowed_keys]
-
-    # Assert that all keys are allowed
-    assert (
-        not invalid_keys
-    ), f"Invalid parameter keys: {invalid_keys}. Allowed keys are: {allowed_keys}."
-    # Filter all arguments that are not None
-    params = {}
-    for key, val in kwargs.items():
-        if key == "method":
-            continue
-        if val is not None:
-            # Convert the values to a numpy array
-            if not isinstance(val, (list, np.ndarray)):
-                val = [val]
-            if not isinstance(val, np.ndarray):
-                val = np.array(val)
-
-            params[key] = val
-
-    # Assert that all values have the same length
-    lengths = [len(v) for v in params.values()]
-    assert all(
-        length == lengths[0] for length in lengths
-    ), "All values must have the same length!"
-
-    # Initialize the BOLD signals
-    bold_true = simulate_bold(
-        params,
-        time=time,
-        u=u,
-        num_rois=NUM_ROIS,
-    )
-    bold_obsv = bold_true
-    tmp_bold = np.concatenate([bold_obsv[:, :, 0], bold_obsv[:, :, 1]], axis=1)
-    tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1, keepdims=True)
-
-    if method == "PCA":
-        components = pca.transform(tmp_bold_c)
-    elif method == "ICA":
-        components = ica.transform(tmp_bold_c)
-
-    return components
+    """Thin wrapper around get_summary_measures for BENCH Trainer compatibility."""
+    return get_summary_measures(method, time, u, NUM_ROIS, MODEL_DIR, setting, **kwargs)
 
 
 # Check if the function works
@@ -122,8 +85,15 @@ tr = change_model.Trainer(
 mdl = tr.train(n_samples=5000, verbose=True)
 
 # %%
+if setting.startswith("no_noise"):
+    # No observation noise on summary measures; use a tiny floor for BENCH numerics
+    noise_level = 1e-4
+else:
+    noise_sigma_path = MODEL_DIR / f"noise_sigmas_{METHOD.lower()}_{setting}.pkl"
+    with open(noise_sigma_path, "rb") as f:
+        noise_sigmas = pickle.load(f)  # noqa: S301 — trusted local artifact
+    noise_level = np.mean(noise_sigmas)
 n_test_samples = 2000
-noise_level = 0.0001
 effect_size = 0.3
 n_repeats = 50
 
@@ -136,14 +106,11 @@ true_change, data, data2, sn = tr.generate_test_samples(
 
 probs, infered_change_bench, amount, _ = mdl.infer(data, data2 - data, sn)
 print("Accuracy:", np.mean(infered_change_bench == true_change))
+
 # %%
 conf_mat = confusion_matrix(true_change, infered_change_bench, normalize="true")
-# cmap = cbd.Spectral_8_r.mpl_colormap
-# cmap = cmo.Dense_12.mpl_colormap
-# cmap = sci.Devon_7_r.mpl_colormap
-cmap = cbs.GnBu_9.mpl_colormap
 
-fig, ax = plt.subplots(1, 1, figsize=(5, 5))
+fig, ax = plt.subplots(1, 1, figsize=(width / 2, width / 2))
 heatmap(
     conf_mat,
     annot=True,
@@ -172,16 +139,15 @@ ax.set_ylabel("Actual Change")
 plt.title("BENCH")
 plt.tick_params(axis="x", which="minor", bottom=False, top=False)
 plt.tick_params(axis="y", which="minor", left=False, right=False)
-plt.savefig(IMG_DIR / "confusion_matrix_bench_new.png")
-plt.show()
+plt.savefig(IMG_DIR / f"confusion_matrix_bench_{setting}.png")
+plt.savefig(LATEX_DIR / f"confusion_matrix_bench_{setting}.pdf")
+plt.show(block=False)
 
 
 # %%
-import pickle
-
-with open(MODEL_DIR / "conf_bench_new.pkl", "wb") as f:
+with open(MODEL_DIR / f"conf_bench_{setting}.pkl", "wb") as f:
     pickle.dump(conf_mat, f)
 
-with open(MODEL_DIR / "mdl.pkl", "wb") as f:
+with open(MODEL_DIR / f"mdl_{setting}.pkl", "wb") as f:
     pickle.dump(mdl, f)
 # %%

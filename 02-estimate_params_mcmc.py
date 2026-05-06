@@ -1,190 +1,165 @@
 # %%
-# !%load_ext autoreload
-# !%autoreload 2
+# Single-parameter MCMC estimation example.
+#
+# Estimates a01 (with other params fixed at ground truth) using emcee,
+# with a proper Gaussian likelihood and Normal prior (matching mcmc_generic.py).
 import corner
 import emcee
 import matplotlib.pyplot as plt
 import numpy as np
-import scienceplots
-from scipy.linalg import inv
-from scipy.optimize import minimize
-from statsmodels.tools.numdiff import approx_hess
 
+from dcsem import PARAM_BOUNDS
+from dcsem.plotting import set_style
 from dcsem.utils import stim_boxcar
-from utils import (
-    add_noise,
-    add_underscore,
-    filter_params,
-    get_param_colors,
-    initialize_parameters,
-    set_style,
-    simulate_bold,
-)
+from utils import add_noise, simulate_bold
 
 set_style()
 
-
 # %%
-def plot_bold_signals(time, bold_true, bold_noisy, bold_estimated):
-    """
-    Plot the observed, true, and estimated BOLD signals for each region of
-    interest (ROI).
-
-    Args:
-        time (ndarray): A 1D array representing time points.
-        bold_true (ndarray): The ground truth BOLD signal, a 2D array where
-                             each column corresponds to an ROI.
-        bold_noisy (ndarray): The observed BOLD signal with added noise,
-                              in the same shape as bold_true.
-        bold_estimated (ndarray): The estimated BOLD signal, also a 2D array
-                                  with the same shape as bold_true.
-    """
-    num_rois = bold_true.shape[1]
-    _, axs = plt.subplots(1, num_rois, figsize=(10, 4))
-    for i in range(num_rois):
-        axs[i].plot(time, bold_noisy[:, i], label="Observed", lw=2)
-        axs[i].plot(time, bold_true[:, i], label="Ground Truth", lw=2)
-        axs[i].plot(
-            time,
-            bold_estimated[:, i],
-            label="Estimated",
-            ls="--",
-            lw=2,
-            c="tomato",
-        )
-        axs[i].set_title(f"ROI {i}")
-        axs[i].set_xlabel("Time (s)")
-        axs[i].legend()
-
-    axs[0].set_ylabel("BOLD Signal")
-
-    plt.tight_layout()
-    plt.show()
-
-
-def log_probability(param, bold_signal, est_name, all_params, bounds):
-    """
-    Log-probability function for MCMC.
-
-    Args:
-        param (list): Parameter values to evaluate.
-        bold_signal (ndarray): Observed noisy BOLD signal.
-        est_name (list): Names of parameters to estimate.
-        all_params (dict): All parameters, including fixed ones.
-        bounds (list of tuples): Bounds for each parameter.
-
-    Returns:
-        float: Log-probability value.
-    """
-    # Check if parameters are within bounds
-    for p, v, (low, high) in zip(est_name, param, bounds):
-        if not (low <= v <= high):
-            return -np.inf  # Outside bounds → log-probability is -∞
-
-    # Update parameter dictionary
-    for p, v in zip(est_name, param):
-        all_params[p] = v
-
-    # Simulate BOLD signal
-    bold_simulated = simulate_bold(
-        all_params,
-        time=time,
-        u=u,
-        num_rois=NUM_ROIS,
-    )
-
-    # Compute likelihood (negative squared error)
-    residuals = bold_simulated - bold_signal
-    likelihood = -0.5 * np.sum(residuals**2)
-
-    return likelihood
-
+# =============================================================================
+# Configuration
+# =============================================================================
 
 time = np.arange(100)
-u = stim_boxcar([[0, 30, 1]])
+u = stim_boxcar([[10, 20, 1]])
 
-# Model parameters
 NUM_ROIS = 2
-NUM_LAYERS = 1
-RANDOM = False
 
-# Parameters to use in the simulation and estimation
-params_to_set = ["a01", "a10", "c0", "c1"]
+# Ground truth
+true_params = {"a01": 0.6, "a10": 0.4, "c0": 0.5, "c1": 0.5}
+
+# Only estimate a01; others are fixed at ground truth
 params_to_est = ["a01"]
+fixed_params = {k: v for k, v in true_params.items() if k not in params_to_est}
 
-# Ground truth parameter values
-true_params = {
-    "a01": 0.6,
-    "a10": 0.4,
-    "c0": 0.5,
-    "c1": 0.5,
-}
-true_params = filter_params(true_params, params_to_set)
+# Bounds from central config
+bounds_dict = PARAM_BOUNDS.get_bounds_dict()
+est_bounds = [bounds_dict[p] for p in params_to_est]
 
-# Bounds for the parameters
-bounds = {
-    "a01": (0, 1),
-    "a10": (0, 1),
-    "c0": (0, 1),
-    "c1": (0, 1),
-}
-bounds = filter_params(bounds, params_to_est)
+# Prior: Normal(mu=0.5, sigma=0.3) for a01 (centered on mid-range, fairly wide)
+priors = [(0.5, 0.3)]
 
-initial_values = initialize_parameters(bounds, params_to_est, random=RANDOM)
-bounds = [(bounds[param]) for param in params_to_est]
-
-bold_true = simulate_bold(
-    true_params,
-    time=time,
-    u=u,
-    num_rois=NUM_ROIS,
-)
-bold_noisy = add_noise(bold_true, snr_db=100)
-
-# Number of dimensions (parameters to estimate)
+# MCMC settings
 n_dim = len(params_to_est)
-
-# Number of walkers (chains)
 n_walkers = 32
+n_burn = 500
+n_samples = 1000
 
-# Burn-in phase + Sampling
-n_burn = 500  # Samples to discard
-n_samples = 1000  # Samples to keep
+# %%
+# =============================================================================
+# Generate observed data
+# =============================================================================
+bold_true = simulate_bold(true_params, time=time, u=u, num_rois=NUM_ROIS)
 
-# Initialize walkers around the initial guess
-initial_guess = [
-    initial_values + 0.01 * np.random.randn(n_dim) for _ in range(n_walkers)
-]
+# Add noise using SNR in dB (matching the pipeline convention)
+bold_noisy, noise_sigma = add_noise(bold_true, snr_db=20.0)
 
+
+# %%
+# =============================================================================
+# Likelihood, prior, posterior  (matching mcmc_generic.py)
+# =============================================================================
+
+
+def log_prior(theta):
+    """Independent Normal priors."""
+    logp = 0.0
+    for i, (mu, sigma) in enumerate(priors):
+        z = (theta[i] - mu) / sigma
+        logp += -0.5 * (z * z + np.log(2.0 * np.pi * sigma * sigma))
+    return logp
+
+
+def log_likelihood(theta, y_obs, sigma):
+    """Gaussian likelihood with known noise std."""
+    if sigma <= 0 or not np.isfinite(sigma):
+        return -np.inf
+    # Build full param dict (free + fixed) without mutating shared state
+    params = dict(fixed_params)
+    for name, val in zip(params_to_est, theta):
+        params[name] = val
+    try:
+        y_pred = simulate_bold(params, time=time, u=u, num_rois=NUM_ROIS)
+        if y_pred.shape != y_obs.shape:
+            return -np.inf
+        r = (y_obs - y_pred) / sigma
+        return -0.5 * (np.sum(r * r) + r.size * np.log(2.0 * np.pi * sigma * sigma))
+    except Exception:
+        return -np.inf
+
+
+def log_posterior(theta, y_obs, sigma):
+    """Unnormalized log posterior = log prior + log likelihood."""
+    lp = log_prior(theta)
+    if not np.isfinite(lp):
+        return -np.inf
+    ll = log_likelihood(theta, y_obs, sigma)
+    return lp + ll
+
+
+# %%
+# =============================================================================
 # Run MCMC
+# =============================================================================
+
+# Initialise walkers around a sensible starting point
+initial_values = np.array([np.mean(bounds_dict[p]) for p in params_to_est])
+p0 = initial_values + 0.01 * np.random.randn(n_walkers, n_dim)
+
 sampler = emcee.EnsembleSampler(
-    n_walkers,
-    n_dim,
-    log_probability,
-    args=(bold_noisy, params_to_est, true_params.copy(), bounds),
+    n_walkers, n_dim, log_posterior, args=(bold_noisy, noise_sigma)
 )
-sampler.run_mcmc(initial_guess, n_burn + n_samples, progress=True)
+
+print(f"Running MCMC: {n_burn} burn-in + {n_samples} production samples...")
+state = sampler.run_mcmc(p0, n_burn, progress=True)
+sampler.reset()
+sampler.run_mcmc(state, n_samples, progress=True)
 
 # %%
-# Discard burn-in samples and reshape
-samples = sampler.get_chain(discard=n_burn, flat=True)
+# =============================================================================
+# Posterior summary
+# =============================================================================
+samples = sampler.get_chain(flat=True)
+logp = sampler.get_log_prob(flat=True)
 
-# %%
-# Compute mean and standard deviation for each parameter
+# Filter invalid samples
+mask = np.isfinite(logp)
+samples = samples[mask]
+logp = logp[mask]
+
 means = np.mean(samples, axis=0)
 stds = np.std(samples, axis=0)
-estimated_params = dict(zip(params_to_est, means))
+q025, q975 = np.percentile(samples, [2.5, 97.5], axis=0)
 
-# Print results
-print("True Parameters:", true_params)
-print("Estimated Parameters (MCMC):", estimated_params)
+print("\nTrue Parameters:", {p: true_params[p] for p in params_to_est})
+print("Estimated (mean):", dict(zip(params_to_est, means)))
+print("Posterior std:", dict(zip(params_to_est, stds)))
+print(f"95% CI: [{q025[0]:.4f}, {q975[0]:.4f}]")
 
-# Visualize posterior distributions
-corner.corner(
-    samples,
-    labels=params_to_est,
-    truths=[true_params[p] for p in params_to_est],
-)
-plt.show()
+# %%
+# =============================================================================
+# Corner plot
+# =============================================================================
+if samples.shape[1] > 1:
+    corner.corner(
+        samples,
+        labels=params_to_est,
+        truths=[true_params[p] for p in params_to_est],
+        show_titles=True,
+        title_fmt=".4f",
+        quantiles=[0.16, 0.5, 0.84],
+    )
+else:
+    # corner library crashes with 1D data; use a simple histogram instead
+    fig, ax = plt.subplots()
+    ax.hist(samples[:, 0], bins=50, density=True, alpha=0.7, label="posterior")
+    ax.axvline(true_params[params_to_est[0]], color="red", ls="--", label="true")
+    ax.axvline(means[0], color="blue", ls="-", label="mean")
+    ax.set_xlabel(params_to_est[0])
+    ax.set_ylabel("Density")
+    ax.legend()
+plt.suptitle("MCMC Posterior — Single Parameter Estimation")
+plt.tight_layout()
+plt.show(block=False)
 
 # %%

@@ -215,10 +215,11 @@ def stim_boxcar(stim):
 
     @np.vectorize
     def u(t, onsets=onsets, durations=durations, amplitudes=amplitudes):
+        total = 0.0
         for o, d, a in zip(onsets, durations, amplitudes):
             if o <= t <= o + d:
-                return a
-        return 0.0
+                total += a
+        return total
 
     return u
 
@@ -355,8 +356,11 @@ class MH(object):
         e = self.loglik(p) + self.logpr(p)
         acc = np.zeros(p.size)
         rej = np.zeros(p.size)
-        prop = np.abs(p0) / 10  # np.ones(p.size)
-        prop[prop == 0] = 1
+        # Initial proposal scale: max(|p0|/10, floor) so very small but
+        # nonzero p0 components do not collapse to a near-zero proposal.
+        # Burn-in adaptation will tune from here.
+        prop_floor = 0.1
+        prop = np.maximum(np.abs(p0) / 10, prop_floor)
 
         samples = np.zeros((self.njumps + self.burnin, p.size))
 
@@ -392,7 +396,11 @@ class MH(object):
                             e = olde
             # end loop over params
             samples[iter, :] = p
-            if iter % self.update == 0:
+            # Adaptive proposal scaling: only during burn-in to preserve
+            # detailed balance / Markov property in the sampling phase.
+            # Continuous adaptation across the full chain breaks ergodicity
+            # of the post-burn-in samples.
+            if iter < self.burnin and iter % self.update == 0:
                 if verbose:
                     print(".... >>> Update Proposal ")
                 prop *= np.sqrt((1 + acc) / (1 + rej))
@@ -478,3 +486,38 @@ def plot_posterior(means, cov, labels=None, samples=None, actual=None):
             k = k + 1
 
     return fig
+
+
+def is_chain_converged(
+    acc_frac: float,
+    eff_total: float,
+    n_params: int,
+    *,
+    acc_lo: float = 0.15,
+    acc_hi: float = 0.80,
+    ess_factor: int = 50,
+) -> bool:
+    """Return True iff the emcee chain looks converged.
+
+    Mirrors the criterion used in ``spdcm_mcmc_generic.py``: acceptance
+    fraction inside a healthy band AND total effective sample size strictly
+    larger than ``ess_factor * n_params``. Asymptotic-Gaussian credible
+    intervals are reliable only when both pass.
+
+    Parameters
+    ----------
+    acc_frac : float
+        Mean acceptance fraction across walkers.
+    eff_total : float
+        Approximate total effective sample size (``n_samples / tau`` summed
+        across walkers); pass ``np.nan`` when autocorr estimation failed.
+    n_params : int
+        Number of free parameters in the chain.
+    acc_lo, acc_hi : float
+        Acceptance band; defaults match spdcm_mcmc_generic.
+    ess_factor : int
+        Multiplicative factor for ESS threshold.
+    """
+    acc_ok = acc_lo <= acc_frac <= acc_hi
+    ess_ok = bool(np.isfinite(eff_total)) and eff_total > ess_factor * n_params
+    return bool(acc_ok and ess_ok)
