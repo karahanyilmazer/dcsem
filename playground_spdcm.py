@@ -41,7 +41,6 @@ from spdcm_generic import (  # noqa: E402
 )
 from utils import get_out_dir  # noqa: E402
 
-
 # %% Configure the run
 cfg = RunConfig(
     n_rois=2,
@@ -234,19 +233,18 @@ H_nll = H_nll_s / np.outer(_scales_h, _scales_h)
 
 hess_diag = compute_hessian_diagnostics(H_nll)
 print("Hessian diagnostics:")
-print(f"  eigvals (min/med/max): {hess_diag['eigvals_min']:.3e} / "
-      f"{hess_diag['eigvals_med']:.3e} / {hess_diag['eigvals_max']:.3e}")
+print(
+    f"  eigvals (min/med/max): {hess_diag['eigvals_min']:.3e} / "
+    f"{hess_diag['eigvals_med']:.3e} / {hess_diag['eigvals_max']:.3e}"
+)
 print(f"  condition number:      {hess_diag['condition_number']:.2e}")
 print(f"  is_near_singular:      {hess_diag['is_near_singular']}")
 
 
 # %% Invert Hessian → cov + cov_is_calibrated (pinvh — diagnostic, matches production)
-cov, cov_diag = safe_hessian_inversion(
-    H_nll, 1.0, regularization=1e-6, method="pinvh"
-)
+cov, cov_diag = safe_hessian_inversion(H_nll, 1.0, regularization=1e-6, method="pinvh")
 cov_is_calibrated = not (
-    cov_diag.get("rank_deficient", False)
-    or hess_diag.get("is_near_singular", False)
+    cov_diag.get("rank_deficient", False) or hess_diag.get("is_near_singular", False)
 )
 se = compute_standard_errors(cov, warn_negative=True)
 ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
@@ -258,7 +256,9 @@ print(f"max |off-diag corr| = {max_offdiag_corr:.3f}")
 print("95% CIs:")
 for i, name in enumerate(param_names):
     if has_ground_truth:
-        print(f"  {name}: [{ci[i, 0]:+.4f}, {ci[i, 1]:+.4f}]  (true: {theta_true[i]:+.4f})")
+        print(
+            f"  {name}: [{ci[i, 0]:+.4f}, {ci[i, 1]:+.4f}]  (true: {theta_true[i]:+.4f})"
+        )
     else:
         print(f"  {name}: [{ci[i, 0]:+.4f}, {ci[i, 1]:+.4f}]")
 
@@ -301,3 +301,5 @@ with np.load(IMG_DIR / "run_results.npz") as d:
     print(f"  cov_is_calibrated = {bool(d['cov_is_calibrated'][0])}")
     print(f"  converged         = {bool(d['converged'][0])}")
     print(f"  TR                = {float(d['tr'][0])}")
+
+# %%

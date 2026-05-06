@@ -38,7 +38,6 @@ from spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e  # noqa: E
 from spdcm_mcmc_generic import RunConfig, _resolve_param_spec  # noqa: E402
 from utils import get_out_dir  # noqa: E402
 
-
 # %% Configure the run (small sample counts for fast iteration)
 cfg = RunConfig(
     n_rois=2,
@@ -266,7 +265,9 @@ cov_is_calibrated = converged
 
 print(f"acceptance_fraction (mean): {acc_frac:.3f}  (healthy [0.15, 0.80])")
 print(f"autocorr time            : {tau}")
-print(f"effective sample size    : {'n/a' if not np.isfinite(eff_total) else int(eff_total)}")
+print(
+    f"effective sample size    : {'n/a' if not np.isfinite(eff_total) else int(eff_total)}"
+)
 print(f"converged                : {converged}  (need ESS > {50 * n_params})")
 print(f"cov_is_calibrated        : {cov_is_calibrated}")
 
@@ -327,3 +328,5 @@ with np.load(IMG_DIR / "run_results.npz") as d:
     print(f"  acc_frac         = {d['acceptance_fraction'][0]:.3f}")
     print(f"  ess_total        = {d['ess_total'][0]}")
     print(f"  TR               = {float(d['tr'][0])}")
+
+# %%

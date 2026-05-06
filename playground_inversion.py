@@ -48,7 +48,6 @@ from inversion_generic import (  # noqa: E402
 )
 from utils import get_out_dir  # noqa: E402
 
-
 # %% Pick model + unpack spec
 # Edit MODEL_NAME to switch model:
 #   "quadratic", "product_degen", "sum_of_exponentials",
@@ -132,7 +131,9 @@ def callback(theta):
     loss_history.append(obj(theta))
 
 
-res = minimize(obj, theta_zero, method=opt_method, callback=callback, bounds=param_bounds)
+res = minimize(
+    obj, theta_zero, method=opt_method, callback=callback, bounds=param_bounds
+)
 theta_est = res.x
 mse_est = obj(theta_est)
 
@@ -226,8 +227,10 @@ H_nll = H_nll_s / np.outer(_scales_h, _scales_h)
 
 hess_diag = compute_hessian_diagnostics(H_nll)
 print("Hessian diagnostics:")
-print(f"  eigvals (min/med/max): {hess_diag['eigvals_min']:.3e} / "
-      f"{hess_diag['eigvals_med']:.3e} / {hess_diag['eigvals_max']:.3e}")
+print(
+    f"  eigvals (min/med/max): {hess_diag['eigvals_min']:.3e} / "
+    f"{hess_diag['eigvals_med']:.3e} / {hess_diag['eigvals_max']:.3e}"
+)
 print(f"  condition number:      {hess_diag['condition_number']:.2e}")
 print(f"  is_near_singular:      {hess_diag['is_near_singular']}")
 print(f"  n_negative_eigvals:    {hess_diag['n_negative_eigvals']}")
@@ -290,3 +293,5 @@ with np.load(IMG_DIR / "run_results.npz") as d:
     print(f"  cov_is_calibrated = {bool(d['cov_is_calibrated'][0])}")
     print(f"  converged         = {bool(d['converged'][0])}")
     print(f"  theta_est shape   = {d['theta_est'].shape}")
+
+# %%

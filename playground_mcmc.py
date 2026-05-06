@@ -34,7 +34,6 @@ from dcsem.utils import is_chain_converged  # noqa: E402
 from mcmc_generic import MODEL_REGISTRY, RunConfig  # noqa: E402
 from utils import get_out_dir  # noqa: E402
 
-
 # %% Pick model + unpack
 # Edit MODEL_NAME to switch model. ``dcm_2roi`` is slow with default
 # sample counts; start with ``quadratic`` to verify the pipeline first.
@@ -218,7 +217,9 @@ cov_is_calibrated = converged
 
 print(f"acceptance_fraction (mean): {acc_frac:.3f}  (healthy band [0.15, 0.80])")
 print(f"autocorr time            : {tau}")
-print(f"effective sample size    : {'n/a' if not np.isfinite(eff_total) else int(eff_total)}")
+print(
+    f"effective sample size    : {'n/a' if not np.isfinite(eff_total) else int(eff_total)}"
+)
 print(f"converged                : {converged}  (need ESS > {50 * n_params})")
 print(f"cov_is_calibrated        : {cov_is_calibrated}")
 
@@ -276,3 +277,5 @@ with np.load(IMG_DIR / "run_results.npz") as d:
     print(f"  cov_is_calibrated= {bool(d['cov_is_calibrated'][0])}")
     print(f"  acc_frac         = {d['acceptance_fraction'][0]:.3f}")
     print(f"  ess_total        = {d['ess_total'][0]}")
+
+# %%
