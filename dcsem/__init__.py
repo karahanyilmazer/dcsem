@@ -35,6 +35,7 @@ from .plotting import (
     get_param_colors,
     get_width_height_latex,
     list_available_colormaps,
+    plot_dcm_graph,
     set_style,
     to_latex_label,
 )
@@ -98,6 +99,7 @@ __all__ = [
     "is_stable_A",
     "assert_dcm_stable",
     # Plotting
+    "plot_dcm_graph",
     "set_style",
     "get_param_colors",
     "to_latex_label",

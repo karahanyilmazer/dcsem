@@ -50,6 +50,16 @@ for l in lambdas:
     bold_tc.append(ldcm.simulate(time, u)[0])
 
 
+# %% Diagram of the layer-DCM (nodes = layers within the single ROI)
+from dcsem import plot_dcm_graph  # noqa: E402
+
+fig, _ = plot_dcm_graph(ldcm)
+for ext in ("svg", "png", "pdf"):
+    target = (LATEX_DIR if ext == "pdf" else IMG_DIR) / f"{FIG_NAME}_graph.{ext}"
+    fig.savefig(target, bbox_inches="tight")
+plt.show(block=False)
+
+
 # %% Plot lower + upper layer BOLD (sweep colours = λ_d)
 fig, axs = plt.subplots(1, 2, figsize=(9, 4), sharey=True)
 

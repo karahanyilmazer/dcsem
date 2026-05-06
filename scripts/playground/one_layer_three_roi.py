@@ -57,6 +57,16 @@ dcm = DCM(num_rois, params={"A": A, "C": C})
 bold, state_tc = dcm.simulate(time, u)
 
 
+# %% Diagram of the DCM model (parameters labelled, saved as SVG/PNG/PDF)
+from dcsem import plot_dcm_graph  # noqa: E402
+
+fig, _ = plot_dcm_graph(dcm)
+for ext in ("svg", "png", "pdf"):
+    target = (LATEX_DIR if ext == "pdf" else IMG_DIR) / f"{FIG_NAME}_graph.{ext}"
+    fig.savefig(target, bbox_inches="tight")
+plt.show(block=False)
+
+
 # %% Plot stimulus + per-ROI BOLD
 fig, axs = plt.subplots(2, 1, figsize=(8, 5), sharex=True)
 

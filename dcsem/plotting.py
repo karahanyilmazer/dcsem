@@ -6,11 +6,14 @@ for visualization across all scripts in the repository.
 """
 
 import re
+from pathlib import Path
+from typing import Optional, Sequence, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
 from cycler import cycler
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.patches import Circle, FancyArrowPatch
 
 
 def get_width_height_latex(column_width: float = 483.6969) -> tuple[float, float]:
@@ -605,3 +608,291 @@ def list_available_colormaps() -> dict[str, list[str]]:
         pass  # Palettable not available
 
     return available_colormaps
+
+
+# ---------------------------------------------------------------------------
+# DCM connectivity diagram
+# ---------------------------------------------------------------------------
+
+
+def _node_positions(n: int) -> list[tuple[float, float]]:
+    """Place ``n`` nodes for a clean DCM diagram.
+
+    1 → centred. 2 → horizontal pair. 3+ → regular polygon, top-most node
+    sitting at 90 degrees so the diagram reads naturally top-to-bottom.
+    """
+    if n == 1:
+        return [(0.0, 0.0)]
+    if n == 2:
+        return [(-1.0, 0.0), (1.0, 0.0)]
+    angles = np.linspace(np.pi / 2, np.pi / 2 + 2 * np.pi, n, endpoint=False)
+    return [(float(np.cos(a)), float(np.sin(a))) for a in angles]
+
+
+def _curved_arrow(
+    ax,
+    p_start: tuple[float, float],
+    p_end: tuple[float, float],
+    *,
+    rad: float = 0.0,
+    color: str = "black",
+    lw: float = 1.5,
+    mutation_scale: float = 14,
+):
+    """Draw an arrow from ``p_start`` to ``p_end`` with bezier curvature ``rad``."""
+    arrow = FancyArrowPatch(
+        p_start,
+        p_end,
+        connectionstyle=f"arc3,rad={rad}",
+        arrowstyle="-|>",
+        color=color,
+        lw=lw,
+        mutation_scale=mutation_scale,
+        shrinkA=0,
+        shrinkB=0,
+        zorder=2,
+    )
+    ax.add_patch(arrow)
+    return arrow
+
+
+def plot_dcm_graph(
+    dcm,
+    *,
+    show_self_connections: bool = True,
+    show_inputs: bool = True,
+    threshold: float = 1e-12,
+    figsize: Optional[tuple[float, float]] = None,
+    node_color: Optional[Union[str, Sequence]] = None,
+    node_radius: float = 0.18,
+    fontsize: int = 14,
+    title: Optional[str] = None,
+    ax: Optional[plt.Axes] = None,
+    save_path: Optional[Union[str, Path]] = None,
+):
+    """Render a DCM connectivity diagram with all parameters labelled.
+
+    Nodes are labelled ``x_i`` and connection labels follow the diagram
+    convention ``a_ij`` = strength of the connection FROM ``x_i`` TO ``x_j``
+    (which is matrix entry ``A[j, i]`` since DCM uses ``dx/dt = A x + C u``
+    with rows indexing destination). Self-connections render as outward
+    loops labelled ``a_ii``; external inputs render as upward arrows from
+    below each node, labelled ``c_i`` with ``u(t)`` underneath.
+
+    Args:
+        dcm: any object exposing ``.p.A`` (square matrix) and ``.p.C``
+            (1D vector of length n_rois). Works with ``DCM``, ``TwoLayerDCM``,
+            ``MultiLayerDCM``, or any duck-typed equivalent.
+        show_self_connections: include ``a_ii`` self-loops (default True).
+        show_inputs: include the ``c_i / u(t)`` input arrows (default True).
+        threshold: connections with absolute weight below this are skipped.
+        figsize: passed to ``plt.subplots``. Auto-scaled by ROI count if None.
+        node_color: a single colour, a list of per-node colours, or None
+            to default to a viridis-style gradient.
+        node_radius: node circle radius in layout units.
+        fontsize: base font size (math labels are scaled up slightly).
+        title: optional figure title.
+        ax: bring-your-own axis. If None, a new figure is created.
+        save_path: if given, ``fig.savefig`` is called on it. The format is
+            inferred from the extension — pass ``.svg`` for vector output
+            suitable for slides and thesis documents.
+
+    Returns:
+        ``(fig, ax)`` so callers can further customise or save in multiple formats.
+
+    Example:
+        >>> from dcsem.models import DCM
+        >>> from dcsem.utils import create_A_matrix, create_C_matrix
+        >>> A = create_A_matrix(2, 1, ["R0,L0->R1,L0=0.5"], self_connections=-1)
+        >>> C = create_C_matrix(2, 1, ["R0,L0=1.0"])
+        >>> dcm = DCM(2, params={"A": A, "C": C})
+        >>> fig, ax = plot_dcm_graph(dcm, save_path="dcm.svg")
+    """
+    A = np.asarray(dcm.p.A, dtype=float)
+    C = np.asarray(dcm.p.C, dtype=float).flatten()
+    n = A.shape[0]
+    if A.shape != (n, n):
+        raise ValueError(f"A must be square, got {A.shape}")
+    if C.shape != (n,):
+        raise ValueError(f"C must be 1D of length {n}, got {C.shape}")
+
+    positions = _node_positions(n)
+    layout_centre = np.mean(positions, axis=0) if n > 1 else np.array([0.0, 0.0])
+
+    if ax is None:
+        if figsize is None:
+            figsize = (max(5.0, 2.5 + 1.2 * n), max(4.0, 2.0 + 1.0 * n))
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    ax.set_aspect("equal")
+    ax.axis("off")
+
+    # Per-node colours
+    if node_color is None:
+        cmap = plt.get_cmap("viridis")
+        denom = max(n - 1, 1)
+        colors = [cmap(0.2 + 0.6 * (i / denom)) for i in range(n)]
+    elif isinstance(node_color, str):
+        colors = [node_color] * n
+    else:
+        colors = list(node_color)
+        if len(colors) < n:
+            colors = (colors * ((n // len(colors)) + 1))[:n]
+
+    # 1) Off-diagonal arrows: a_ij rendered on i → j
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+            weight = A[j, i]  # DCM: A[dest, src] = strength of src → dest
+            if abs(weight) < threshold:
+                continue
+            xi, yi = positions[i]
+            xj, yj = positions[j]
+            dx, dy = xj - xi, yj - yi
+            d = float(np.hypot(dx, dy))
+            ux, uy = dx / d, dy / d
+            start = (xi + node_radius * ux, yi + node_radius * uy)
+            end = (xj - node_radius * ux, yj - node_radius * uy)
+
+            # If the reverse connection also exists, curve the two arrows
+            # in opposite directions so they don't overlap.
+            has_reverse = abs(A[i, j]) >= threshold
+            rad = 0.25 if has_reverse else 0.0
+
+            _curved_arrow(ax, start, end, rad=rad)
+
+            # Label at midpoint, offset perpendicular toward the curve
+            # (positive rad bows to the LEFT looking from start→end).
+            mx = (start[0] + end[0]) / 2
+            my = (start[1] + end[1]) / 2
+            perp = np.array([-uy, ux])  # left-perpendicular
+            offset_mag = 0.18 + 0.5 * abs(rad)
+            sign = 1.0 if rad >= 0 else -1.0
+            lx = mx + sign * offset_mag * perp[0]
+            ly = my + sign * offset_mag * perp[1]
+            ax.text(
+                lx,
+                ly,
+                rf"$a_{{{i}{j}}}$",
+                ha="center",
+                va="center",
+                fontsize=fontsize + 1,
+                zorder=4,
+            )
+
+    # 2) Nodes (drawn after arrows so they cover arrow tails neatly)
+    for i, (x, y) in enumerate(positions):
+        circle = Circle(
+            (x, y),
+            node_radius,
+            facecolor=colors[i],
+            edgecolor="black",
+            linewidth=1.2,
+            zorder=3,
+        )
+        ax.add_patch(circle)
+        ax.text(
+            x,
+            y,
+            rf"$x_{{{i}}}$",
+            ha="center",
+            va="center",
+            fontsize=fontsize + 3,
+            zorder=4,
+        )
+
+    # 3) Self-loops (a_ii)
+    if show_self_connections:
+        for i in range(n):
+            if abs(A[i, i]) < threshold:
+                continue
+            x, y = positions[i]
+            # Outward direction (from layout centre to node)
+            if n == 1:
+                outward = np.array([0.0, 1.0])
+            else:
+                outward = np.array([x - layout_centre[0], y - layout_centre[1]])
+                outward = outward / max(np.linalg.norm(outward), 1e-9)
+
+            # Two attachment points on the node boundary, separated by an
+            # angular opening so the bezier produces a visible loop.
+            base_angle = float(np.arctan2(outward[1], outward[0]))
+            half_opening = np.deg2rad(28)
+            p_left = (
+                x + node_radius * np.cos(base_angle - half_opening),
+                y + node_radius * np.sin(base_angle - half_opening),
+            )
+            p_right = (
+                x + node_radius * np.cos(base_angle + half_opening),
+                y + node_radius * np.sin(base_angle + half_opening),
+            )
+            _curved_arrow(
+                ax, p_left, p_right, rad=2.5, lw=1.2, mutation_scale=10
+            )
+
+            label_pos = (
+                x + 2.6 * node_radius * outward[0],
+                y + 2.6 * node_radius * outward[1],
+            )
+            ax.text(
+                label_pos[0],
+                label_pos[1],
+                rf"$a_{{{i}{i}}}$",
+                ha="center",
+                va="center",
+                fontsize=fontsize + 1,
+                zorder=4,
+            )
+
+    # 4) External inputs (u(t) → c_i → x_i), arrows coming from below
+    if show_inputs:
+        for i in range(n):
+            if abs(C[i]) < threshold:
+                continue
+            x, y = positions[i]
+            tip = (x, y - node_radius - 0.04)
+            tail = (x, y - node_radius - 0.45)
+            ax.annotate(
+                "",
+                xy=tip,
+                xytext=tail,
+                arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5),
+                zorder=2,
+            )
+            # c_i label sits beside the arrow shaft
+            ax.text(
+                x + 0.08,
+                y - node_radius - 0.25,
+                rf"$c_{{{i}}}$",
+                ha="left",
+                va="center",
+                fontsize=fontsize + 1,
+            )
+            # u(t) label below the arrow tail
+            ax.text(
+                x,
+                y - node_radius - 0.58,
+                r"$u(t)$",
+                ha="center",
+                va="center",
+                fontsize=fontsize + 1,
+            )
+
+    if title is not None:
+        ax.set_title(title)
+
+    # Set view limits with padding
+    xs = [p[0] for p in positions]
+    ys = [p[1] for p in positions]
+    pad_x = 0.7 + node_radius
+    pad_y_top = 0.9 + node_radius  # room for a_ii labels above top node
+    pad_y_bot = 0.95 + node_radius  # room for u(t) below bottom node
+    ax.set_xlim(min(xs) - pad_x, max(xs) + pad_x)
+    ax.set_ylim(min(ys) - pad_y_bot, max(ys) + pad_y_top)
+
+    if save_path is not None:
+        fig.savefig(save_path, bbox_inches="tight")
+
+    return fig, ax
