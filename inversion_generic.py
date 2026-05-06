@@ -1,4 +1,11 @@
-# %% Imports and config
+"""L-BFGS-B inversion driver — model registry + run_single(cfg) entrypoint.
+
+Stage 2.6: refactored from a linear notebook-style script into a
+``run_single(cfg)`` function so stage-3 sweep harnesses can dispatch
+parameter studies without going through ``runpy``.  Behaviour for the
+``__main__`` entry path is preserved via env-var overrides.
+"""
+
 import itertools
 import os
 from dataclasses import dataclass
@@ -34,9 +41,6 @@ width, height = get_width_height_latex()
 cmap = get_colormap("YlGnBu_r")
 conf_cmap = load_cmap("Revolucion", cmap_type="continuous")
 default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-# Reproducibility and data settings
-SEED = 42
-rng = np.random.default_rng(SEED)
 
 # =============================================================================
 # MODEL REGISTRY
@@ -60,6 +64,21 @@ class ModelSpec:
     x_min: float = -20.0
     x_max: float = 20.0
     n_samples: int = 50
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    """Configuration for a single L-BFGS-B inversion run.
+
+    Mirrors the shape of ``spdcm_generic.RunConfig``: keep this lightweight
+    and only expose what callers (stage-3 sweep harness, tests) actually
+    need to override.  Plot toggles stay as hardcoded locals inside
+    ``run_single`` to match the spectral pattern.
+    """
+
+    model_name: str = "quadratic"  # key into MODEL_REGISTRY
+    seed: int = 42
+    hess_step: float = 1e-3  # numdifftools step for the scaled-NLL Hessian
 
 
 # =============================================================================
@@ -202,81 +221,9 @@ MODEL_REGISTRY: dict[str, ModelSpec] = {
     ),
 }
 
-# =============================================================================
-# UNPACK SELECTED MODEL
-# =============================================================================
-
-ACTIVE_MODEL = os.environ.get(
-    "DCSEM_ACTIVE_MODEL",
-    {
-        1: "quadratic",
-        2: "product_degen",
-        3: "product_reparam",
-        4: "sum_of_exponentials",
-        5: "michaelis_menten",
-        6: "logistic_sigmoid",
-        7: "power_law",
-        8: "dcm_2roi",
-    }[1],
-)
-
-spec = MODEL_REGISTRY[ACTIVE_MODEL]
-model = spec.func
-model_name = spec.name
-model_display_name = spec.display_name
-param_names = spec.param_names
-theta_true = spec.theta_true
-theta_zero = spec.theta_zero
-IS_DCM_MODEL = spec.is_dcm
-param_bounds = spec.param_bounds
-
 
 # =============================================================================
-# SETTINGS
-# =============================================================================
-
-# Loss function must return a value to MINIMIZE (lower = better fit).
-loss_function = mean_squared_error
-
-# Auto-detect number of parameters
-n_params = len(theta_zero)
-
-# Optimization settings
-opt_method = "L-BFGS-B"  # DCM needs bounds
-title_suffix = "Least Squares"
-
-# Plot settings
-IMG_DIR = get_out_dir(
-    type="img",
-    subfolder="inversion",
-    extra_subfolders=[opt_method, model_name],
-)
-LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
-IMG_DIR.mkdir(parents=True, exist_ok=True)
-
-print(f"Using model: {model_display_name}")
-print(f"Plots will be saved to: {IMG_DIR}")
-print(f"Plots will be saved to: {LATEX_DIR}")
-
-# Plot toggles
-PLOT_1D = False
-PLOT_2D = True
-PLOT_3D = False  # only if n_params == 3
-
-# Landscape resolution
-if not IS_DCM_MODEL:
-    N_1D = 100
-    N_2D = 100
-else:
-    N_1D = 20
-    N_2D = 20
-
-# Loss plot span overrides (None = auto, or dict with param indices)
-SPAN_OVERRIDE = None  # e.g., {0: 2.0, 1: 5.0} for custom spans
-
-
-# =============================================================================
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS (pure, module level)
 # =============================================================================
 
 
@@ -308,604 +255,608 @@ def make_objective(model_func, y_obs, x_data, loss_fn, noise_sigma=None):
 
 
 # =============================================================================
-# DATA GENERATION
+# RUN
 # =============================================================================
 
-# Data settings
-x_min, x_max = spec.x_min, spec.x_max
-n_samples = spec.n_samples
 
-if not IS_DCM_MODEL:
-    # Standard analytical models
-    x_data = np.linspace(x_min, x_max, n_samples)
-    y_true = model(theta_true, x_data)
-    noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
-    y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
-    noise_std_actual = noise_sigma  # Store actual noise level used
-else:
-    # DCM BOLD model
-    x_data = None  # Not used for DCM
-    y_true = model(theta_true, x_data)  # Shape: (T, R)
-    noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
-    y_obs = y_true + rng.normal(0.0, noise_sigma, size=y_true.shape)
-    noise_std_actual = noise_sigma  # Store actual noise level used
+def run_single(cfg: RunConfig = RunConfig()) -> None:
+    """Single-run L-BFGS-B inversion: simulate → fit → diagnostics → plots → NPZ."""
 
-# =============================================================================
-# FIT
-# =============================================================================
-loss_history = []
+    # ---- Unpack model spec ----
+    spec = MODEL_REGISTRY[cfg.model_name]
+    model = spec.func
+    model_name = spec.name
+    model_display_name = spec.display_name
+    param_names = spec.param_names
+    theta_true = spec.theta_true
+    theta_zero = spec.theta_zero
+    IS_DCM_MODEL = spec.is_dcm
+    param_bounds = spec.param_bounds
 
-# Build the single objective used everywhere (raw MSE, no normalisation)
-obj, _noise_sigma_used = make_objective(
-    model, y_obs, x_data, loss_function, noise_sigma=noise_std_actual
-)
+    rng = np.random.default_rng(cfg.seed)
 
+    # ---- Settings ----
+    loss_function = mean_squared_error
+    n_params = len(theta_zero)
+    opt_method = "L-BFGS-B"
+    title_suffix = "Least Squares"
 
-def callback(theta):
-    loss = obj(theta)
-    loss_history.append(loss)
-    print(f"Iteration {len(loss_history)}: loss = {loss:.6e}")
+    IMG_DIR = get_out_dir(
+        type="img",
+        subfolder="inversion",
+        extra_subfolders=[opt_method, model_name],
+    )
+    LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+    IMG_DIR.mkdir(parents=True, exist_ok=True)
 
+    print(f"Using model: {model_display_name}")
+    print(f"Plots will be saved to: {IMG_DIR}")
+    print(f"Plots will be saved to: {LATEX_DIR}")
 
-# Run the optimization
-res = minimize(
-    obj,
-    theta_zero,
-    method=opt_method,
-    callback=callback,
-    bounds=param_bounds,
-)
+    # Plot toggles (hardcoded locals, mirroring the spectral pattern)
+    PLOT_1D = False
+    PLOT_2D = True
+    PLOT_3D = False  # only if n_params == 3
 
-# Check convergence
-if not res.success:
-    print(f"⚠️  Optimization did not converge: {res.message}")
+    # Landscape resolution
+    if not IS_DCM_MODEL:
+        N_1D = 100
+        N_2D = 100
+    else:
+        N_1D = 20  # noqa: F841 — kept for parity with PLOT_1D path
+        N_2D = 20
 
-# Extract estimated parameters and final MSE
-theta_est = res.x
-mse_est = obj(theta_est)
+    # Loss plot span overrides (None = auto, or dict with param indices)
+    SPAN_OVERRIDE = None  # e.g., {0: 2.0, 1: 5.0} for custom spans
 
-# Print fit results
-print("Fit results:")
-print(f"  True params: {np.round(theta_true, 4)}")
-print(f"  Estimated  : {np.round(theta_est, 4)}")
-print(f"  Loss: {mse_est:.4f}  (noise std = {noise_std_actual:.4f})")
+    # =========================================================================
+    # DATA GENERATION
+    # =========================================================================
+    x_min, x_max = spec.x_min, spec.x_max
+    n_samples = spec.n_samples
 
+    if not IS_DCM_MODEL:
+        x_data = np.linspace(x_min, x_max, n_samples)
+        y_true = model(theta_true, x_data)
+        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
+        y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
+        noise_std_actual = noise_sigma
+    else:
+        x_data = None
+        y_true = model(theta_true, x_data)  # Shape: (T, R)
+        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
+        y_obs = y_true + rng.normal(0.0, noise_sigma, size=y_true.shape)
+        noise_std_actual = noise_sigma
 
-# %%
-# =============================================================================
-# PLOT: DATA AND FITTED CURVE
-# =============================================================================
+    # =========================================================================
+    # FIT
+    # =========================================================================
+    loss_history = []
 
-if not IS_DCM_MODEL:
-    # Standard 1D analytical model plot
-    x_plot = np.linspace(x_data.min(), x_data.max(), 400)
-    y_pred = model(theta_est, x_plot)
-    y_true_plot = model(theta_true, x_plot)
-
-    # Plot
-    plt.figure(figsize=(width, height / 1.5))
-    plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
-    plt.plot(x_plot, y_pred, color=default_colors[2], label="fitted")
-    plt.plot(x_plot, y_true_plot, color=default_colors[1], linestyle="--", label="true")
-
-    # Adjust
-    plt.xlabel("x")
-    plt.ylabel("y")
-    plt.title(rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}")
-    plt.legend()
-
-    # Save
-    plt.tight_layout()
-    plt.savefig(IMG_DIR / "data_fit.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
-    plt.show(block=False)
-
-else:
-    # DCM BOLD model: plot each ROI's time series
-    y_pred = model(theta_est, None)  # Shape: (T, R)
-    y_true_plot = model(theta_true, None)  # Shape: (T, R)
-
-    # Get time vector from spec
-    time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
-    num_rois = y_obs.shape[1]
-    fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
-
-    if num_rois == 1:
-        axes = [axes]
-
-    for r in range(num_rois):
-        axes[r].plot(
-            time_vec,
-            y_obs[:, r],
-            alpha=0.7,
-            color=default_colors[0],
-            label="observed",
-        )
-        axes[r].plot(
-            time_vec,
-            y_pred[:, r],
-            color=default_colors[2],
-            label="fitted",
-        )
-        axes[r].plot(
-            time_vec,
-            y_true_plot[:, r],
-            linestyle="--",
-            color=default_colors[1],
-            label="true",
-        )
-        axes[r].set_title(f"ROI {r + 1}")
-        axes[r].set_xlabel("Time (s)")
-        axes[r].grid(True, alpha=0.3)
-
-    # Create a single legend below all subplots
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=3,
-        bbox_to_anchor=(0.5, -0.1),
-        frameon=True,
+    obj, _noise_sigma_used = make_objective(
+        model, y_obs, x_data, loss_function, noise_sigma=noise_std_actual
     )
 
-    axes[0].set_ylabel("BOLD Amplitude")
-    fig.suptitle(
-        rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}", y=0.95
-    )
-    plt.tight_layout()
-    plt.savefig(IMG_DIR / "data_fit.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
-    plt.show(block=False)
+    def callback(theta):
+        loss = obj(theta)
+        loss_history.append(loss)
+        print(f"Iteration {len(loss_history)}: loss = {loss:.6e}")
 
-
-# %%
-
-# %%
-# =============================================================================
-# LOSS LANDSCAPES - 1D
-# =============================================================================
-
-if PLOT_1D:
-    # Compute spans
-    spans = []
-    for i in range(n_params):
-        if SPAN_OVERRIDE and i in SPAN_OVERRIDE:
-            spans.append(SPAN_OVERRIDE[i])
-        else:
-            spans.append(auto_span(theta_est[i], min_span=0.0))
-
-    fig, axes = plt.subplots(1, n_params, figsize=(width, height / 1.5))
-    if n_params == 1:
-        axes = [axes]
-
-    for i, (ax, name, span) in enumerate(zip(axes, param_names, spans)):
-        grid = make_range(theta_est[i], span, N_1D)
-        losses = []
-
-        for v in tqdm(grid, desc=f"1D loss {name}"):
-            th = theta_est.copy()
-            th[i] = v
-            losses.append(obj(th))
-
-        ax.plot(grid, losses)
-        ax.axvline(theta_est[i], color=default_colors[2], label="estimate")
-        ax.axvline(theta_true[i], color=default_colors[1], linestyle="--", label="true")
-        ax.set_xlabel(to_latex_label(name))
-        ax.set_title(f"MSE vs {to_latex_label(name)}")
-
-    axes[0].set_ylabel("MSE")
-
-    # Create a single legend below all subplots
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="lower center",
-        ncol=2,
-        bbox_to_anchor=(0.5, -0.1),
-        frameon=True,
+    res = minimize(
+        obj,
+        theta_zero,
+        method=opt_method,
+        callback=callback,
+        bounds=param_bounds,
     )
 
-    fig.suptitle(rf"\textbf{{{model_display_name} - 1D Loss Landscape}}")
-    plt.tight_layout()
-    plt.savefig(IMG_DIR / "loss_landscape_1d.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_1d_new.pdf")
-    plt.show(block=False)
+    if not res.success:
+        print(f"⚠️  Optimization did not converge: {res.message}")
 
-# %%
-# =============================================================================
-# LOSS LANDSCAPES - 2D CONTOURS
-# =============================================================================
-if PLOT_2D and n_params >= 2:
-    # Compute spans
-    spans = []
-    for i in range(n_params):
-        if SPAN_OVERRIDE and i in SPAN_OVERRIDE:
-            spans.append(SPAN_OVERRIDE[i])
-        else:
-            spans.append(auto_span(theta_est[i], min_span=0.0))
+    theta_est = res.x
+    mse_est = obj(theta_est)
 
-    # Generate all pairs
-    pairs = list(itertools.combinations(range(n_params), 2))
-    n_pairs = len(pairs)
+    print("Fit results:")
+    print(f"  True params: {np.round(theta_true, 4)}")
+    print(f"  Estimated  : {np.round(theta_est, 4)}")
+    print(f"  Loss: {mse_est:.4f}  (noise std = {noise_std_actual:.4f})")
 
-    nrows = min(3, n_pairs)
-    ncols = int(np.ceil(n_pairs / nrows))
+    # =========================================================================
+    # PLOT: DATA AND FITTED CURVE
+    # =========================================================================
+    if not IS_DCM_MODEL:
+        x_plot = np.linspace(x_data.min(), x_data.max(), 400)
+        y_pred = model(theta_est, x_plot)
+        y_true_plot = model(theta_true, x_plot)
 
-    fig, axes = plt.subplots(nrows, ncols, figsize=(width, height * 2))
-    if n_pairs == 1:
-        axes = np.array([axes])
-    axes = axes.flatten()
+        plt.figure(figsize=(width, height / 1.5))
+        plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
+        plt.plot(x_plot, y_pred, color=default_colors[2], label="fitted")
+        plt.plot(x_plot, y_true_plot, color=default_colors[1], linestyle="--", label="true")
 
-    for plot_idx, (i, j) in enumerate(pairs):
-        ax = axes[plot_idx]
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.title(rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}")
+        plt.legend()
 
-        # Unified grid for all models, centered on theta_est
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "data_fit.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
+        plt.show(block=False)
+
+    else:
+        y_pred = model(theta_est, None)
+        y_true_plot = model(theta_true, None)
+
+        time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
+        num_rois = y_obs.shape[1]
+        fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
+
+        if num_rois == 1:
+            axes = [axes]
+
+        for r in range(num_rois):
+            axes[r].plot(
+                time_vec,
+                y_obs[:, r],
+                alpha=0.7,
+                color=default_colors[0],
+                label="observed",
+            )
+            axes[r].plot(
+                time_vec,
+                y_pred[:, r],
+                color=default_colors[2],
+                label="fitted",
+            )
+            axes[r].plot(
+                time_vec,
+                y_true_plot[:, r],
+                linestyle="--",
+                color=default_colors[1],
+                label="true",
+            )
+            axes[r].set_title(f"ROI {r + 1}")
+            axes[r].set_xlabel("Time (s)")
+            axes[r].grid(True, alpha=0.3)
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=3,
+            bbox_to_anchor=(0.5, -0.1),
+            frameon=True,
+        )
+
+        axes[0].set_ylabel("BOLD Amplitude")
+        fig.suptitle(
+            rf"\textbf{{{model_display_name} - Best Fit ({title_suffix})}}", y=0.95
+        )
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "data_fit.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_data_fit_new.pdf")
+        plt.show(block=False)
+
+    # =========================================================================
+    # LOSS LANDSCAPES - 1D
+    # =========================================================================
+    if PLOT_1D:
+        spans = []
+        for i in range(n_params):
+            if SPAN_OVERRIDE and i in SPAN_OVERRIDE:
+                spans.append(SPAN_OVERRIDE[i])
+            else:
+                spans.append(auto_span(theta_est[i], min_span=0.0))
+
+        fig, axes = plt.subplots(1, n_params, figsize=(width, height / 1.5))
+        if n_params == 1:
+            axes = [axes]
+
+        for i, (ax, name, span) in enumerate(zip(axes, param_names, spans)):
+            grid = make_range(theta_est[i], span, N_1D)
+            losses = []
+
+            for v in tqdm(grid, desc=f"1D loss {name}"):
+                th = theta_est.copy()
+                th[i] = v
+                losses.append(obj(th))
+
+            ax.plot(grid, losses)
+            ax.axvline(theta_est[i], color=default_colors[2], label="estimate")
+            ax.axvline(theta_true[i], color=default_colors[1], linestyle="--", label="true")
+            ax.set_xlabel(to_latex_label(name))
+            ax.set_title(f"MSE vs {to_latex_label(name)}")
+
+        axes[0].set_ylabel("MSE")
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=2,
+            bbox_to_anchor=(0.5, -0.1),
+            frameon=True,
+        )
+
+        fig.suptitle(rf"\textbf{{{model_display_name} - 1D Loss Landscape}}")
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "loss_landscape_1d.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_1d_new.pdf")
+        plt.show(block=False)
+
+    # =========================================================================
+    # LOSS LANDSCAPES - 2D CONTOURS
+    # =========================================================================
+    if PLOT_2D and n_params >= 2:
+        spans = []
+        for i in range(n_params):
+            if SPAN_OVERRIDE and i in SPAN_OVERRIDE:
+                spans.append(SPAN_OVERRIDE[i])
+            else:
+                spans.append(auto_span(theta_est[i], min_span=0.0))
+
+        pairs = list(itertools.combinations(range(n_params), 2))
+        n_pairs = len(pairs)
+
+        nrows = min(3, n_pairs)
+        ncols = int(np.ceil(n_pairs / nrows))
+
+        fig, axes = plt.subplots(nrows, ncols, figsize=(width, height * 2))
+        if n_pairs == 1:
+            axes = np.array([axes])
+        axes = axes.flatten()
+
+        for plot_idx, (i, j) in enumerate(pairs):
+            ax = axes[plot_idx]
+
+            grid_i = make_range(theta_est[i], spans[i], N_2D)
+            grid_j = make_range(theta_est[j], spans[j], N_2D)
+            if param_bounds is not None:
+                grid_i = np.clip(grid_i, param_bounds[i][0], param_bounds[i][1])
+                grid_j = np.clip(grid_j, param_bounds[j][0], param_bounds[j][1])
+
+            Grid_i, Grid_j = np.meshgrid(grid_i, grid_j, indexing="ij")
+
+            Z = np.zeros_like(Grid_i)
+            for ii in tqdm(
+                range(len(grid_i)), desc=f"2D loss {param_names[i]} vs {param_names[j]}"
+            ):
+                for jj in range(len(grid_j)):
+                    th = theta_est.copy()
+                    th[i] = Grid_i[ii, jj]
+                    th[j] = Grid_j[ii, jj]
+                    Z[ii, jj] = obj(th)
+
+            cont = ax.contourf(Grid_i, Grid_j, Z, levels=30, cmap=cmap)
+            ax.scatter(
+                [theta_true[i]],
+                [theta_true[j]],
+                s=100,
+                color=default_colors[1],
+                edgecolors="black",
+                label="true",
+            )
+            ax.scatter(
+                [theta_est[i]],
+                [theta_est[j]],
+                marker="*",
+                s=50,
+                color=default_colors[2],
+                edgecolors="black",
+                label="estimate",
+            )
+            ax.set_xlabel(to_latex_label(param_names[i]))
+            ax.set_ylabel(to_latex_label(param_names[j]))
+            ax.set_title(
+                rf"{to_latex_label(param_names[i])} vs. {to_latex_label(param_names[j])} (others fixed)"
+            )
+
+        for idx in range(n_pairs, len(axes)):
+            axes[idx].axis("off")
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="upper center",
+            ncol=n_pairs,
+            bbox_to_anchor=(0.5, 0.03),
+            frameon=True,
+        )
+
+        cbar_ax = fig.add_axes([0.25, -0.04, 0.5, 0.02])
+        cb = fig.colorbar(
+            cont,
+            cax=cbar_ax,
+            orientation="horizontal",
+        )
+
+        cb.set_ticks([])
+        cb.set_label("MSE Loss", labelpad=5)
+
+        cb.ax.text(0.0, -0.3, "Low", va="top", ha="left", fontsize="small", color="black")
+        cb.ax.text(
+            0.0004, -0.3, "High", va="top", ha="left", fontsize="small", color="black"
+        )
+
+        fig.suptitle(
+            rf"\textbf{{{model_display_name} - 2D Loss Landscape Contours}}", y=0.98
+        )
+        plt.tight_layout()
+
+        plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_2d_new.pdf")
+        plt.savefig(IMG_DIR / "loss_landscape_2d.png")
+        plt.show(block=False)
+
+    # =========================================================================
+    # LOSS LANDSCAPE - 3D SURFACE (only if n_params == 3)
+    # =========================================================================
+    if PLOT_3D and n_params == 3:
+        i, j = 0, 1
+
+        spans = []
+        for idx in range(n_params):
+            if SPAN_OVERRIDE and idx in SPAN_OVERRIDE:
+                spans.append(SPAN_OVERRIDE[idx])
+            else:
+                spans.append(auto_span(theta_est[idx]))
+
         grid_i = make_range(theta_est[i], spans[i], N_2D)
         grid_j = make_range(theta_est[j], spans[j], N_2D)
-        if param_bounds is not None:
-            grid_i = np.clip(grid_i, param_bounds[i][0], param_bounds[i][1])
-            grid_j = np.clip(grid_j, param_bounds[j][0], param_bounds[j][1])
-
         Grid_i, Grid_j = np.meshgrid(grid_i, grid_j, indexing="ij")
 
-        # Compute loss over grid
         Z = np.zeros_like(Grid_i)
-        for ii in tqdm(
-            range(len(grid_i)), desc=f"2D loss {param_names[i]} vs {param_names[j]}"
-        ):
+        for ii in tqdm(range(len(grid_i)), desc="3D surface computation"):
             for jj in range(len(grid_j)):
                 th = theta_est.copy()
                 th[i] = Grid_i[ii, jj]
                 th[j] = Grid_j[ii, jj]
                 Z[ii, jj] = obj(th)
 
-        # Plot contour
-        cont = ax.contourf(Grid_i, Grid_j, Z, levels=30, cmap=cmap)
-        ax.scatter(
-            [theta_true[i]],
-            [theta_true[j]],
-            s=100,
-            color=default_colors[1],
-            edgecolors="black",
-            label="true",
-        )
-        ax.scatter(
-            [theta_est[i]],
-            [theta_est[j]],
-            marker="*",
-            s=50,
-            color=default_colors[2],
-            edgecolors="black",
-            label="estimate",
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection="3d")
+        surf = ax.plot_surface(
+            Grid_i, Grid_j, Z, cmap=cmap, linewidth=0, antialiased=True, alpha=0.95
         )
         ax.set_xlabel(to_latex_label(param_names[i]))
         ax.set_ylabel(to_latex_label(param_names[j]))
+        ax.set_zlabel("MSE")
+
+        fixed_str = f"{to_latex_label(param_names[2])}={theta_est[2]:.3g}"
         ax.set_title(
-            rf"{to_latex_label(param_names[i])} vs. {to_latex_label(param_names[j])} (others fixed)"
+            f"{model_display_name} | MSE({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
         )
 
-    # Hide unused subplots
-    for idx in range(n_pairs, len(axes)):
-        axes[idx].axis("off")
+        z_est = obj(theta_est)
+        th_true_proj = theta_est.copy()
+        th_true_proj[i] = theta_true[i]
+        th_true_proj[j] = theta_true[j]
+        z_true_proj = obj(th_true_proj)
 
-    # Create a single legend below all subplots
-    handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(
-        handles,
-        labels,
-        loc="upper center",
-        ncol=n_pairs,
-        bbox_to_anchor=(0.5, 0.03),
-        frameon=True,
-    )
-
-    # Create a single shared colorbar below all subplots
-    cbar_ax = fig.add_axes([0.25, -0.04, 0.5, 0.02])  # [left, bottom, width, height]
-    cb = fig.colorbar(
-        cont,
-        cax=cbar_ax,
-        orientation="horizontal",
-    )
-
-    # Replace numeric ticks with qualitative labels
-    cb.set_ticks([])
-    cb.set_label("MSE Loss", labelpad=5)
-
-    # Optional gradient labels for clarity
-    cb.ax.text(0.0, -0.3, "Low", va="top", ha="left", fontsize="small", color="black")
-    cb.ax.text(
-        0.0004, -0.3, "High", va="top", ha="left", fontsize="small", color="black"
-    )
-
-    fig.suptitle(
-        rf"\textbf{{{model_display_name} - 2D Loss Landscape Contours}}", y=0.98
-    )
-    plt.tight_layout()
-
-    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_loss_landscape_2d_new.pdf")
-    plt.savefig(IMG_DIR / "loss_landscape_2d.png")
-    plt.show(block=False)
-
-
-# %%
-# =============================================================================
-# LOSS LANDSCAPE - 3D SURFACE (only if n_params == 3)
-# =============================================================================
-
-if PLOT_3D and n_params == 3:
-    # Use first two parameters for 3D plot
-    i, j = 0, 1
-
-    spans = []
-    for idx in range(n_params):
-        if SPAN_OVERRIDE and idx in SPAN_OVERRIDE:
-            spans.append(SPAN_OVERRIDE[idx])
-        else:
-            spans.append(auto_span(theta_est[idx]))
-
-    grid_i = make_range(theta_est[i], spans[i], N_2D)
-    grid_j = make_range(theta_est[j], spans[j], N_2D)
-    Grid_i, Grid_j = np.meshgrid(grid_i, grid_j, indexing="ij")
-
-    Z = np.zeros_like(Grid_i)
-    for ii in tqdm(range(len(grid_i)), desc="3D surface computation"):
-        for jj in range(len(grid_j)):
-            th = theta_est.copy()
-            th[i] = Grid_i[ii, jj]
-            th[j] = Grid_j[ii, jj]
-            Z[ii, jj] = obj(th)
-
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    surf = ax.plot_surface(
-        Grid_i, Grid_j, Z, cmap=cmap, linewidth=0, antialiased=True, alpha=0.95
-    )
-    ax.set_xlabel(to_latex_label(param_names[i]))
-    ax.set_ylabel(to_latex_label(param_names[j]))
-    ax.set_zlabel("MSE")
-
-    fixed_str = f"{to_latex_label(param_names[2])}={theta_est[2]:.3g}"
-    ax.set_title(
-        f"{model_display_name} | MSE({to_latex_label(param_names[i])}, {to_latex_label(param_names[j])}) | {fixed_str}"
-    )
-
-    z_est = obj(theta_est)
-    th_true_proj = theta_est.copy()
-    th_true_proj[i] = theta_true[i]
-    th_true_proj[j] = theta_true[j]
-    z_true_proj = obj(th_true_proj)
-
-    ax.scatter(
-        [theta_est[i]],
-        [theta_est[j]],
-        [z_est],
-        s=50,
-        color=default_colors[2],
-        label="estimate",
-    )
-    ax.scatter(
-        [theta_true[i]],
-        [theta_true[j]],
-        [z_true_proj],
-        color=default_colors[1],
-        edgecolors="black",
-        s=45,
-        label=f"true ({to_latex_label(param_names[2])} fixed)",
-    )
-    fig.colorbar(surf, ax=ax, shrink=0.7, aspect=12, pad=0.1, label="MSE")
-    ax.legend(loc="best")
-    plt.tight_layout()
-    plt.savefig(IMG_DIR / "loss_landscape_3d.png")
-    plt.show(block=False)
-
-
-# %%
-# =============================================================================
-# HESSIAN-BASED DIAGNOSTICS
-# =============================================================================
-# Canonical NLL Hessian in scaled parameter space for numerical stability.
-# Cov = H_NLL^{-1} directly (sigma_sq=1.0, absorbed into NLL).
-HESS_STEP = 1e-3  # step size for numerical Hessian
-
-# Parameter scaling: map param_bounds → [0,1]^n if bounds available
-if param_bounds is not None:
-    _lowers_h = np.array([b[0] for b in param_bounds])
-    _scales_h = np.array([b[1] - b[0] for b in param_bounds])
-else:
-    _lowers_h = np.zeros(n_params)
-    _scales_h = np.ones(n_params)
-
-
-def _to_scaled_h(theta):
-    return (theta - _lowers_h) / _scales_h
-
-
-def _from_scaled_h(s):
-    return s * _scales_h + _lowers_h
-
-
-# Build canonical NLL objective: 0.5 * SSE / sigma2_est
-# Residuals are in original (un-normalised) space so that the Hessian and CIs
-# are directly interpretable in terms of the original parameters and data.
-_r_est = (y_obs - model(theta_est, x_data)).ravel()
-_sigma2_est = float(np.dot(_r_est, _r_est)) / max(_r_est.size - n_params, 1)
-
-
-def _nll_obj(theta):
-    y_pred = model(theta, x_data)
-    if not np.all(np.isfinite(y_pred)):
-        return 1e10
-    r = (y_obs - y_pred).ravel()
-    return 0.5 * float(np.dot(r, r)) / _sigma2_est
-
-
-def _nll_scaled_h(s):
-    return _nll_obj(_from_scaled_h(s))
-
-
-theta_s = _to_scaled_h(theta_est)
-
-# Initialise fallback values
-se = np.full(n_params, np.nan)
-ci = np.full((n_params, 2), np.nan)
-cov = np.full((n_params, n_params), np.nan)
-corr = None
-max_offdiag_corr = np.nan
-hess_diag = {}
-cov_is_calibrated = False
-
-try:
-    H_nll_s = nd.Hessian(_nll_scaled_h, step=HESS_STEP)(theta_s)
-    H_nll_s = 0.5 * (H_nll_s + H_nll_s.T)
-    H_nll = H_nll_s / np.outer(_scales_h, _scales_h)
-
-    # Hessian diagnostics using positive-spectrum condition number
-    hess_diag = compute_hessian_diagnostics(H_nll)
-
-    # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def).
-    # The diagnostics dict surfaces ``regularization_warning`` whenever the
-    # ridge had to lift indefiniteness beyond the epsilon floor — that case
-    # means the reported covariance is regularised, not the asymptotic
-    # inverse-Hessian, and CIs are not calibrated.
-    cov, cov_diag = safe_hessian_inversion(
-        H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
-    )
-    cov_is_calibrated = not (
-        cov_diag.get("regularization_warning", False)
-        or hess_diag.get("is_near_singular", False)
-    )
-    if not cov_is_calibrated:
-        print(
-            "⚠️  Covariance is regularised (adaptive_ridge lifted indefinite "
-            "Hessian); reported CIs are diagnostic, not asymptotic."
+        ax.scatter(
+            [theta_est[i]],
+            [theta_est[j]],
+            [z_est],
+            s=50,
+            color=default_colors[2],
+            label="estimate",
         )
-    se = compute_standard_errors(cov, warn_negative=True)
-    ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
-    corr = compute_correlation_matrix(cov, handle_degenerate=True)
-    max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
+        ax.scatter(
+            [theta_true[i]],
+            [theta_true[j]],
+            [z_true_proj],
+            color=default_colors[1],
+            edgecolors="black",
+            s=45,
+            label=f"true ({to_latex_label(param_names[2])} fixed)",
+        )
+        fig.colorbar(surf, ax=ax, shrink=0.7, aspect=12, pad=0.1, label="MSE")
+        ax.legend(loc="best")
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "loss_landscape_3d.png")
+        plt.show(block=False)
 
-    # Plot correlation matrix
-    latex_labels = [to_latex_label(name) for name in param_names]
-    fig, ax = plt.subplots()
-    heatmap = sns.heatmap(
-        corr,
-        annot=True,
-        fmt=".2f",
-        cmap=conf_cmap,
-        vmin=-1,
-        vmax=1,
-        xticklabels=latex_labels,
-        yticklabels=latex_labels,
-        ax=ax,
-        square=True,
-        cbar_kws={"label": "Correlation"},
-    )
-    ax.tick_params(which="both", left=False, bottom=False)
-    cbar = heatmap.collections[0].colorbar
-    cbar.ax.tick_params(which="both", size=0)
-    ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
-    plt.tight_layout()
-    plt.savefig(IMG_DIR / "correlation_matrix.png")
-    plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf")
-    plt.show(block=False)
+    # =========================================================================
+    # HESSIAN-BASED DIAGNOSTICS
+    # =========================================================================
+    # Canonical NLL Hessian in scaled parameter space for numerical stability.
+    # Cov = H_NLL^{-1} directly (sigma_sq=1.0, absorbed into NLL).
+    HESS_STEP = cfg.hess_step
 
-except (np.linalg.LinAlgError, Exception) as _hess_err:
-    print(f"⚠️  Hessian inversion failed: {type(_hess_err).__name__}: {_hess_err}")
+    # Parameter scaling: map param_bounds → [0,1]^n if bounds available
+    if param_bounds is not None:
+        _lowers_h = np.array([b[0] for b in param_bounds])
+        _scales_h = np.array([b[1] - b[0] for b in param_bounds])
+    else:
+        _lowers_h = np.zeros(n_params)
+        _scales_h = np.ones(n_params)
+
+    def _to_scaled_h(theta):
+        return (theta - _lowers_h) / _scales_h
+
+    def _from_scaled_h(s):
+        return s * _scales_h + _lowers_h
+
+    # Build canonical NLL objective: 0.5 * SSE / sigma2_est
+    # Residuals are in original (un-normalised) space so that the Hessian and CIs
+    # are directly interpretable in terms of the original parameters and data.
+    _r_est = (y_obs - model(theta_est, x_data)).ravel()
+    _sigma2_est = float(np.dot(_r_est, _r_est)) / max(_r_est.size - n_params, 1)
+
+    def _nll_obj(theta):
+        y_pred = model(theta, x_data)
+        if not np.all(np.isfinite(y_pred)):
+            return 1e10
+        r = (y_obs - y_pred).ravel()
+        return 0.5 * float(np.dot(r, r)) / _sigma2_est
+
+    def _nll_scaled_h(s):
+        return _nll_obj(_from_scaled_h(s))
+
+    theta_s = _to_scaled_h(theta_est)
+
+    # Initialise fallback values
+    se = np.full(n_params, np.nan)
+    ci = np.full((n_params, 2), np.nan)
+    cov = np.full((n_params, n_params), np.nan)
+    corr = None
+    max_offdiag_corr = np.nan
+    hess_diag = {}
     cov_is_calibrated = False
 
-# Print diagnostics
-cond = hess_diag.get("condition_number", np.inf)
-rank_deficient = hess_diag.get("is_near_singular", True)
-print("\nHessian diagnostics:")
-if hess_diag:
-    print(f"  Eigenvalues (min/med/max): "
-          f"{hess_diag['eigvals_min']:.3e} / "
-          f"{hess_diag['eigvals_med']:.3e} / "
-          f"{hess_diag['eigvals_max']:.3e}")
-    print(f"  Condition number (pos. spectrum): {cond:.2e}")
-    print(f"  Negative eigenvalues: {hess_diag['n_negative_eigvals']}")
-    if hess_diag["is_near_singular"]:
-        print("  ⚠️  Near-singular Hessian — model may be degenerate!")
-else:
-    print("  (Hessian computation failed)")
+    try:
+        H_nll_s = nd.Hessian(_nll_scaled_h, step=HESS_STEP)(theta_s)
+        H_nll_s = 0.5 * (H_nll_s + H_nll_s.T)
+        H_nll = H_nll_s / np.outer(_scales_h, _scales_h)
 
-print(f"  Standard errors: {np.round(se, 4)}")
+        hess_diag = compute_hessian_diagnostics(H_nll)
 
-if np.isfinite(max_offdiag_corr):
-    print(f"  Max. off-diagonal correlation: {max_offdiag_corr:.3f}")
-    if max_offdiag_corr > 0.95:
-        print("  ⚠️  High parameter correlation - identifiability issues!")
-
-if not rank_deficient:
-    print("  95% Confidence intervals (local quadratic approx):")
-    for i, name in enumerate(param_names):
-        print(
-            f"    {name}: [{ci[i, 0]:.4f}, {ci[i, 1]:.4f}] (True: {theta_true[i]:.4f})"
+        # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def).
+        # The diagnostics dict surfaces ``regularization_warning`` whenever the
+        # ridge had to lift indefiniteness beyond the epsilon floor — that case
+        # means the reported covariance is regularised, not the asymptotic
+        # inverse-Hessian, and CIs are not calibrated.
+        cov, cov_diag = safe_hessian_inversion(
+            H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
         )
+        cov_is_calibrated = not (
+            cov_diag.get("regularization_warning", False)
+            or hess_diag.get("is_near_singular", False)
+        )
+        if not cov_is_calibrated:
+            print(
+                "⚠️  Covariance is regularised (adaptive_ridge lifted indefinite "
+                "Hessian); reported CIs are diagnostic, not asymptotic."
+            )
+        se = compute_standard_errors(cov, warn_negative=True)
+        ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
+        corr = compute_correlation_matrix(cov, handle_degenerate=True)
+        max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
+
+        # Plot correlation matrix
+        latex_labels = [to_latex_label(name) for name in param_names]
+        fig, ax = plt.subplots()
+        heatmap = sns.heatmap(
+            corr,
+            annot=True,
+            fmt=".2f",
+            cmap=conf_cmap,
+            vmin=-1,
+            vmax=1,
+            xticklabels=latex_labels,
+            yticklabels=latex_labels,
+            ax=ax,
+            square=True,
+            cbar_kws={"label": "Correlation"},
+        )
+        ax.tick_params(which="both", left=False, bottom=False)
+        cbar = heatmap.collections[0].colorbar
+        cbar.ax.tick_params(which="both", size=0)
+        ax.set_title(rf"\textbf{{{model_display_name} - Parameter Correlation Matrix}}")
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "correlation_matrix.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{title_suffix}_correlation_matrix_new.pdf")
+        plt.show(block=False)
+
+    except (np.linalg.LinAlgError, Exception) as _hess_err:
+        print(f"⚠️  Hessian inversion failed: {type(_hess_err).__name__}: {_hess_err}")
+        cov_is_calibrated = False
+
+    # Print diagnostics
+    cond = hess_diag.get("condition_number", np.inf)
+    rank_deficient = hess_diag.get("is_near_singular", True)
+    print("\nHessian diagnostics:")
+    if hess_diag:
+        print(f"  Eigenvalues (min/med/max): "
+              f"{hess_diag['eigvals_min']:.3e} / "
+              f"{hess_diag['eigvals_med']:.3e} / "
+              f"{hess_diag['eigvals_max']:.3e}")
+        print(f"  Condition number (pos. spectrum): {cond:.2e}")
+        print(f"  Negative eigenvalues: {hess_diag['n_negative_eigvals']}")
+        if hess_diag["is_near_singular"]:
+            print("  ⚠️  Near-singular Hessian — model may be degenerate!")
+    else:
+        print("  (Hessian computation failed)")
+
+    print(f"  Standard errors: {np.round(se, 4)}")
+
+    if np.isfinite(max_offdiag_corr):
+        print(f"  Max. off-diagonal correlation: {max_offdiag_corr:.3f}")
+        if max_offdiag_corr > 0.95:
+            print("  ⚠️  High parameter correlation - identifiability issues!")
+
+    if not rank_deficient:
+        print("  95% Confidence intervals (local quadratic approx):")
+        for i, name in enumerate(param_names):
+            print(
+                f"    {name}: [{ci[i, 0]:.4f}, {ci[i, 1]:.4f}] (True: {theta_true[i]:.4f})"
+            )
+
+    # =========================================================================
+    # NPZ ARTIFACT SAVE
+    # =========================================================================
+    # Mirrors spdcm_generic.py:873-889 so stage-3 sweep harnesses can ingest
+    # time-domain and spectral runs through a single loader. ``cov_is_calibrated``
+    # distinguishes asymptotic CIs from regularised / diagnostic ones.
+    np.savez(
+        IMG_DIR / "run_results.npz",
+        y_obs=y_obs,
+        y_pred=model(theta_est, x_data),
+        theta_est=theta_est,
+        theta_true=theta_true,
+        theta_zero=theta_zero,
+        se=se,
+        ci=ci,
+        cov=cov,
+        hess_cond=np.array([float(cond) if np.isfinite(cond) else np.nan]),
+        cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
+        hess_is_near_singular=np.array(
+            [bool(hess_diag.get("is_near_singular", True))]
+        ),
+        converged=np.array([bool(res.success)]),
+    )
+    print(f"\nArtifacts saved to: {IMG_DIR}")
+
+    # =========================================================================
+    # LOGGING
+    # =========================================================================
+    log_run(
+        model_name=model_name,
+        method=opt_method,
+        seed=cfg.seed,
+        settings={
+            "n_samples": n_samples if not IS_DCM_MODEL else y_obs.shape[0],
+            "noise_sigma": noise_std_actual,
+        },
+        params={
+            "names": param_names,
+            "true": theta_true.tolist(),
+            "init": theta_zero.tolist(),
+            "est": theta_est.tolist(),
+            "se": se.tolist() if not rank_deficient else [float("nan")] * n_params,
+            "corr_max": float(max_offdiag_corr) if np.isfinite(max_offdiag_corr) else None,
+        },
+        hessian={
+            "cond": float(cond),
+            "eigval_min": hess_diag.get("eigvals_min", float("nan")),
+            "eigval_max": hess_diag.get("eigvals_max", float("nan")),
+            "n_negative": hess_diag.get("n_negative_eigvals", 0),
+            "cov_is_calibrated": bool(cov_is_calibrated),
+            "converged": bool(res.success),
+        },
+        performance={"mse": float(mse_est)},
+        correlation=corr.tolist() if corr is not None else None,
+        overwrite=False,
+    )
 
 
-# %%
-# =============================================================================
-# NPZ ARTIFACT SAVE
-# =============================================================================
-# Mirrors spdcm_generic.py:873-889 so stage-3 sweep harnesses can ingest
-# time-domain and spectral runs through a single loader. ``cov_is_calibrated``
-# distinguishes asymptotic CIs from regularised / diagnostic ones.
-
-np.savez(
-    IMG_DIR / "run_results.npz",
-    y_obs=y_obs,
-    y_pred=model(theta_est, x_data),
-    theta_est=theta_est,
-    theta_true=theta_true,
-    theta_zero=theta_zero,
-    se=se,
-    ci=ci,
-    cov=cov,
-    hess_cond=np.array([float(cond) if np.isfinite(cond) else np.nan]),
-    cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
-    hess_is_near_singular=np.array(
-        [bool(hess_diag.get("is_near_singular", True))]
-    ),
-    converged=np.array([bool(res.success)]),
-)
-print(f"\nArtifacts saved to: {IMG_DIR}")
-
-
-# %%
-# =============================================================================
-# LOGGING
-# =============================================================================
-
-log_run(
-    model_name=model_name,
-    method=opt_method,
-    seed=SEED,
-    settings={
-        "n_samples": n_samples if not IS_DCM_MODEL else y_obs.shape[0],
-        "noise_sigma": noise_std_actual,
-    },
-    params={
-        "names": param_names,
-        "true": theta_true.tolist(),
-        "init": theta_zero.tolist(),
-        "est": theta_est.tolist(),
-        "se": se.tolist() if not rank_deficient else [float("nan")] * n_params,
-        "corr_max": float(max_offdiag_corr) if np.isfinite(max_offdiag_corr) else None,
-    },
-    hessian={
-        "cond": float(cond),
-        "eigval_min": hess_diag.get("eigvals_min", float("nan")),
-        "eigval_max": hess_diag.get("eigvals_max", float("nan")),
-        "n_negative": hess_diag.get("n_negative_eigvals", 0),
-        "cov_is_calibrated": bool(cov_is_calibrated),
-        "converged": bool(res.success),
-    },
-    performance={"mse": float(mse_est)},
-    correlation=corr.tolist() if corr is not None else None,
-    overwrite=False,
-)
-
-# %%
+if __name__ == "__main__":
+    cfg = RunConfig(
+        model_name=os.environ.get("DCSEM_ACTIVE_MODEL", "quadratic"),
+        seed=int(os.environ.get("DCSEM_SEED", 42)),
+        hess_step=float(os.environ.get("DCSEM_HESS_STEP", 1e-3)),
+    )
+    run_single(cfg)
