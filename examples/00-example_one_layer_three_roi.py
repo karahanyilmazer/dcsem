@@ -74,7 +74,7 @@ axs[1].set_xlabel("Time (s)")
 axs[1].set_ylabel("BOLD Signal")
 axs[1].legend()
 plt.tight_layout()
-plt.savefig("img/five_roi")
+plt.savefig("results/img/five_roi")
 plt.savefig(BASE_DIR / "five_roi")
 plt.show(block=False)
 # %%

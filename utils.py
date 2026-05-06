@@ -401,7 +401,7 @@ def log_run(
     params,
     hessian,
     performance,
-    log_dir="logs",
+    log_dir="results/logs",
     diagnostics=None,
     correlation=None,
     overwrite=False,
@@ -431,7 +431,7 @@ def log_run(
         "performance": performance,
         "diagnostics": diagnostics,
     }
-    Path(log_dir).mkdir(exist_ok=True)
+    Path(log_dir).mkdir(parents=True, exist_ok=True)
 
     # Create filename with timestamp to avoid overwriting
     if overwrite:
