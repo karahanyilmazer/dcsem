@@ -1,58 +1,77 @@
-# %%
-# !%load_ext autoreload
-# !%autoreload 2
+"""Forward-simulation demo — 2-layer DCM, 1 ROI, sweep over blood-draining λ_d.
+
+Cell-by-cell script. Open in VS Code's Interactive Window or Jupyter
+and step through the ``# %%`` blocks. The blood-draining parameter
+``λ_d`` controls how much of the deeper layer's hemodynamic response
+leaks into the upper layer. The upper-layer panel shows that mixing
+across a range of ``λ_d`` values; the lower-layer panel is unaffected
+by ``λ_d`` (no draining flows into it from below).
+"""
+
+# %% Imports + style + output dirs
 import matplotlib.pyplot as plt
 import numpy as np
 
-from dcsem import models, utils
+from dcsem.models import TwoLayerDCM
+from dcsem.utils import create_A_matrix, create_C_matrix, stim_boxcar
+from utils import get_out_dir, set_style
 
-# %%
-TR = 1  # Repetition time
-n_time = 100  # Number of time points
-time = np.linspace(0, n_time * TR, n_time)  # Seconds
+set_style()
+IMG_DIR = get_out_dir(type="img", subfolder="dcm")
+LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+FIG_NAME = "two_layer_one_roi"
 
-# Stimulus
-u = utils.stim_boxcar([[0, 30, 1]])  # (onset, duration, amplitude)
 
-# Connectivity parameters
+# %% Time vector + stimulus
+TR = 1.0
+n_time = 100
+time = np.linspace(0, n_time * TR, n_time)
+u = stim_boxcar([[0, 30, 1]])  # 30 s on, then off
+
+
+# %% Connectivity (A) and input (C) matrices
 num_rois = 1
 num_layers = 2
 
-# 1 ROI
-A = utils.create_A_matrix(num_rois, num_layers, self_connections=-1)
+A = create_A_matrix(num_rois, num_layers, self_connections=-1)
 print("A:\n", A)
 
-# Input -> ROI0, Layer0 : c = 1
+# Drive both layers equally; the difference between them comes from λ_d.
 input_connections = ["R0, L0 = 1.0", "R0, L1 = 1.0"]
-C = utils.create_C_matrix(num_rois, num_layers, input_connections)
+C = create_C_matrix(num_rois, num_layers, input_connections)
 print("C:\n", C)
 
-# Iterate over different values of lambda
-bold_tc = []
-lambdas = [0.9, 0.8, 0.6, 0.4, 0.1, 0]
 
+# %% Forward simulate across a sweep of λ_d
+lambdas = [0.0, 0.1, 0.4, 0.6, 0.8, 0.9]
+bold_tc = []
 for l in lambdas:
-    ldcm = models.TwoLayerDCM(num_rois, params={"A": A, "C": C, "l_d": l})
+    ldcm = TwoLayerDCM(num_rois, params={"A": A, "C": C, "l_d": l})
     bold_tc.append(ldcm.simulate(time, u)[0])
 
-fig, axs = plt.subplots(1, 2)
-axs[0].plot(bold_tc[0][:, 0], c=[0, 0, 0])
 
-for bold, l in zip(bold_tc, lambdas):
-    axs[1].plot(bold[:, 1], c=[l, l, l], label=rf"$\lambda_d$={l}")
+# %% Plot lower + upper layer BOLD (sweep colours = λ_d)
+fig, axs = plt.subplots(1, 2, figsize=(9, 4), sharey=True)
 
-# Adjust the plots
-axs[0].set_title("Lower Layer")
+# Lower layer is independent of λ_d — show one trace as ground truth.
+axs[0].plot(time, bold_tc[0][:, 0], color="k")
+axs[0].set_title("Lower layer")
 axs[0].set_xlabel("Time (s)")
-axs[0].set_ylabel("BOLD Signal")
-axs[0].set_ylim([0, 0.1])
-axs[0].grid()
+axs[0].set_ylabel("BOLD signal (a.u.)")
+axs[0].grid(alpha=0.3)
 
-axs[1].set_title("Upper Layer")
+# Upper layer absorbs draining from below — plot every λ_d.
+for bold, l in zip(bold_tc, lambdas):
+    axs[1].plot(time, bold[:, 1], color=str(l), label=rf"$\lambda_d$={l}")
+axs[1].set_title("Upper layer")
 axs[1].set_xlabel("Time (s)")
-axs[1].set_ylim([0, 0.1])
-axs[1].grid()
+axs[1].grid(alpha=0.3)
 axs[1].legend()
 
+fig.suptitle(r"\textbf{Two-layer DCM — effect of blood-draining $\lambda_d$}")
+plt.tight_layout()
+plt.savefig(IMG_DIR / f"{FIG_NAME}.png")
+plt.savefig(LATEX_DIR / f"{FIG_NAME}.pdf")
 plt.show(block=False)
+
 # %%
