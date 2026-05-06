@@ -278,5 +278,5 @@ results/
 data/
 .memsearch/
 *.pkl
-calculate_condition_number.py
-final_confusions.py
+experimentation/calculate_condition_number.py
+experimentation/final_confusions.py
