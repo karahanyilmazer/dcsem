@@ -337,3 +337,39 @@ class TestComputeConfidenceIntervals:
         # Midpoint should be the estimate
         midpoints = (ci[:, 0] + ci[:, 1]) / 2
         assert np.allclose(midpoints, theta_est)
+
+
+def test_cov_is_calibrated_stable_across_hessian_step_sizes():
+    """FD step variation across 4 orders of magnitude must not flip
+    ``cov_is_calibrated`` on a well-conditioned quadratic problem.
+
+    Pinned to catch future regressions where numdifftools defaults or
+    objective-function tolerances amplify FD noise to the point of
+    manufacturing indefiniteness in an otherwise positive-definite
+    Hessian.  This is the inversion-script analogue of the policy that
+    ``cov_is_calibrated`` should track *true* identifiability, not FD
+    rounding noise.
+    """
+    import numdifftools as nd
+
+    # Well-conditioned quadratic objective: 3 params, cond(H) ≈ 9.
+    A_true = np.array([1.0, 2.0, 3.0])
+    x = np.linspace(-1.0, 1.0, 100)
+
+    def obj(theta):
+        y_pred = theta[0] + theta[1] * x + theta[2] * x**2
+        y_true = A_true[0] + A_true[1] * x + A_true[2] * x**2
+        return 0.5 * float(np.dot(y_pred - y_true, y_pred - y_true))
+
+    results = []
+    for step in (1e-2, 1e-3, 1e-4, 1e-5):
+        H = nd.Hessian(obj, step=step)(A_true)
+        H = 0.5 * (H + H.T)
+        _, diag = safe_hessian_inversion(
+            H, 1.0, regularization=1e-6, method="adaptive_ridge"
+        )
+        cov_is_calibrated = not diag.get("regularization_warning", False)
+        results.append((step, cov_is_calibrated))
+
+    flips = [r for r in results if not r[1]]
+    assert not flips, f"FD step flipped cov_is_calibrated: {results}"
