@@ -278,6 +278,7 @@ results/
 data/
 .memsearch/
 *.pkl
-experimentation/calculate_condition_number.py
-experimentation/final_confusions.py
+scripts/experimentation/calculate_condition_number.py
+scripts/experimentation/final_confusions.py
 .code-review-graph/
+.cache/

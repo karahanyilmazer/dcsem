@@ -30,3 +30,9 @@ dependencies = [
 
 [tool.uv.sources]
 bench = { git = "https://git.fmrib.ox.ac.uk/hossein/bench.git" }
+
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+
+[tool.ruff]
+cache-dir = ".cache/ruff"
