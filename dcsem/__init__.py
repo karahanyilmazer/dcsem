@@ -57,6 +57,8 @@ from .utils import (
 # Validation utilities
 from .validation import (
     ShapeError,
+    assert_dcm_stable,
+    is_stable_A,
     validate_bold_shape,
     validate_connectivity_matrix,
     validate_input_matrix,
@@ -93,6 +95,8 @@ __all__ = [
     "validate_input_matrix",
     "validate_stimulus",
     "validate_parameters_in_bounds",
+    "is_stable_A",
+    "assert_dcm_stable",
     # Plotting
     "set_style",
     "get_param_colors",

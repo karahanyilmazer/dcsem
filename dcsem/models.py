@@ -788,14 +788,19 @@ class DCM(BaseModel):
             raise FloatingPointError("DCM neural integration produced non-finite states.")
         return x
 
-    def simulate(self, tvec, u=None, p=None, CNR=None, generator=None):
+    def simulate(
+        self, tvec, u=None, p=None, CNR=None, generator=None, allow_unstable=False
+    ):
         """Generate BOLD+state time courses using ODE solver
         params:
-        tvec (array)  - Times where states are evaluated
-        p (array)     - The parameters used to simulate
-        u (function)  - Input function u(t) should be scalar for t scalar
-        CNR (float)   - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
-        generator     - numpy.random.Generator for stochastic mode (pass for reproducibility)
+        tvec (array)     - Times where states are evaluated
+        p (array)        - The parameters used to simulate
+        u (function)     - Input function u(t) should be scalar for t scalar
+        CNR (float)      - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
+        generator        - numpy.random.Generator for stochastic mode (pass for reproducibility)
+        allow_unstable   - bypass the stability pre-check on A (research only;
+                           an unstable system makes the adaptive ODE solver
+                           grind forever and effectively hang)
 
         returns:
         array (BOLD time course)
@@ -811,6 +816,12 @@ class DCM(BaseModel):
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
         try:
+            # Stability pre-check: max real eigenvalue of A must be < 0,
+            # otherwise neural dynamics diverge and the integrator hangs.
+            if not allow_unstable:
+                from dcsem.validation import assert_dcm_stable
+
+                assert_dcm_stable(self.p.A, name="A")
             ivp, x = self.integrate(tvec, p0, u, generator=generator)
         finally:
             if p is not None:

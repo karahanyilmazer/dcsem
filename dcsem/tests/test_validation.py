@@ -5,6 +5,8 @@ import pytest
 
 from dcsem.validation import (
     ShapeError,
+    assert_dcm_stable,
+    is_stable_A,
     validate_bold_shape,
     validate_connectivity_matrix,
     validate_input_matrix,
@@ -269,3 +271,106 @@ class TestShapeError:
             raise ShapeError("Custom message")
         except ShapeError as e:
             assert "Custom message" in str(e)
+
+
+class TestStability:
+    """Tests for is_stable_A and assert_dcm_stable."""
+
+    def test_stable_A_two_roi_returns_true(self):
+        """Stable: a01·a10 < 1 with self_connection=-1."""
+        A = np.array([[-1.0, 0.5], [0.4, -1.0]])
+        assert is_stable_A(A) is True
+
+    def test_unstable_A_two_roi_returns_false(self):
+        """Unstable: a01·a10 = 1.40 > 1 — the bug we hit in the example."""
+        A = np.array([[-1.0, 0.9817256226338589], [1.434253606094104, -1.0]])
+        assert is_stable_A(A) is False
+
+    def test_marginal_A_with_margin(self):
+        """Stable but borderline: a strict margin should reject it."""
+        # Eigenvalues = -1 ± 0.99, max = -0.01 (just barely stable)
+        A = np.array([[-1.0, 0.99], [1.0, -1.0]])
+        assert is_stable_A(A) is True
+        assert is_stable_A(A, margin=0.05) is False
+
+    def test_assert_stable_passes_silently(self):
+        """assert_dcm_stable returns None on stable input."""
+        A = np.array([[-1.0, 0.5], [0.4, -1.0]])
+        assert assert_dcm_stable(A) is None
+
+    def test_assert_unstable_raises_with_eig_in_message(self):
+        """assert_dcm_stable raises with a useful message including the eigenvalue."""
+        A = np.array([[-1.0, 0.9817256226338589], [1.434253606094104, -1.0]])
+        with pytest.raises(ValueError, match=r"unstable.*eigenvalue"):
+            assert_dcm_stable(A)
+
+    def test_assert_unstable_raises_includes_param_hint(self):
+        """Error message tells the user how to fix it."""
+        A = np.array([[-1.0, 1.5], [1.5, -1.0]])
+        with pytest.raises(ValueError, match=r"a01.*a10|self_connection"):
+            assert_dcm_stable(A)
+
+
+class TestDCMSimulateStabilityGuard:
+    """Pin that DCM.simulate fails fast on unstable A instead of hanging."""
+
+    def test_unstable_A_raises_before_integration(self):
+        """Pre-check fires before solve_ivp is invoked.
+
+        With a01=0.98, a10=1.43, self=-1, max real eigenvalue is +0.187 →
+        exponential blow-up → adaptive ODE solver shrinks step forever
+        and the call effectively hangs. Guard converts that into a
+        microsecond-level ValueError.
+        """
+        import time
+
+        from dcsem.models import DCM
+        from dcsem.utils import stim_boxcar
+
+        A = np.array([[-1.0, 0.9817256226338589], [1.434253606094104, -1.0]])
+        C = np.array([1.0, 0.5])
+        dcm = DCM(2, params={"A": A, "C": C})
+        u = stim_boxcar([[0, 10, 1]])
+        tvec = np.arange(50)
+
+        t0 = time.perf_counter()
+        with pytest.raises(ValueError, match="unstable"):
+            dcm.simulate(tvec, u)
+        elapsed = time.perf_counter() - t0
+        assert elapsed < 1.0, f"guard took {elapsed:.2f}s — too slow"
+
+    def test_allow_unstable_bypasses_guard(self):
+        """Research escape hatch: allow_unstable=True skips the check.
+
+        We assert only that the stability ValueError no longer fires;
+        the solver itself may still error or hang, which is the user's
+        problem when they opt out.
+        """
+        from dcsem.models import DCM
+        from dcsem.utils import stim_boxcar
+
+        A = np.array([[-1.0, 0.9817256226338589], [1.434253606094104, -1.0]])
+        C = np.array([1.0, 0.5])
+        dcm = DCM(2, params={"A": A, "C": C})
+        u = stim_boxcar([[0, 10, 1]])
+        tvec = np.array([0.0, 0.01])
+        try:
+            dcm.simulate(tvec, u, allow_unstable=True)
+        except ValueError as e:
+            if "unstable" in str(e).lower():
+                pytest.fail("allow_unstable=True should bypass the stability check")
+
+    def test_stable_A_simulates_normally(self):
+        """Sanity: the guard does not break the happy path."""
+        from dcsem.models import DCM
+        from dcsem.utils import stim_boxcar
+
+        A = np.array([[-1.0, 0.4], [0.4, -1.0]])
+        C = np.array([1.0, 0.5])
+        dcm = DCM(2, params={"A": A, "C": C})
+        u = stim_boxcar([[0, 10, 1]])
+        tvec = np.arange(50)
+
+        bold, _ = dcm.simulate(tvec, u)
+        assert bold.shape == (50, 2)
+        assert np.all(np.isfinite(bold))

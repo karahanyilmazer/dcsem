@@ -192,3 +192,46 @@ def validate_parameters_in_bounds(
         raise ValueError(f"Parameters out of bounds: {', '.join(msg_parts)}")
 
     return violations
+
+
+def is_stable_A(A: np.ndarray, margin: float = 0.0) -> bool:
+    """Return True iff a linear DCM with this A matrix is asymptotically stable.
+
+    Stability of dx/dt = A x + C u requires every eigenvalue of A to have
+    a negative real part. With self-connection -s and 2-ROI off-diagonals
+    a01, a10, the eigenvalues are -s ± sqrt(a01 * a10), so a01 * a10 < s^2
+    is the practical rule.
+
+    Args:
+        A: connectivity matrix (square).
+        margin: required stability margin. ``margin > 0`` requires
+            ``max(real(eig)) < -margin`` so borderline-stable matrices are
+            rejected. Default 0.0 = strict negativity.
+
+    Returns:
+        True if every eigenvalue of A has real part below -margin.
+    """
+    return float(np.max(np.linalg.eigvals(A).real)) < -margin
+
+
+def assert_dcm_stable(A: np.ndarray, *, name: str = "A") -> None:
+    """Raise ValueError if A produces unstable DCM neural dynamics.
+
+    Used by ``DCM.simulate`` and ``utils.simulate_bold`` to fail fast (in
+    microseconds) instead of letting the adaptive ODE solver grind forever
+    on a divergent trajectory. Unstable systems are physically meaningful
+    only for narrow research questions; the default forward path treats
+    them as a bug.
+
+    Raises:
+        ValueError: with the offending eigenvalue and a parameter hint.
+    """
+    max_eig = float(np.max(np.linalg.eigvals(A).real))
+    if max_eig > 0.0:
+        raise ValueError(
+            f"DCM neural dynamics are unstable: max real eigenvalue of {name} "
+            f"is {max_eig:+.4f} (need <= 0; >0 causes exponential blow-up "
+            f"and the ODE integrator hangs). Reduce off-diagonals so "
+            f"a01·a10 < self_connection^2, strengthen self-inhibition, or "
+            f"pass allow_unstable=True to override (research only)."
+        )
