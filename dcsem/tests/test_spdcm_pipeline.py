@@ -18,7 +18,7 @@ def test_resolve_effective_tr_uses_npz_tr_over_cfg(tmp_path):
     at the wrong sampling rate when the file's TR differed.  The helper
     now reads the NPZ's TR up-front so the model sees the right sampling rate.
     """
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     npz_path = tmp_path / "bold.npz"
     bold = np.random.default_rng(0).standard_normal((200, 2)).astype(np.float32)
@@ -34,7 +34,7 @@ def test_resolve_effective_tr_uses_npz_tr_over_cfg(tmp_path):
 
 def test_resolve_effective_tr_falls_back_to_cfg_when_npz_lacks_tr(tmp_path):
     """If the NPZ has no ``TR`` key, ``cfg.TR`` is used."""
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     npz_path = tmp_path / "bold_no_tr.npz"
     bold = np.random.default_rng(0).standard_normal((100, 2)).astype(np.float32)
@@ -50,7 +50,7 @@ def test_resolve_effective_tr_falls_back_to_cfg_when_npz_lacks_tr(tmp_path):
 
 def test_resolve_effective_tr_passthrough_for_synthetic_modes():
     """Non-empirical modes return ``cfg.TR`` and ``None`` for bold."""
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     for mode in ("synthetic_csd", "synthetic_bold"):
         cfg = RunConfig(data_mode=mode, TR=1.5)
@@ -62,7 +62,7 @@ def test_resolve_effective_tr_passthrough_for_synthetic_modes():
 def test_resolve_effective_tr_warns_on_mismatch(tmp_path, capsys):
     """Mismatch between ``cfg.TR`` and NPZ TR must surface a warning so the
     silent-override behaviour is impossible."""
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     npz_path = tmp_path / "bold_tr_mismatch.npz"
     np.savez(
@@ -84,8 +84,8 @@ def test_mcmc_runconfig_routes_through_resolve_effective_tr(tmp_path):
     that future field renames cannot silently bypass the TR resolution path
     in the MCMC script.
     """
-    from spdcm_generic import _resolve_effective_tr
-    from spdcm_mcmc_generic import RunConfig as MCMCRunConfig
+    from pipelines.spdcm_generic import _resolve_effective_tr
+    from pipelines.spdcm_mcmc_generic import RunConfig as MCMCRunConfig
 
     npz_path = tmp_path / "bold_mcmc.npz"
     np.savez(
@@ -104,7 +104,7 @@ def test_mcmc_runconfig_routes_through_resolve_effective_tr(tmp_path):
 def test_resolve_effective_tr_csv_uses_cfg_tr(tmp_path):
     """CSV files carry no TR metadata; must fall back to ``cfg.TR`` and load
     the BOLD without raising."""
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     csv_path = tmp_path / "bold.csv"
     bold = np.random.default_rng(0).standard_normal((50, 2))
@@ -128,8 +128,8 @@ def test_mcmc_runconfig_supports_csv_empirical_mode(tmp_path):
     L-BFGS script is not lost."""
     import pandas as pd
 
-    from spdcm_generic import _resolve_effective_tr
-    from spdcm_mcmc_generic import RunConfig as MCMCRunConfig
+    from pipelines.spdcm_generic import _resolve_effective_tr
+    from pipelines.spdcm_mcmc_generic import RunConfig as MCMCRunConfig
 
     csv_path = tmp_path / "bold_mcmc.csv"
     bold = np.random.default_rng(0).standard_normal((40, 2))
@@ -149,7 +149,7 @@ def test_resolve_effective_tr_raises_on_missing_bold_key(tmp_path):
     """An NPZ that lacks the ``"bold"`` key must produce a clear error
     naming the available keys, not an opaque ``KeyError`` from numpy.
     """
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     npz_path = tmp_path / "wrong_key.npz"
     np.savez(npz_path, BOLD=np.zeros((50, 2)), TR=np.float64(1.0))
@@ -162,7 +162,7 @@ def test_resolve_effective_tr_raises_on_missing_bold_key(tmp_path):
 def test_resolve_effective_tr_requires_bold_path_in_empirical_mode():
     """Empirical mode without ``cfg.bold_path`` raises before silently using
     cfg.TR on no-data."""
-    from spdcm_generic import RunConfig, _resolve_effective_tr
+    from pipelines.spdcm_generic import RunConfig, _resolve_effective_tr
 
     cfg = RunConfig(data_mode="empirical", bold_path=None, TR=1.0)
     with pytest.raises(ValueError, match="bold_path"):
@@ -188,7 +188,7 @@ def test_spdcm_artifact_schema_includes_calibration_flag(tmp_path, monkeypatch):
     monkeypatch.setenv("DCSEM_LATEX_DIR", str(tmp_path / "latex"))
     (tmp_path / "latex").mkdir(parents=True, exist_ok=True)
 
-    from spdcm_generic import RunConfig, run_single
+    from pipelines.spdcm_generic import RunConfig, run_single
 
     cfg = RunConfig(
         data_mode="synthetic_csd",

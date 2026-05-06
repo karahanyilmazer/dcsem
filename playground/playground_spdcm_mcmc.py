@@ -34,8 +34,8 @@ from dcsem.numerics import (  # noqa: E402
     compute_standard_errors,
 )
 from dcsem.utils import is_chain_converged  # noqa: E402
-from spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e  # noqa: E402
-from spdcm_mcmc_generic import RunConfig, _resolve_param_spec  # noqa: E402
+from pipelines.spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e  # noqa: E402
+from pipelines.spdcm_mcmc_generic import RunConfig, _resolve_param_spec  # noqa: E402
 from utils import get_out_dir  # noqa: E402
 
 # %% Configure the run (small sample counts for fast iteration)

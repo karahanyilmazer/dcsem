@@ -107,7 +107,7 @@ def test_inversion_generic_artifact_schema(tmp_path, monkeypatch):
     _prepare_runpy_env(monkeypatch, tmp_path, active_model="quadratic")
 
     runpy.run_path(
-        str(PROJECT_ROOT / "inversion_generic.py"),
+        str(PROJECT_ROOT / "pipelines" / "inversion_generic.py"),
         run_name="__main__",
     )
 
@@ -170,7 +170,7 @@ def test_mcmc_generic_artifact_schema(tmp_path, monkeypatch):
     monkeypatch.setenv("DCSEM_N_SAMPLES_MCMC", "300")
 
     runpy.run_path(
-        str(PROJECT_ROOT / "mcmc_generic.py"),
+        str(PROJECT_ROOT / "pipelines" / "mcmc_generic.py"),
         run_name="__main__",
     )
 
