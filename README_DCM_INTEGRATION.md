@@ -1,12 +1,12 @@
 # DCM Model Integration for Parameter Estimation
 
-Both `pipelines/inversion_generic.py` and `pipelines/mcmc_generic.py` now support DCM 2-ROI BOLD models alongside analytical models.
+Both `scripts/pipelines/inversion_generic.py` and `scripts/pipelines/mcmc_generic.py` now support DCM 2-ROI BOLD models alongside analytical models.
 
 ## Quick Start
 
-### For Optimizer-Based Estimation (`pipelines/inversion_generic.py`)
+### For Optimizer-Based Estimation (`scripts/pipelines/inversion_generic.py`)
 
-1. Open `pipelines/inversion_generic.py`
+1. Open `scripts/pipelines/inversion_generic.py`
 2. Comment out the active model (e.g., quadratic)
 3. Uncomment the DCM model section (lines ~119-157):
 
@@ -40,9 +40,9 @@ param_bounds = [
 
 4. Run the script normally
 
-### For MCMC-Based Estimation (`pipelines/mcmc_generic.py`)
+### For MCMC-Based Estimation (`scripts/pipelines/mcmc_generic.py`)
 
-1. Open `pipelines/mcmc_generic.py`
+1. Open `scripts/pipelines/mcmc_generic.py`
 2. Comment out the active model (e.g., quadratic)
 3. Uncomment the DCM model section (lines ~120-168):
 
@@ -154,7 +154,7 @@ noise_sigma = 0.05    # Moderate noise
 noise_sigma = 0.0     # No noise (perfect observations)
 ```
 
-### MCMC Settings (`pipelines/mcmc_generic.py` only)
+### MCMC Settings (`scripts/pipelines/mcmc_generic.py` only)
 ```python
 n_walkers = 24        # Number of MCMC walkers
 n_burn = 5000         # Burn-in iterations
@@ -163,7 +163,7 @@ n_samples_mcmc = 10000  # Sampling iterations
 
 ## Output Structure
 
-### Optimizer-Based (`pipelines/inversion_generic.py`)
+### Optimizer-Based (`scripts/pipelines/inversion_generic.py`)
 ```
 img/inversion/L-BFGS-B/dcm_2roi/
 ├── data_fit.png              # Multi-ROI BOLD time series
@@ -174,7 +174,7 @@ img/inversion/L-BFGS-B/dcm_2roi/
 logs/dcm_2roi_L-BFGS-B.json  # Full results log
 ```
 
-### MCMC-Based (`pipelines/mcmc_generic.py`)
+### MCMC-Based (`scripts/pipelines/mcmc_generic.py`)
 ```
 img/inversion/MCMC/dcm_2roi/
 ├── data_fit.png              # Multi-ROI BOLD with posterior mean
