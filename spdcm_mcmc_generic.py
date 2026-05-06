@@ -12,6 +12,7 @@ from scipy import optimize
 from sklearn.metrics import mean_squared_error
 
 from dcsem import SpectralDCM, get_colormap, set_style, to_latex_label
+from dcsem.utils import is_chain_converged
 from spdcm_generic import _resolve_effective_tr, estimate_log_sigma_e
 from utils import get_out_dir, get_width_height_latex, log_run
 
@@ -370,10 +371,12 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()):
 
     # Real convergence flag: acceptance in healthy band AND enough effective samples.
     # Asymptotic-Gaussian credible intervals are reliable only when the chain has
-    # actually converged, so cov_is_calibrated tracks the same criterion.
+    # actually converged, so cov_is_calibrated tracks the same criterion.  The
+    # threshold logic lives in dcsem.utils.is_chain_converged so a future tweak
+    # changes one place; acc_ok/ess_ok stay inline for the diagnostic message.
     acc_ok = 0.15 <= acc_frac <= 0.80
-    ess_ok = np.isfinite(eff_total) and eff_total > 50 * n_params
-    converged = bool(acc_ok and ess_ok)
+    ess_ok = bool(np.isfinite(eff_total)) and eff_total > 50 * n_params
+    converged = is_chain_converged(acc_frac, eff_total, n_params)
     cov_is_calibrated = converged
     if not converged:
         reasons = []
