@@ -19,7 +19,7 @@ from utils import get_out_dir, set_style
 set_style()
 IMG_DIR = get_out_dir(type="img", subfolder="dcm")
 LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
-FIG_NAME = "two_layer_one_roi"
+FIG_NAME = "dcm_2layer_1roi"
 
 
 # %% Time vector + stimulus

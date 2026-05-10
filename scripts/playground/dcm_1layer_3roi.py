@@ -10,7 +10,7 @@ and step through the ``# %%`` blocks. Topology:
 
 Stage-2 ROI inhibits the source via a negative connection — this lets
 you see how feedback shapes the time course relative to the simpler
-2-ROI chain in ``one_layer_two_roi.py``.
+2-ROI chain in ``dcm_1layer_2roi.py``.
 """
 
 # %% Imports + style + output dirs
@@ -24,7 +24,7 @@ from utils import get_out_dir, set_style
 set_style()
 IMG_DIR = get_out_dir(type="img", subfolder="dcm")
 LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
-FIG_NAME = "one_layer_three_roi"
+FIG_NAME = "dcm_1layer_3roi"
 
 
 # %% Time vector + stimulus
@@ -60,7 +60,16 @@ bold, state_tc = dcm.simulate(time, u)
 # %% Diagram of the DCM model (parameters labelled, saved as SVG/PNG/PDF)
 from dcsem import plot_dcm_graph  # noqa: E402
 
-fig, _ = plot_dcm_graph(dcm)
+fig, _ = plot_dcm_graph(
+    dcm,
+    show_self_connections=True,
+    show_inputs=True,
+    threshold=1e-12,
+    figsize=None,
+    node_color=None,
+    node_radius=0.22,
+    fontsize=14,
+)
 for ext in ("svg", "png", "pdf"):
     target = (LATEX_DIR if ext == "pdf" else IMG_DIR) / f"{FIG_NAME}_graph.{ext}"
     fig.savefig(target, bbox_inches="tight")
