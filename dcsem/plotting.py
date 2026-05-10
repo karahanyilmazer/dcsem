@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from cycler import cycler
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Circle, FancyArrowPatch
+from matplotlib.patches import Arc, Circle, FancyArrowPatch
 
 
 def get_width_height_latex(column_width: float = 483.6969) -> tuple[float, float]:
@@ -212,6 +212,7 @@ def get_colormap(name: str = "parula", as_colors: bool = False):
         matplotlib colormap object.
     """
     import inspect
+
     import matplotlib.colors as mcolors
 
     # First, try to find the colormap in palettable
@@ -664,7 +665,7 @@ def plot_dcm_graph(
     threshold: float = 1e-12,
     figsize: Optional[tuple[float, float]] = None,
     node_color: Optional[Union[str, Sequence]] = None,
-    node_radius: float = 0.18,
+    node_radius: float = 0.22,
     fontsize: int = 14,
     title: Optional[str] = None,
     ax: Optional[plt.Axes] = None,
@@ -751,27 +752,54 @@ def plot_dcm_graph(
             xi, yi = positions[i]
             xj, yj = positions[j]
             dx, dy = xj - xi, yj - yi
-            d = float(np.hypot(dx, dy))
-            ux, uy = dx / d, dy / d
-            start = (xi + node_radius * ux, yi + node_radius * uy)
-            end = (xj - node_radius * ux, yj - node_radius * uy)
 
             # If the reverse connection also exists, curve the two arrows
             # in opposite directions so they don't overlap.
             has_reverse = abs(A[i, j]) >= threshold
-            rad = 0.25 if has_reverse else 0.0
+            rad = 0.50 if has_reverse else 0.0
+
+            # Attachment angles on the node boundaries. For bidirectional
+            # pairs, rotate each endpoint slightly along the bow direction
+            # so a_ij and a_ji attach at distinct points on the boundary
+            # (matplotlib's arc3 with rad>0 bows toward the right-perp of
+            # the chord, which corresponds to subtracting +sign(rad)*delta
+            # from the chord angle at the start node).
+            chord_angle = float(np.arctan2(dy, dx))
+            attach_offset = np.deg2rad(15) * (
+                1.0 if rad > 0 else -1.0 if rad < 0 else 0.0
+            )
+            start_angle = chord_angle - attach_offset
+            end_angle = chord_angle + np.pi + attach_offset
+            start = (
+                xi + node_radius * np.cos(start_angle),
+                yi + node_radius * np.sin(start_angle),
+            )
+            end = (
+                xj + node_radius * np.cos(end_angle),
+                yj + node_radius * np.sin(end_angle),
+            )
 
             _curved_arrow(ax, start, end, rad=rad)
 
-            # Label at midpoint, offset perpendicular toward the curve
-            # (positive rad bows to the LEFT looking from start→end).
-            mx = (start[0] + end[0]) / 2
-            my = (start[1] + end[1]) / 2
-            perp = np.array([-uy, ux])  # left-perpendicular
-            offset_mag = 0.18 + 0.5 * abs(rad)
-            sign = 1.0 if rad >= 0 else -1.0
-            lx = mx + sign * offset_mag * perp[0]
-            ly = my + sign * offset_mag * perp[1]
+            # matplotlib's arc3 places the bezier control point at
+            #   midpoint + rad * (dy, -dx)
+            # so the curve's apex (t=0.5) sits at midpoint + 0.5*rad*(dy,-dx).
+            # Compute the label position from the apex itself (not the chord
+            # midpoint) so the white bbox lines up with where the curve is.
+            sx, sy = start
+            ex, ey = end
+            mx = (sx + ex) / 2
+            my = (sy + ey) / 2
+            cdx, cdy = ex - sx, ey - sy
+            chord_len = max(float(np.hypot(cdx, cdy)), 1e-9)
+            # Right-perpendicular unit vector (matches matplotlib's rad sign).
+            rperp = np.array([cdy / chord_len, -cdx / chord_len])
+            apex_x = mx + 0.5 * rad * cdy
+            apex_y = my - 0.5 * rad * cdx
+            push = 0.15  # extra distance from arc to label, in data units
+            sign = 1.0 if rad >= 0 else (-1.0 if rad < 0 else 1.0)
+            lx = apex_x + sign * push * rperp[0]
+            ly = apex_y + sign * push * rperp[1]
             ax.text(
                 lx,
                 ly,
@@ -816,25 +844,89 @@ def plot_dcm_graph(
                 outward = np.array([x - layout_centre[0], y - layout_centre[1]])
                 outward = outward / max(np.linalg.norm(outward), 1e-9)
 
-            # Two attachment points on the node boundary, separated by an
-            # angular opening so the bezier produces a visible loop.
+            # Self-loop drawn as an elliptical arc squeezed perpendicular
+            # to the ROI surface: short axis runs OUTWARD (so the loop
+            # sits low against the node), long axis runs TANGENTIAL.
             base_angle = float(np.arctan2(outward[1], outward[0]))
-            half_opening = np.deg2rad(28)
-            p_left = (
-                x + node_radius * np.cos(base_angle - half_opening),
-                y + node_radius * np.sin(base_angle - half_opening),
+            half_opening = np.deg2rad(20)
+            loop_radius = 0.8 * node_radius
+            squeeze = 0.80  # outward / tangential — smaller = flatter loop
+            a_out = squeeze * loop_radius  # semi-axis along outward
+            b_tan = loop_radius  # semi-axis tangential
+
+            # Solve, in the ellipse's local frame (local +x = outward), for
+            # the centre offset D such that the ellipse passes through both
+            # attachment points (r·cos α, ±r·sin α) on the node boundary.
+            #   ((r·cos α − D)/a_out)² + (r·sin α / b_tan)² = 1
+            cos_a = float(np.cos(half_opening))
+            sin_a = float(np.sin(half_opening))
+            inner = 1.0 - (node_radius * sin_a / b_tan) ** 2
+            D = node_radius * cos_a + a_out * float(np.sqrt(max(inner, 1e-9)))
+            cx = x + D * outward[0]
+            cy = y + D * outward[1]
+
+            # Parametric angles of the two attachments in the ellipse's
+            # LOCAL frame (the one matplotlib's Arc uses internally before
+            # the `angle` rotation is applied).
+            local_x = (node_radius * cos_a - D) / a_out  # < 0 (node side)
+            local_y_top = node_radius * sin_a / b_tan
+            theta_top_local = float(np.arctan2(local_y_top, local_x))
+            theta_bot_local = float(np.arctan2(-local_y_top, local_x))
+
+            # CCW long arc from bottom attachment, through the outward apex
+            # (local +x), to the top attachment.
+            arc = Arc(
+                (cx, cy),
+                width=2 * a_out,
+                height=2 * b_tan,
+                angle=np.rad2deg(base_angle),  # rotate so local +x = outward
+                theta1=np.rad2deg(theta_bot_local),
+                theta2=np.rad2deg(theta_top_local),
+                color="black",
+                lw=1.2,
+                zorder=2,
             )
-            p_right = (
+            ax.add_patch(arc)
+
+            # Tangent arrowhead at the top attachment (end of the CCW
+            # sweep). Tail is one small angular step earlier along the arc
+            # so the arrow direction matches the local tangent at the tip.
+            ca_b, sa_b = float(np.cos(base_angle)), float(np.sin(base_angle))
+
+            def _local_to_world(lx_l, ly_l):
+                return (
+                    cx + ca_b * lx_l - sa_b * ly_l,
+                    cy + sa_b * lx_l + ca_b * ly_l,
+                )
+
+            dtheta = np.deg2rad(8)
+            theta_back = theta_top_local - dtheta
+            back_world = _local_to_world(
+                a_out * float(np.cos(theta_back)),
+                b_tan * float(np.sin(theta_back)),
+            )
+            tip_world = (
                 x + node_radius * np.cos(base_angle + half_opening),
                 y + node_radius * np.sin(base_angle + half_opening),
             )
-            _curved_arrow(
-                ax, p_left, p_right, rad=2.5, lw=1.2, mutation_scale=10
+            ax.add_patch(
+                FancyArrowPatch(
+                    back_world,
+                    tip_world,
+                    arrowstyle="-|>",
+                    color="black",
+                    lw=1.2,
+                    mutation_scale=10,
+                    shrinkA=0,
+                    shrinkB=0,
+                    zorder=3,
+                )
             )
 
+            # Label sits past the far side of the loop along the outward axis
             label_pos = (
-                x + 2.6 * node_radius * outward[0],
-                y + 2.6 * node_radius * outward[1],
+                cx + (a_out + 0.10) * outward[0],
+                cy + (a_out + 0.10) * outward[1],
             )
             ax.text(
                 label_pos[0],
@@ -846,14 +938,68 @@ def plot_dcm_graph(
                 zorder=4,
             )
 
-    # 4) External inputs (u(t) → c_i → x_i), arrows coming from below
+    # 4) External inputs (u(t) → c_i → x_i)
+    # For n<=2 the arrow comes from below (legacy default — works well when
+    # the polygon is degenerate). For n>=3 the input enters the node in the
+    # angular gap BETWEEN the self-loop's CCW endpoint and the nearest
+    # cross-ROI attachment, so the shaft cannot pass through either. The
+    # shaft is radial at the tip — perpendicular to the ROI boundary there.
+    half_opening_self = np.deg2rad(20)
     if show_inputs:
         for i in range(n):
             if abs(C[i]) < threshold:
                 continue
             x, y = positions[i]
-            tip = (x, y - node_radius - 0.04)
-            tail = (x, y - node_radius - 0.45)
+            if n >= 3:
+                outward_local = np.array([x - layout_centre[0], y - layout_centre[1]])
+                outward_local = outward_local / max(
+                    float(np.linalg.norm(outward_local)), 1e-9
+                )
+                base_a = float(np.arctan2(outward_local[1], outward_local[0]))
+                sl_right = base_a + half_opening_self
+                smallest_step = 2 * np.pi
+                for j in range(n):
+                    if j == i:
+                        continue
+                    chord_to_j = float(
+                        np.arctan2(positions[j][1] - y, positions[j][0] - x)
+                    )
+                    bidirectional = (
+                        abs(A[j, i]) >= threshold and abs(A[i, j]) >= threshold
+                    )
+                    delta = np.deg2rad(15) if bidirectional else 0.0
+                    if abs(A[j, i]) >= threshold:
+                        step = (chord_to_j - delta - sl_right) % (2 * np.pi)
+                        if 1e-6 < step < smallest_step:
+                            smallest_step = step
+                    if abs(A[i, j]) >= threshold:
+                        step = (chord_to_j + delta - sl_right) % (2 * np.pi)
+                        if 1e-6 < step < smallest_step:
+                            smallest_step = step
+                if smallest_step >= 2 * np.pi - 1e-6:
+                    smallest_step = np.pi
+                tip_a = sl_right + smallest_step / 2
+                tip_unit = np.array([float(np.cos(tip_a)), float(np.sin(tip_a))])
+                # 90° anti-clockwise rotation of outward
+                shaft_unit = np.array([-outward_local[1], outward_local[0]])
+            else:
+                tip_unit = np.array([0.0, -1.0])
+                shaft_unit = np.array([0.0, -1.0])
+
+            gap = 0.04  # small visual gap between arrow tip and node boundary
+            length = 0.55
+            boundary_pt = (
+                x + node_radius * tip_unit[0],
+                y + node_radius * tip_unit[1],
+            )
+            tip = (
+                boundary_pt[0] + gap * shaft_unit[0],
+                boundary_pt[1] + gap * shaft_unit[1],
+            )
+            tail = (
+                boundary_pt[0] + (gap + length) * shaft_unit[0],
+                boundary_pt[1] + (gap + length) * shaft_unit[1],
+            )
             ax.annotate(
                 "",
                 xy=tip,
@@ -861,19 +1007,22 @@ def plot_dcm_graph(
                 arrowprops=dict(arrowstyle="-|>", color="black", lw=1.5),
                 zorder=2,
             )
-            # c_i label sits beside the arrow shaft
+
+            # c_i label: beside the shaft midpoint, perpendicular to shaft
+            mid = ((tip[0] + tail[0]) / 2, (tip[1] + tail[1]) / 2)
+            perp = np.array([-shaft_unit[1], shaft_unit[0]])
             ax.text(
-                x + 0.08,
-                y - node_radius - 0.25,
+                mid[0] + 0.10 * perp[0],
+                mid[1] + 0.10 * perp[1],
                 rf"$c_{{{i}}}$",
-                ha="left",
+                ha="center",
                 va="center",
                 fontsize=fontsize + 1,
             )
-            # u(t) label below the arrow tail
+            # u(t) label: just past the tail along the shaft direction
             ax.text(
-                x,
-                y - node_radius - 0.58,
+                tail[0] + 0.15 * shaft_unit[0],
+                tail[1] + 0.15 * shaft_unit[1],
                 r"$u(t)$",
                 ha="center",
                 va="center",
@@ -887,8 +1036,8 @@ def plot_dcm_graph(
     xs = [p[0] for p in positions]
     ys = [p[1] for p in positions]
     pad_x = 0.7 + node_radius
-    pad_y_top = 0.9 + node_radius  # room for a_ii labels above top node
-    pad_y_bot = 0.95 + node_radius  # room for u(t) below bottom node
+    pad_y_top = 0.4 + node_radius  # room for a_ii labels above top node
+    pad_y_bot = 0.45 + node_radius  # room for u(t) below bottom node
     ax.set_xlim(min(xs) - pad_x, max(xs) + pad_x)
     ax.set_ylim(min(ys) - pad_y_bot, max(ys) + pad_y_top)
 
