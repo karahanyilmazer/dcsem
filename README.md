@@ -349,6 +349,55 @@ pointing at an NPZ with `bold: float32 (T, R)` and optional `TR: float`).
   simulating time-domain BOLD; default Runge-Kutta can blow up on stiff
   parameter sets.
 
+## Identifiability and PCA validation for BENCH
+
+The 2-ROI deterministic DCM with free parameters `{a01, a10, c0, c1}` was
+analysed for structural identifiability via the forward-model Fisher
+Information Matrix (FIM). At each of 200 random baselines drawn uniformly
+from `PARAM_BOUNDS`, the central-difference Jacobian `∂BOLD/∂θ` was
+computed and the FIM `J'J / σ²` formed (noise σ from
+`NOISE_CONFIG.get_noise_std`). Driver: `scripts/workflows/08-identifiability_analysis.py`.
+
+**Identifiability findings** (run 2026-05-10):
+
+- All four parameters are structurally identifiable at every tested baseline
+  (smallest FIM eigenvalue stays above the 1e-6 floor).
+- FIM eigenvalue spread spans ~4× on average (9.5e6 to 4.0e7) — moderately
+  sloppy but invertible.
+- Median FIM condition number ~26 500; worst-case ~3.1e9 (a small fraction
+  of baselines is severely ill-conditioned). The least-identifiable direction
+  is dominated by `a10` (loading +0.748) with anti-correlated `c1` (-0.493) —
+  i.e. trade-offs between an upstream connection and the corresponding input.
+
+**PCA-as-summary validation for BENCH** (the open methodological item from
+the March 2026 review):
+
+The BENCH pipeline (`scripts/workflows/05-apply_bench.py`) compresses the
+forward simulation into the top-k principal components of BOLD across 5000
+prior-sampled simulations. We checked whether this PCA basis preserves the
+parameter-space directions that the FIM identifies as informative, by
+projecting Jacobians: `J_pca = V_k' · J`, then measuring rank and
+condition number of `J_pca`.
+
+| `n_components` | Projected Jacobian full-rank | Median condition number |
+|---|---|---|
+| 3 | 0% of baselines (rank-deficient) | 33.5 |
+| 4 | 100% | 644 |
+| 5 | 100% | 452 |
+| 6 | 100% | 219 |
+
+Four PCA components is the minimum that preserves discriminability across
+all four DCM parameters — which justifies the `n_comps=4` default in
+`05-apply_bench.py`. With three components the projected Jacobian collapses
+to rank 3 in every tested baseline, meaning at least one parameter
+direction is invisible to BENCH. Increasing `n_components` beyond 4 only
+reduces the condition number of the projection; the rank ceiling is set by
+the parameter dimension.
+
+Figures: `results/images/identifiability/{fim_eigenvalue_spectrum,
+fim_correlation, bold_sensitivity}.png`. This closes the item flagged in
+the March 2026 review (PCA validation via Jacobian projection).
+
 
 ## SEM and Layer SEM
 
