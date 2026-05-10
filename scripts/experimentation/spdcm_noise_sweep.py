@@ -195,9 +195,9 @@ def run_snr_sweep():
                 H_nll_s = nd.Hessian(_nll_scaled, step=HESS_STEP)(theta_s)
                 H_nll_s = 0.5 * (H_nll_s + H_nll_s.T)
                 H_nll = H_nll_s / np.outer(_scales, _scales)
-                # Cov = H_NLL^{-1} via pinvh; sigma_sq=1.0 (absorbed into NLL)
+                # Cov = H_NLL^{-1} via adaptive_ridge; sigma_sq=1.0 (absorbed into NLL)
                 cov, _ = safe_hessian_inversion(
-                    H_nll, 1.0, regularization=1e-6, method="pinvh"
+                    H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
                 )
                 se_all[i, j] = compute_standard_errors(cov, warn_negative=False)
                 ci_all[i, j] = compute_confidence_intervals(res.x, se_all[i, j])
@@ -531,7 +531,7 @@ def run_snr_sweep():
             marker="^",
             lw=1.5,
             linestyle="--",
-            label="Hessian SE (pinvh+NLL)",
+            label="Hessian SE (adaptive_ridge+NLL)",
         )
         if N_BOOTSTRAP > 0:
             mean_bs_se = np.nanmean(bs_se_all, axis=1)
@@ -835,7 +835,7 @@ def run_snr_sweep():
     )
 
     lines.append("\n## 2. SE Calibration Table\n")
-    lines.append("| SNR | Param | Empirical SD | Hessian SE (pinvh+NLL) | Ratio |\n")
+    lines.append("| SNR | Param | Empirical SD | Hessian SE (adaptive_ridge+NLL) | Ratio |\n")
     lines.append("|-----|-------|-------------|----------------------|-------|\n")
     for i, snr in enumerate(SNR_GRID):
         for p, pname in enumerate(param_names):
@@ -880,7 +880,7 @@ def run_snr_sweep():
     else:
         lines.append(
             "Bootstrap was not run (N_BOOTSTRAP=0). "
-            "Hessian SE (pinvh+NLL) is a fast alternative for identifiable parameters "
+            "Hessian SE (adaptive_ridge+NLL) is a fast alternative for identifiable parameters "
             "but should be validated against bootstrap before use as primary uncertainty report.\n"
         )
     lines.append(

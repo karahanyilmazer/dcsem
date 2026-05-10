@@ -227,6 +227,13 @@ def test_spdcm_artifact_schema_includes_calibration_flag(tmp_path, monkeypatch):
     assert artifact["cov_is_calibrated"].dtype == bool
     assert artifact["hess_is_near_singular"].dtype == bool
     assert artifact["tr"].shape == (1,)
+
+    assert bool(artifact["cov_is_calibrated"]), (
+        "Clean synthetic_csd run at SNR=20 should yield a calibrated covariance "
+        "under adaptive_ridge. cov_is_calibrated=False here would mean the "
+        "Hessian inversion needed a non-trivial ridge — regression in the "
+        "spdcm_generic.py inversion path."
+    )
     # theta_zero must match theta_est dimensionality so downstream tooling
     # can reproduce the run from the artifact alone.
     assert artifact["theta_zero"].shape == artifact["theta_est"].shape

@@ -705,21 +705,22 @@ def run_single(cfg: RunConfig = RunConfig()):
     eigvals_H = np.linalg.eigvalsh(H_nll)
 
     try:
-        # pinvh is a *diagnostic* inverse — it zeros near-singular directions
-        # rather than ridging them. CIs are calibrated only when the Hessian is
-        # itself well-conditioned; otherwise they signal parameter degeneracy
-        # (which is the whole point of stage-3 BENCH coupling).
+        # Cov = H_NLL^{-1} via adaptive_ridge (minimum ridge to restore pos-def).
+        # The diagnostics dict surfaces ``regularization_warning`` whenever the
+        # ridge had to lift indefiniteness beyond the epsilon floor — that case
+        # means the reported covariance is regularised, not the asymptotic
+        # inverse-Hessian, and CIs are not calibrated.
         cov, cov_diag = safe_hessian_inversion(
-            H_nll, 1.0, regularization=1e-6, method="pinvh"
+            H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
         )
         cov_is_calibrated = not (
-            cov_diag.get("rank_deficient", False)
+            cov_diag.get("regularization_warning", False)
             or hess_diag.get("is_near_singular", False)
         )
         if not cov_is_calibrated:
             print(
-                "⚠️  Covariance is regularised (pinvh zeroed near-singular "
-                "directions); reported CIs are diagnostic, not asymptotic."
+                "⚠️  Covariance is regularised (adaptive_ridge lifted indefinite "
+                "Hessian); reported CIs are diagnostic, not asymptotic."
             )
         se = compute_standard_errors(cov, warn_negative=True)
         ci = compute_confidence_intervals(theta_est, se, alpha=0.05)
