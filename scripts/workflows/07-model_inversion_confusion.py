@@ -113,7 +113,11 @@ def invert_model(y_obs, initial_guess, param_bounds, loss_function=mean_squared_
 display(Markdown("## Running Parameter Change Detection Simulation"))
 
 n_samples = 500
-change_amount = 0.3  # Match BENCH test effect size (0.1 is below detection at 10% noise)
+# change_amount = 0.3 matches the canonical BENCH headline effect size in
+# 05-apply_bench.py. The 05 sweep characterises BENCH accuracy as a function
+# of effect size; this script uses the same point so the head-to-head
+# comparison is at a single, comparable perturbation magnitude.
+change_amount = 0.3
 change_thr = 0.15  # ~half the change amount
 
 true_change = []  # Ground truth: which parameter changed (0=none, 1-4=param index)

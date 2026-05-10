@@ -97,6 +97,59 @@ n_test_samples = 2000
 effect_size = 0.3
 n_repeats = 50
 
+# %%
+# ======================================================================================
+# Effect-size sweep: characterise BENCH's regime of validity.
+#
+# BENCH is a Taylor-expansion method: ``Trainer.train(dv0=1e-6)`` learns the
+# *linearised derivative* dy/dθ via finite differences (dv0 is a numerical
+# step, not a training-perturbation magnitude). The change models then
+# extrapolate to finite test perturbations of size ``effect_size``. As the
+# perturbation grows, second-order terms become non-negligible and accuracy
+# degrades. Sweeping ``effect_size`` reports this regime explicitly and
+# replaces the prior single-point ``effect_size=0.3`` evaluation, which the
+# 2026-03 review flagged as a train/test mismatch.
+EFFECT_SIZE_GRID = [0.05, 0.1, 0.2, 0.3, 0.5]
+N_SWEEP_SAMPLES = 200  # 5 × 200 × 2 ≈ 2000 forward calls; the sweep is for trend
+# detection rather than tight per-point CIs (the headline run below uses
+# n_test_samples=2000 for the canonical effect_size=0.3 confusion matrix).
+
+sweep_accuracy = []
+for es in EFFECT_SIZE_GRID:
+    print(f"\n--- effect_size = {es} ---")
+    tc_es, data_es, data2_es, sn_es = tr.generate_test_samples(
+        n_samples=N_SWEEP_SAMPLES,
+        n_repeats=n_repeats,
+        effect_size=es,
+        noise_std=noise_level,
+    )
+    _, infered_es, _, _ = mdl.infer(data_es, data2_es - data_es, sn_es)
+    acc_es = float(np.mean(infered_es == tc_es))
+    sweep_accuracy.append(acc_es)
+    print(f"  accuracy = {acc_es:.3f}")
+
+fig, ax = plt.subplots(figsize=(width / 2, height * 0.7))
+ax.plot(EFFECT_SIZE_GRID, sweep_accuracy, marker="o", color="C0")
+ax.set_xlabel("test effect size")
+ax.set_ylabel("BENCH accuracy")
+ax.set_ylim(0, 1)
+ax.axhline(1 / 5, color="grey", ls="--", alpha=0.5, label="chance (5 classes)")
+ax.set_title("BENCH regime of validity")
+ax.legend(fontsize="small", loc="lower right")
+plt.tight_layout()
+plt.savefig(IMG_DIR / f"accuracy_vs_effect_size_{setting}.png")
+plt.savefig(LATEX_DIR / f"accuracy_vs_effect_size_{setting}.pdf")
+plt.show(block=False)
+
+np.savez(
+    MODEL_DIR / f"accuracy_vs_effect_size_{setting}.npz",
+    effect_size=np.array(EFFECT_SIZE_GRID, dtype=np.float64),
+    accuracy=np.array(sweep_accuracy, dtype=np.float64),
+)
+
+# %%
+# ======================================================================================
+# Headline confusion matrix at the canonical ``effect_size = 0.3``.
 true_change, data, data2, sn = tr.generate_test_samples(
     n_samples=n_test_samples,
     n_repeats=n_repeats,
