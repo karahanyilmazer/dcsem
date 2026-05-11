@@ -784,6 +784,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--effect-sizes", default=None, help="Comma-separated effect sizes.")
     parser.add_argument("--n-test-samples", type=int, default=200)
     parser.add_argument("--n-train-samples", type=int, default=5000)
+    parser.add_argument(
+        "--bench-dv0",
+        type=float,
+        default=1e-6,
+        help=(
+            "Perturbation magnitude for BENCH Jacobian training. "
+            "1e-6 is BENCH's default; raise (e.g. 0.2) if the linearity "
+            "diagnostic flags cells with cosine < 0.95 or magnitude ratio "
+            "outside [0.8, 1.25]."
+        ),
+    )
     parser.add_argument("--inversion-maxiter", type=int, default=100)
     parser.add_argument("--force-train", action="store_true")
     parser.add_argument("--serial-bench", action="store_true")
@@ -800,6 +811,7 @@ def main(argv: list[str] | None = None) -> None:
         effect_size_grid=_parse_effect_sizes(args.effect_sizes),
         n_test_samples=args.n_test_samples,
         n_train_samples=args.n_train_samples,
+        bench_dv0=args.bench_dv0,
         inversion_maxiter=args.inversion_maxiter,
         reuse_bench_model=not args.force_train,
         bench_parallel=not args.serial_bench,

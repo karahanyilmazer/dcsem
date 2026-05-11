@@ -48,6 +48,8 @@ Stages (in order):
   05c-wf05_bench_headline2000   scripts/workflows/05-apply_bench.py --n-test-samples 2000
                                   (skip with --skip-headline)
   05d-wf06_investigate          scripts/workflows/06-investigate_bench.py
+  05e-wf10_linearity            scripts/workflows/10-bench_linearity_diagnostic.py
+                                  (soft gate: FLAGGED cells do not abort)
   06-wf07_inversion_confusion   scripts/workflows/07-model_inversion_confusion.py
 
 Total wall clock: ~50–90 min sequential.
@@ -405,6 +407,11 @@ else
 fi
 run_stage "05d-wf06_investigate" "" \
   uv run python "scripts/workflows/06-investigate_bench.py"
+# Linearity diagnostic: characterises BENCH's Jacobian extrapolation across
+# the test effect-size grid. Soft-gated (does not abort the pipeline) so a
+# FLAGGED outcome still produces the full SUMMARY.md.
+run_stage "05e-wf10_linearity" "" \
+  uv run python "scripts/workflows/10-bench_linearity_diagnostic.py" --setting no_noise_4
 
 run_stage "06-wf07_inversion_confusion" "" \
   uv run python "scripts/workflows/07-model_inversion_confusion.py"
