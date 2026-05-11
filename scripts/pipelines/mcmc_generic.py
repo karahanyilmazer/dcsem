@@ -330,7 +330,18 @@ def run_single_mcmc(cfg: RunConfig = RunConfig()) -> None:
         def neg_logpost(th):
             return -log_posterior(th, x, y, sigma)
 
-        res = optimize.minimize(neg_logpost, theta0, method="L-BFGS-B")
+        # DCM forward models integrate stiff ODEs (BDF); scipy's default FD step
+        # (~1.5e-8) falls below the solver's relative tolerance, so the gradient
+        # comes back as integration noise. Mirror the fix in inversion_generic.py.
+        opts = {"eps": 1e-3} if IS_DCM_MODEL else {}
+
+        res = optimize.minimize(
+            neg_logpost,
+            theta0,
+            method="L-BFGS-B",
+            bounds=param_bounds,
+            options=opts,
+        )
         return res.x
 
     # =========================================================================

@@ -62,11 +62,15 @@ def estimate_parameters(
     """
     from scipy.optimize import minimize
 
+    # DCM forward models integrate stiff ODEs (BDF); scipy's default FD step
+    # (~1.5e-8) falls below the solver's relative tolerance, so the gradient
+    # comes back as integration noise. Mirror the fix in inversion_generic.py.
     res = minimize(
         objective,
         x0=initial_values,
         bounds=bounds,
         method="L-BFGS-B",
+        options={"eps": 1e-3},
     )
     theta_est = res.x
 

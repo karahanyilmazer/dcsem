@@ -128,6 +128,31 @@ def test_spectral_recovers_theta_from_clean_csd():
     assert np.isclose(res.x[2], theta_true[2], atol=0.1)
 
 
+def test_3roi_spectral_recovers_theta_from_clean_csd():
+    """3-ROI LS-spDCM self-consistency smoke for the clean CSD path."""
+    spdcm = SpectralDCM(n_rois=3, TR=1.0, n_freqs=12)
+    theta_true = np.array(
+        [
+            0.35,  # a01
+            0.0,   # a02
+            0.0,   # a10
+            0.25,  # a12
+            -0.15, # a20
+            0.0,   # a21
+            np.log(0.08),
+        ]
+    )
+
+    y_clean = spdcm.predict_csd(theta_true)
+    theta_init = np.array([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, np.log(0.1)])
+
+    res = _fit_spectral_lsq(spdcm, y_clean, theta_init)
+
+    assert res.success
+    np.testing.assert_allclose(res.x[:6], theta_true[:6], atol=5e-2)
+    assert np.isclose(res.x[6], theta_true[6], atol=0.15)
+
+
 def test_spectral_recovers_theta_from_noisy_csd():
     """With structured Hermitian noise (snr=20), connectivity recovery within
     ~0.1, log_sigma_e within ~0.4."""

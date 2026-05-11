@@ -342,12 +342,19 @@ def run_single(cfg: RunConfig = RunConfig()) -> None:
         loss_history.append(loss)
         print(f"Iteration {len(loss_history)}: loss = {loss:.6e}")
 
+    # DCM forward models integrate stiff ODEs (BDF); scipy's default FD step
+    # (~1.5e-8) falls below the solver's relative tolerance, so the gradient
+    # comes back as integration noise (often wrong-signed). 1e-3 is well above
+    # the solver floor while still small relative to param scale (~0.1–1.0).
+    opt_options = {"eps": 1e-3} if IS_DCM_MODEL else {}
+
     res = minimize(
         obj,
         theta_zero,
         method=opt_method,
         callback=callback,
         bounds=param_bounds,
+        options=opt_options,
     )
 
     if not res.success:
