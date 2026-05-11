@@ -2,9 +2,16 @@
 
 set -euo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_PATH="$ROOT_DIR/$(basename "${BASH_SOURCE[0]}")"
-DEFAULT_PY="/Users/karahanyilmazer/Coding/python/venvs/dcsem_13/bin/python"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCRIPT_PATH="$SCRIPT_DIR/$(basename "${BASH_SOURCE[0]}")"
+if command -v python3 >/dev/null 2>&1; then
+  DEFAULT_PY="$(command -v python3)"
+elif command -v python >/dev/null 2>&1; then
+  DEFAULT_PY="$(command -v python)"
+else
+  DEFAULT_PY="python3"
+fi
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 
 PYTHON_BIN="${PYTHON_BIN:-$DEFAULT_PY}"
@@ -15,19 +22,19 @@ MODE="detach"
 DRY_RUN=0
 
 SCRIPTS=(
-  "02-estimate_params_solver.py"
-  "02-estimate_params_mcmc.py"
-  "03-off_diag_errors.py"
-  "04-extract_summary_measures.py"
-  "05-apply_bench.py"
-  "06-investigate_bench.py"
-  "07-model_inversion_confusion.py"
-  "08-identifiability_analysis.py"
-  "inversion_generic.py"
-  "mcmc_generic.py"
-  "spdcm_generic.py"
-  "spdcm_mcmc_generic.py"
-  "spdcm_noise_sweep.py"
+  "scripts/workflows/02-estimate_params_solver.py"
+  "scripts/workflows/02-estimate_params_mcmc.py"
+  "scripts/workflows/03-off_diag_errors.py"
+  "scripts/workflows/04-extract_summary_measures.py"
+  "scripts/workflows/05-apply_bench.py"
+  "scripts/workflows/06-investigate_bench.py"
+  "scripts/workflows/07-model_inversion_confusion.py"
+  "scripts/workflows/08-identifiability_analysis.py"
+  "scripts/pipelines/inversion_generic.py"
+  "scripts/pipelines/mcmc_generic.py"
+  "scripts/pipelines/spdcm_generic.py"
+  "scripts/pipelines/spdcm_mcmc_generic.py"
+  "scripts/experimentation/spdcm_noise_sweep.py"
 )
 
 usage() {
@@ -92,6 +99,7 @@ run_worker() {
   local script
   for script in "${SCRIPTS[@]}"; do
     local log_file="$LOG_DIR/${script%.py}.log"
+    mkdir -p "$(dirname "$log_file")"
     echo "[$(timestamp)] START $script"
 
     if [[ "$DRY_RUN" -eq 1 ]]; then
