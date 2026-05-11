@@ -50,7 +50,10 @@ Stages (in order):
   05d-wf06_investigate          scripts/workflows/06-investigate_bench.py
   05e-wf10_linearity            scripts/workflows/10-bench_linearity_diagnostic.py
                                   (soft gate: FLAGGED cells do not abort)
+  05f-sigma_n_diagnostic        scripts/_inspect_bench_sigma.py
+                                  (soft gate: sigma_n behaviour smoke test)
   06-wf07_inversion_confusion   scripts/workflows/07-model_inversion_confusion.py
+                                  (canonical NLL + 2-sigma Wald decision rule)
 
 Total wall clock: ~50–90 min sequential.
 
@@ -412,6 +415,10 @@ run_stage "05d-wf06_investigate" "" \
 # FLAGGED outcome still produces the full SUMMARY.md.
 run_stage "05e-wf10_linearity" "" \
   uv run python "scripts/workflows/10-bench_linearity_diagnostic.py" --setting no_noise_4
+# sigma_n diagnostic: confirm BENCH's infer() honours the noise covariance
+# (open question E). Soft-gated; useful for tuning summary_noise_floor.
+run_stage "05f-sigma_n_diagnostic" "" \
+  uv run python "scripts/_inspect_bench_sigma.py" --setting no_noise_4
 
 run_stage "06-wf07_inversion_confusion" "" \
   uv run python "scripts/workflows/07-model_inversion_confusion.py"

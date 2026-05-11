@@ -22,7 +22,10 @@ from scipy.optimize import minimize
 from scipy.stats import uniform
 from sklearn.metrics import confusion_matrix, mean_squared_error
 
+import numdifftools as nd
+
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style
+from dcsem.numerics import compute_standard_errors, safe_hessian_inversion
 from dcsem.utils import stim_boxcar
 from scripts._artifact_metadata import (
     compute_sha256,
@@ -47,14 +50,22 @@ class ComparisonConfig:
     effect_size_grid: tuple[float, ...] = DEFAULT_EFFECT_SIZE_GRID
     n_test_samples: int = 200
     n_train_samples: int = 5000
-    # n_repeats was historically declared as 50 but never read; with the
-    # wiring planned for PR 3 it would multiply the inversion sweep cost by 50x.
-    # Default to 1 (no-op) until that PR explicitly opts in.
+    # n_repeats was historically declared as 50 but never read; activating it
+    # at 50 would multiply the inversion sweep cost by 50x. Default to 1
+    # (no-op); PR 3 wires it into both sweep loops.
     n_repeats: int = 1
     method: str = "PCA"
     ode_method: str = "BDF"
     summary_noise_floor: float = 1e-4
+    # Wald-test threshold for the inversion-arm decision rule (PR 4).
+    # |z_k| = |theta_p_k - theta_b_k| / sqrt(SE_b_k^2 + SE_p_k^2) > wald_threshold
+    # picks the changed parameter; below threshold means "no change".
+    # 2.0 is the standard 2-sigma cutoff.
+    wald_threshold: float = 2.0
+    # Legacy 0.5 * effect_size threshold for the inversion arm (pre-PR-4).
+    # Retained behind a flag so old behaviour can be reproduced for diff plots.
     change_threshold_fraction: float = 0.5
+    use_wald_decision: bool = True
     inversion_maxiter: int = 100
     bench_parallel: bool = True
     inversion_verbose: bool = True
@@ -133,6 +144,8 @@ class SweepResult:
     convergence_fun: np.ndarray | None = None
     convergence_nit: np.ndarray | None = None
     theta_hat: np.ndarray | None = None
+    se_hat: np.ndarray | None = None  # (E, R, N, 2, P) canonical-NLL SEs
+    z_stat: np.ndarray | None = None  # (E, R, N, P) per-param Wald z
 
     @property
     def accuracy_mean(self) -> np.ndarray:
@@ -536,21 +549,118 @@ def _simulate_observed_bold(
     return bold + rng.normal(0.0, noise_sigma, size=bold.shape)
 
 
+def _forward_bold(theta: np.ndarray, cfg: ComparisonConfig) -> np.ndarray:
+    time, u = _default_time_and_stimulus()
+    params = dict(zip(PARAM_NAMES, theta))
+    return simulate_bold(
+        params, time=time, u=u, num_rois=2, ode_method=cfg.ode_method
+    )
+
+
+def _canonical_nll_se(
+    theta_hat: np.ndarray,
+    y_obs: np.ndarray,
+    cfg: ComparisonConfig,
+    bounds_list: list[tuple[float, float]],
+) -> tuple[np.ndarray, bool]:
+    """Standard errors via Hessian of the canonical NLL in scaled parameter space.
+
+    Builds 0.5 * SSE(theta) / sigma2_est in original residual space (so the
+    inverse Hessian is in original parameter units), Hessians it in
+    [0,1]^n-scaled coordinates for numerical stability, then unscales and
+    inverts via ``safe_hessian_inversion(method='adaptive_ridge')``.
+
+    Returns ``(se, regularized)`` where ``se`` is a length-n vector with NaN
+    where the recovered covariance has a non-positive diagonal, and
+    ``regularized`` is True iff adaptive_ridge had to lift indefiniteness
+    beyond the epsilon floor (covariance reported is then a diagnostic
+    proxy, not an asymptotic inverse Hessian).
+    """
+    n_params = len(theta_hat)
+    lowers = np.array([b[0] for b in bounds_list], dtype=float)
+    scales = np.array([b[1] - b[0] for b in bounds_list], dtype=float)
+
+    def _to_scaled(t):
+        return (t - lowers) / scales
+
+    def _from_scaled(s):
+        return s * scales + lowers
+
+    nan_vec = np.full(n_params, np.nan)
+
+    try:
+        y_pred_hat = _forward_bold(theta_hat, cfg)
+    except Exception:
+        return nan_vec, False
+    if not np.all(np.isfinite(y_pred_hat)):
+        return nan_vec, False
+
+    resid = (y_obs - y_pred_hat).ravel()
+    sigma2_est = float(np.dot(resid, resid)) / max(resid.size - n_params, 1)
+    if not np.isfinite(sigma2_est) or sigma2_est <= 0:
+        return nan_vec, False
+
+    def _nll_obj(theta):
+        try:
+            y_pred = _forward_bold(theta, cfg)
+        except Exception:
+            return 1e10
+        if not np.all(np.isfinite(y_pred)):
+            return 1e10
+        r = (y_obs - y_pred).ravel()
+        return 0.5 * float(np.dot(r, r)) / sigma2_est
+
+    def _nll_scaled(s):
+        return _nll_obj(_from_scaled(s))
+
+    theta_s = _to_scaled(theta_hat)
+    try:
+        H_nll_s = nd.Hessian(_nll_scaled, step=1e-3)(theta_s)
+        H_nll_s = 0.5 * (H_nll_s + H_nll_s.T)
+        H_nll = H_nll_s / np.outer(scales, scales)
+        # Silence the per-call adaptive_ridge warning while the sweep is
+        # iterating thousands of fits; we surface a single summary count at
+        # the end of the sweep instead. Using a context-managed logger level
+        # change keeps the diagnostic available for one-off callers.
+        import logging
+        from dcsem import numerics as _numerics_mod
+
+        numerics_logger = logging.getLogger(_numerics_mod.__name__)
+        prev_level = numerics_logger.level
+        numerics_logger.setLevel(logging.ERROR)
+        try:
+            cov, cov_diag = safe_hessian_inversion(
+                H_nll, 1.0, regularization=1e-6, method="adaptive_ridge"
+            )
+        finally:
+            numerics_logger.setLevel(prev_level)
+        regularised = bool(cov_diag.get("regularization_warning", False))
+        return compute_standard_errors(cov, warn_negative=False), regularised
+    except Exception:
+        return nan_vec, False
+
+
 def invert_bold_observation(
     y_obs: np.ndarray,
     cfg: ComparisonConfig,
     initial_guess: np.ndarray | None = None,
-) -> tuple[np.ndarray, dict[str, float]]:
-    """L-BFGS-B fit of (a01, a10, c0, c1) to ``y_obs``.
+    compute_se: bool = True,
+) -> tuple[np.ndarray, dict[str, object]]:
+    """L-BFGS-B fit of (a01, a10, c0, c1) to ``y_obs`` plus canonical-NLL SEs.
 
-    Returns ``(theta_hat, diagnostics)`` where ``diagnostics`` carries the
-    SciPy ``OptimizeResult`` fields the comparison needs downstream:
-    ``success`` (bool), ``fun`` (final objective), ``nit`` (iterations).
+    Returns ``(theta_hat, diagnostics)`` where ``diagnostics`` carries:
+      * ``success`` (bool) - SciPy convergence flag
+      * ``fun`` (float)    - final objective value (scaled MSE)
+      * ``nit`` (int)      - iterations
+      * ``se``  (ndarray)  - length-n vector of standard errors from the
+                             canonical NLL Hessian in scaled parameter
+                             space (NaN where the recovered covariance has
+                             a non-positive diagonal). Present when
+                             ``compute_se=True``.
 
     ``initial_guess`` defaults to the per-bound midpoint (``[0.5]*4`` under
-    PARAM_BOUNDS). PR 3 calls this for the perturbed-side fit with the
-    baseline fit's ``theta_hat`` so the two fits no longer share a starting
-    point.
+    PARAM_BOUNDS). For paired baseline/perturbed fits, the perturbed call
+    site warm-starts from the baseline fit's ``theta_hat``.
     """
     time, u = _default_time_and_stimulus()
     bounds = _bounds_list()
@@ -584,12 +694,20 @@ def invert_bold_observation(
         bounds=bounds,
         options={"maxiter": cfg.inversion_maxiter, "eps": 1e-3},
     )
-    diagnostics = {
+    theta_hat = np.asarray(res.x, dtype=float)
+    diagnostics: dict[str, object] = {
         "success": bool(res.success),
         "fun": float(res.fun),
         "nit": int(getattr(res, "nit", 0)),
     }
-    return np.asarray(res.x, dtype=float), diagnostics
+    if compute_se:
+        # Note: SE comes from the canonical NLL Hessian (residuals in original
+        # space, scaled-parameter Hessian), NOT from the normalised MSE
+        # objective L-BFGS-B optimises - those Hessians give un-calibrated SEs.
+        se, regularised = _canonical_nll_se(theta_hat, y_obs, cfg, bounds)
+        diagnostics["se"] = se
+        diagnostics["se_regularised"] = regularised
+    return theta_hat, diagnostics
 
 
 def run_model_inversion_effect_size_sweep(
@@ -618,8 +736,6 @@ def run_model_inversion_effect_size_sweep(
     n_params = len(PARAM_NAMES)
 
     n_effects = len(designs)
-    # Allocate per-effect, per-repeat accumulators. We do this eagerly because
-    # the inner shapes are known up front.
     sample_counts = [len(d.true_change) for d in designs]
     max_n = max(sample_counts) if sample_counts else 0
     accuracy_arr = np.zeros((n_effects, n_repeats), dtype=float)
@@ -632,6 +748,15 @@ def run_model_inversion_effect_size_sweep(
     theta_hat = np.full(
         (n_effects, n_repeats, max_n, 2, n_params), np.nan, dtype=float
     )
+    se_hat = np.full(
+        (n_effects, n_repeats, max_n, 2, n_params), np.nan, dtype=float
+    )
+    z_stat = np.full((n_effects, n_repeats, max_n, n_params), np.nan, dtype=float)
+    # Track how often adaptive_ridge had to lift the Hessian (per-fit SE is
+    # then a regularised proxy rather than the asymptotic inverse). Surfaced
+    # as a single summary line after the sweep.
+    reg_count = 0
+    se_count = 0
 
     for effect_index, design in enumerate(designs):
         threshold = cfg.change_threshold_fraction * design.effect_size
@@ -658,11 +783,16 @@ def run_model_inversion_effect_size_sweep(
                 y_perturbed = _simulate_observed_bold(
                     design.perturbed_theta[sample_idx], cfg, rng
                 )
-                theta_first, diag_first = invert_bold_observation(y_baseline, cfg)
+                theta_first, diag_first = invert_bold_observation(
+                    y_baseline, cfg, compute_se=cfg.use_wald_decision
+                )
                 # Warm-start the perturbed fit from the baseline fit so the
                 # difference is forward-model driven, not L-BFGS-B-step driven.
                 theta_second, diag_second = invert_bold_observation(
-                    y_perturbed, cfg, initial_guess=theta_first
+                    y_perturbed,
+                    cfg,
+                    initial_guess=theta_first,
+                    compute_se=cfg.use_wald_decision,
                 )
 
                 conv_success[effect_index, repeat_idx, sample_idx, 0] = diag_first["success"]
@@ -674,17 +804,57 @@ def run_model_inversion_effect_size_sweep(
                 theta_hat[effect_index, repeat_idx, sample_idx, 0] = theta_first
                 theta_hat[effect_index, repeat_idx, sample_idx, 1] = theta_second
 
-                diff = np.abs(theta_second - theta_first)
-                max_diff = float(np.max(diff))
-                inferred[sample_idx] = (
-                    int(np.argmax(diff) + 1) if max_diff > threshold else 0
-                )
+                if cfg.use_wald_decision:
+                    se_b = np.asarray(diag_first.get("se"), dtype=float)
+                    se_p = np.asarray(diag_second.get("se"), dtype=float)
+                    se_hat[effect_index, repeat_idx, sample_idx, 0] = se_b
+                    se_hat[effect_index, repeat_idx, sample_idx, 1] = se_p
+                    se_count += 2
+                    if diag_first.get("se_regularised"):
+                        reg_count += 1
+                    if diag_second.get("se_regularised"):
+                        reg_count += 1
+                    # Wald z per parameter: (theta_p - theta_b) / sqrt(SE_b^2 + SE_p^2).
+                    # NaN SEs (uncalibrated cov) propagate to NaN z, which we
+                    # treat as "no signal" for that param below.
+                    pooled = np.sqrt(np.square(se_b) + np.square(se_p))
+                    with np.errstate(divide="ignore", invalid="ignore"):
+                        z = (theta_second - theta_first) / pooled
+                    z_stat[effect_index, repeat_idx, sample_idx] = z
+
+                    abs_z = np.abs(z)
+                    valid = np.isfinite(abs_z)
+                    if not np.any(valid):
+                        inferred[sample_idx] = 0
+                    else:
+                        masked = np.where(valid, abs_z, -np.inf)
+                        max_idx = int(np.argmax(masked))
+                        if masked[max_idx] > cfg.wald_threshold:
+                            inferred[sample_idx] = max_idx + 1
+                        else:
+                            inferred[sample_idx] = 0
+                else:
+                    diff = np.abs(theta_second - theta_first)
+                    max_diff = float(np.max(diff))
+                    inferred[sample_idx] = (
+                        int(np.argmax(diff) + 1)
+                        if max_diff > threshold
+                        else 0
+                    )
 
             conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
             accuracy_arr[effect_index, repeat_idx] = accuracy
             conf_arr[effect_index, repeat_idx] = conf
             true_arr[effect_index, repeat_idx, :n_samples] = design.true_change
             inferred_arr[effect_index, repeat_idx, :n_samples] = inferred
+
+    if cfg.use_wald_decision and se_count > 0:
+        pct = 100.0 * reg_count / se_count
+        print(
+            f"[inversion-sweep] {reg_count}/{se_count} fits "
+            f"({pct:.1f}%) needed adaptive_ridge regularisation; "
+            "their SEs are a diagnostic proxy, not asymptotic."
+        )
 
     return SweepResult(
         effect_size=np.array([d.effect_size for d in designs], dtype=np.float64),
@@ -696,6 +866,8 @@ def run_model_inversion_effect_size_sweep(
         convergence_fun=conv_fun,
         convergence_nit=conv_nit,
         theta_hat=theta_hat,
+        se_hat=se_hat if cfg.use_wald_decision else None,
+        z_stat=z_stat if cfg.use_wald_decision else None,
     )
 
 
@@ -730,6 +902,10 @@ def save_sweep_artifact(
         payload["convergence_nit"] = result.convergence_nit
     if result.theta_hat is not None:
         payload["theta_hat"] = result.theta_hat
+    if result.se_hat is not None:
+        payload["se_hat"] = result.se_hat
+    if result.z_stat is not None:
+        payload["z_stat"] = result.z_stat
     np.savez(path, **payload)
 
 
@@ -771,6 +947,8 @@ def load_sweep_artifact(path: Path) -> SweepResult:
         convergence_fun=_maybe("convergence_fun"),
         convergence_nit=_maybe("convergence_nit"),
         theta_hat=_maybe("theta_hat"),
+        se_hat=_maybe("se_hat"),
+        z_stat=_maybe("z_stat"),
     )
 
 
@@ -817,7 +995,12 @@ def plot_accuracy_comparison(
         yerr=bench_result.accuracy_sem,
         marker="o",
         capsize=3,
-        label="BENCH (PCA-4)",
+        label="BENCH posterior argmax",
+    )
+    inversion_label = (
+        f"inversion {int(cfg.wald_threshold)}-sigma Wald"
+        if cfg.use_wald_decision
+        else f"inversion |dtheta| > {cfg.change_threshold_fraction} e"
     )
     ax.errorbar(
         inversion_result.effect_size,
@@ -825,7 +1008,7 @@ def plot_accuracy_comparison(
         yerr=inversion_result.accuracy_sem,
         marker="s",
         capsize=3,
-        label="model inversion",
+        label=inversion_label,
     )
     ax.axhline(1 / len(CLASS_LABELS), color="0.5", ls="--", lw=1, label="chance")
     ax.set_xlabel("test effect size")
@@ -979,6 +1162,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument("--inversion-maxiter", type=int, default=100)
+    parser.add_argument(
+        "--wald-threshold",
+        type=float,
+        default=2.0,
+        help=(
+            "Wald-test cutoff for the inversion arm: a sample is called "
+            "'changed' iff max_k |z_k| exceeds this. Default 2.0 (2 sigma)."
+        ),
+    )
+    parser.add_argument(
+        "--legacy-threshold",
+        action="store_true",
+        help=(
+            "Use the pre-PR-4 inversion rule (|theta_p - theta_b| > "
+            "0.5 * effect_size) instead of the Wald z-test. Mostly for "
+            "reproducing old plots."
+        ),
+    )
     parser.add_argument("--force-train", action="store_true")
     parser.add_argument("--serial-bench", action="store_true")
     parser.add_argument("--quiet-inversion", action="store_true")
@@ -996,6 +1197,8 @@ def main(argv: list[str] | None = None) -> None:
         n_train_samples=args.n_train_samples,
         bench_dv0=args.bench_dv0,
         inversion_maxiter=args.inversion_maxiter,
+        wald_threshold=args.wald_threshold,
+        use_wald_decision=not args.legacy_threshold,
         reuse_bench_model=not args.force_train,
         bench_parallel=not args.serial_bench,
         inversion_verbose=not args.quiet_inversion,
