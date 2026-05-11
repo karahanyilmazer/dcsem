@@ -110,5 +110,11 @@ def test_fast_bench_sweep_smoke_uses_current_api(tmp_path):
     )
 
     np.testing.assert_allclose(result.effect_size, [0.1])
-    assert result.accuracy.shape == (1,)
-    assert result.confusion_matrices.shape == (1, len(CLASS_LABELS), len(CLASS_LABELS))
+    # Shape now carries an explicit per-repeat axis (E, R) and (E, R, C, C);
+    # default ComparisonConfig.n_repeats=1 keeps the leading repeat axis tight.
+    assert result.accuracy.shape == (1, 1)
+    assert result.confusion_matrices.shape == (
+        1, 1, len(CLASS_LABELS), len(CLASS_LABELS)
+    )
+    assert result.accuracy_mean.shape == (1,)
+    assert result.confusion_mean.shape == (1, len(CLASS_LABELS), len(CLASS_LABELS))

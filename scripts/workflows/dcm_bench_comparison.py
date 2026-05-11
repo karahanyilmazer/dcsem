@@ -105,11 +105,49 @@ class ChangeDesign:
 
 @dataclass(frozen=True)
 class SweepResult:
+    """Outcome of one comparison sweep over the effect-size grid.
+
+    Shapes (E = #effects, R = #repeats, N = #samples per effect, C = #classes,
+    P = len(PARAM_NAMES), 2 = baseline/perturbed):
+
+      effect_size         (E,)
+      accuracy            (E, R)         per-repeat accuracy
+      confusion_matrices  (E, R, C, C)   per-repeat row-normalised confusion
+      true_change         (E, R, N)      ground-truth class index
+      inferred_change     (E, R, N)      inferred class index
+
+    Optional inversion-arm metadata (None for the BENCH arm):
+
+      convergence_success (E, R, N, 2)   res.success per (baseline, perturbed)
+      convergence_fun     (E, R, N, 2)   final objective value
+      convergence_nit     (E, R, N, 2)   iterations
+      theta_hat           (E, R, N, 2, P) fitted theta per (baseline, perturbed)
+    """
+
     effect_size: np.ndarray
     accuracy: np.ndarray
     confusion_matrices: np.ndarray
     true_change: np.ndarray
     inferred_change: np.ndarray
+    convergence_success: np.ndarray | None = None
+    convergence_fun: np.ndarray | None = None
+    convergence_nit: np.ndarray | None = None
+    theta_hat: np.ndarray | None = None
+
+    @property
+    def accuracy_mean(self) -> np.ndarray:
+        return self.accuracy.mean(axis=1)
+
+    @property
+    def accuracy_sem(self) -> np.ndarray:
+        r = self.accuracy.shape[1]
+        if r <= 1:
+            return np.zeros(self.accuracy.shape[0])
+        return self.accuracy.std(axis=1, ddof=1) / np.sqrt(r)
+
+    @property
+    def confusion_mean(self) -> np.ndarray:
+        return self.confusion_matrices.mean(axis=1)
 
 
 def _default_time_and_stimulus() -> tuple[np.ndarray, Callable[[float], float]]:
@@ -410,46 +448,70 @@ def run_bench_effect_size_sweep(
     summary_model = summary_model or build_summary_forward_model(cfg, paths)
     noise_std = _summary_noise_std(cfg, paths)
     designs = list(generate_change_designs(cfg) if designs is None else designs)
+    n_repeats = max(1, cfg.n_repeats)
 
-    accuracies: list[float] = []
-    confusions: list[np.ndarray] = []
-    true_by_effect: list[np.ndarray] = []
-    inferred_by_effect: list[np.ndarray] = []
+    accuracies: list[list[float]] = []
+    confusions: list[list[np.ndarray]] = []
+    true_by_effect: list[list[np.ndarray]] = []
+    inferred_by_effect: list[list[np.ndarray]] = []
 
     for effect_index, design in enumerate(designs):
-        rng = np.random.default_rng(np.random.SeedSequence([cfg.seed, 10_000, effect_index]))
-        baseline = summary_model(**theta_matrix_to_params(design.baseline_theta))
-        perturbed = summary_model(**theta_matrix_to_params(design.perturbed_theta))
+        # All BENCH stochasticity per-effect comes from the additive sigma_n
+        # noise; vary the seed across repeats to get independent draws.
+        acc_per_repeat: list[float] = []
+        conf_per_repeat: list[np.ndarray] = []
+        true_per_repeat: list[np.ndarray] = []
+        inferred_per_repeat: list[np.ndarray] = []
+        for repeat_idx in range(n_repeats):
+            rng = np.random.default_rng(
+                np.random.SeedSequence([cfg.seed, 10_000, effect_index, repeat_idx])
+            )
+            baseline = summary_model(**theta_matrix_to_params(design.baseline_theta))
+            perturbed = summary_model(**theta_matrix_to_params(design.perturbed_theta))
 
-        if noise_std > 0:
-            baseline = baseline + rng.normal(0.0, noise_std, size=baseline.shape)
-            perturbed = perturbed + rng.normal(0.0, noise_std, size=perturbed.shape)
+            if noise_std > 0:
+                baseline = baseline + rng.normal(0.0, noise_std, size=baseline.shape)
+                perturbed = perturbed + rng.normal(0.0, noise_std, size=perturbed.shape)
 
-        sigma_n = (noise_std**2) * np.eye(baseline.shape[1])
-        sigma_n = np.broadcast_to(sigma_n, (baseline.shape[0], *sigma_n.shape)).copy()
-        # NB: a DeprecationWarning ("Conversion of an array with ndim > 0 to
-        # a scalar") used to be silenced here. It comes from BENCH's
-        # log-likelihood code path and may indicate sigma_n collapse; left
-        # visible so we can diagnose during the linearity / wald-test work.
-        _, inferred, _, _ = bench_model.infer(
-            baseline,
-            perturbed - baseline,
-            sigma_n,
-            parallel=cfg.bench_parallel,
-        )
+            sigma_n = (noise_std**2) * np.eye(baseline.shape[1])
+            sigma_n = np.broadcast_to(
+                sigma_n, (baseline.shape[0], *sigma_n.shape)
+            ).copy()
+            # NB: a DeprecationWarning ("Conversion of an array with ndim > 0
+            # to a scalar") used to be silenced here. It comes from BENCH's
+            # log-likelihood code path and may indicate sigma_n collapse;
+            # left visible so we can diagnose during the linearity /
+            # wald-test work.
+            _, inferred, _, _ = bench_model.infer(
+                baseline,
+                perturbed - baseline,
+                sigma_n,
+                parallel=cfg.bench_parallel,
+            )
 
-        conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
-        accuracies.append(accuracy)
-        confusions.append(conf)
-        true_by_effect.append(design.true_change)
-        inferred_by_effect.append(np.asarray(inferred, dtype=int))
+            conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
+            acc_per_repeat.append(accuracy)
+            conf_per_repeat.append(conf)
+            true_per_repeat.append(design.true_change.copy())
+            inferred_per_repeat.append(np.asarray(inferred, dtype=int))
+
+        accuracies.append(acc_per_repeat)
+        confusions.append(conf_per_repeat)
+        true_by_effect.append(true_per_repeat)
+        inferred_by_effect.append(inferred_per_repeat)
 
     return SweepResult(
         effect_size=np.array([d.effect_size for d in designs], dtype=np.float64),
-        accuracy=np.array(accuracies, dtype=np.float64),
-        confusion_matrices=np.stack(confusions, axis=0),
-        true_change=np.stack(true_by_effect, axis=0),
-        inferred_change=np.stack(inferred_by_effect, axis=0),
+        accuracy=np.array(accuracies, dtype=np.float64),  # (E, R)
+        confusion_matrices=np.stack(
+            [np.stack(c, axis=0) for c in confusions], axis=0
+        ),  # (E, R, C, C)
+        true_change=np.stack(
+            [np.stack(t, axis=0) for t in true_by_effect], axis=0
+        ),  # (E, R, N)
+        inferred_change=np.stack(
+            [np.stack(i, axis=0) for i in inferred_by_effect], axis=0
+        ),  # (E, R, N)
     )
 
 
@@ -474,10 +536,26 @@ def _simulate_observed_bold(
     return bold + rng.normal(0.0, noise_sigma, size=bold.shape)
 
 
-def invert_bold_observation(y_obs: np.ndarray, cfg: ComparisonConfig) -> np.ndarray:
+def invert_bold_observation(
+    y_obs: np.ndarray,
+    cfg: ComparisonConfig,
+    initial_guess: np.ndarray | None = None,
+) -> tuple[np.ndarray, dict[str, float]]:
+    """L-BFGS-B fit of (a01, a10, c0, c1) to ``y_obs``.
+
+    Returns ``(theta_hat, diagnostics)`` where ``diagnostics`` carries the
+    SciPy ``OptimizeResult`` fields the comparison needs downstream:
+    ``success`` (bool), ``fun`` (final objective), ``nit`` (iterations).
+
+    ``initial_guess`` defaults to the per-bound midpoint (``[0.5]*4`` under
+    PARAM_BOUNDS). PR 3 calls this for the perturbed-side fit with the
+    baseline fit's ``theta_hat`` so the two fits no longer share a starting
+    point.
+    """
     time, u = _default_time_and_stimulus()
     bounds = _bounds_list()
-    initial_guess = np.array([np.mean(bound) for bound in bounds], dtype=float)
+    if initial_guess is None:
+        initial_guess = np.array([np.mean(bound) for bound in bounds], dtype=float)
     scale = float(np.std(y_obs)) + 1e-12
 
     def objective(theta: np.ndarray) -> float:
@@ -506,62 +584,118 @@ def invert_bold_observation(y_obs: np.ndarray, cfg: ComparisonConfig) -> np.ndar
         bounds=bounds,
         options={"maxiter": cfg.inversion_maxiter, "eps": 1e-3},
     )
-    return np.asarray(res.x, dtype=float)
+    diagnostics = {
+        "success": bool(res.success),
+        "fun": float(res.fun),
+        "nit": int(getattr(res, "nit", 0)),
+    }
+    return np.asarray(res.x, dtype=float), diagnostics
 
 
 def run_model_inversion_effect_size_sweep(
     cfg: ComparisonConfig,
     designs: Iterable[ChangeDesign] | None = None,
 ) -> SweepResult:
-    """Run matched model-inversion confusion sweeps over effect size."""
+    """Run matched model-inversion confusion sweeps over effect size.
+
+    PR 3 changes:
+      - perturbed-side L-BFGS-B fits warm-start from the baseline fit's
+        ``theta_first`` instead of the global midpoint, so the inferred
+        per-parameter delta is forward-model driven rather than driven by
+        L-BFGS-B step structure from a shared starting point.
+      - per-fit convergence metadata (``res.success``, ``res.fun``,
+        ``res.nit``) and the fitted thetas are captured into the
+        :class:`SweepResult` so downstream consumers can see how often the
+        optimiser actually converged.
+      - ``cfg.n_repeats`` is honored: each design is fit ``n_repeats`` times
+        with independent observation-noise seeds; SweepResult exposes the
+        per-repeat accuracy / confusion in its leading two axes.
+    """
 
     designs = list(generate_change_designs(cfg) if designs is None else designs)
-    accuracies: list[float] = []
-    confusions: list[np.ndarray] = []
-    true_by_effect: list[np.ndarray] = []
-    inferred_by_effect: list[np.ndarray] = []
+    n_repeats = max(1, cfg.n_repeats)
+    n_classes = len(CLASS_LABELS)
+    n_params = len(PARAM_NAMES)
+
+    n_effects = len(designs)
+    # Allocate per-effect, per-repeat accumulators. We do this eagerly because
+    # the inner shapes are known up front.
+    sample_counts = [len(d.true_change) for d in designs]
+    max_n = max(sample_counts) if sample_counts else 0
+    accuracy_arr = np.zeros((n_effects, n_repeats), dtype=float)
+    conf_arr = np.zeros((n_effects, n_repeats, n_classes, n_classes), dtype=float)
+    true_arr = np.zeros((n_effects, n_repeats, max_n), dtype=int)
+    inferred_arr = np.zeros((n_effects, n_repeats, max_n), dtype=int)
+    conv_success = np.zeros((n_effects, n_repeats, max_n, 2), dtype=bool)
+    conv_fun = np.full((n_effects, n_repeats, max_n, 2), np.nan, dtype=float)
+    conv_nit = np.zeros((n_effects, n_repeats, max_n, 2), dtype=np.int32)
+    theta_hat = np.full(
+        (n_effects, n_repeats, max_n, 2, n_params), np.nan, dtype=float
+    )
 
     for effect_index, design in enumerate(designs):
-        rng = np.random.default_rng(np.random.SeedSequence([cfg.seed, 20_000, effect_index]))
-        inferred = np.zeros_like(design.true_change)
         threshold = cfg.change_threshold_fraction * design.effect_size
+        n_samples = len(design.true_change)
+        for repeat_idx in range(n_repeats):
+            rng = np.random.default_rng(
+                np.random.SeedSequence([cfg.seed, 20_000, effect_index, repeat_idx])
+            )
+            inferred = np.zeros_like(design.true_change)
 
-        iterator = range(len(design.true_change))
-        for sample_idx in iterator:
-            if cfg.inversion_verbose and sample_idx % max(1, len(design.true_change) // 10) == 0:
-                print(
-                    f"model inversion effect={design.effect_size:g}: "
-                    f"{sample_idx}/{len(design.true_change)}"
+            for sample_idx in range(n_samples):
+                if (
+                    cfg.inversion_verbose
+                    and sample_idx % max(1, n_samples // 10) == 0
+                ):
+                    print(
+                        f"model inversion effect={design.effect_size:g} "
+                        f"repeat={repeat_idx}: {sample_idx}/{n_samples}"
+                    )
+
+                y_baseline = _simulate_observed_bold(
+                    design.baseline_theta[sample_idx], cfg, rng
+                )
+                y_perturbed = _simulate_observed_bold(
+                    design.perturbed_theta[sample_idx], cfg, rng
+                )
+                theta_first, diag_first = invert_bold_observation(y_baseline, cfg)
+                # Warm-start the perturbed fit from the baseline fit so the
+                # difference is forward-model driven, not L-BFGS-B-step driven.
+                theta_second, diag_second = invert_bold_observation(
+                    y_perturbed, cfg, initial_guess=theta_first
                 )
 
-            y_baseline = _simulate_observed_bold(
-                design.baseline_theta[sample_idx],
-                cfg,
-                rng,
-            )
-            y_perturbed = _simulate_observed_bold(
-                design.perturbed_theta[sample_idx],
-                cfg,
-                rng,
-            )
-            theta_first = invert_bold_observation(y_baseline, cfg)
-            theta_second = invert_bold_observation(y_perturbed, cfg)
-            diff = np.abs(theta_second - theta_first)
-            max_diff = float(np.max(diff))
-            inferred[sample_idx] = int(np.argmax(diff) + 1) if max_diff > threshold else 0
+                conv_success[effect_index, repeat_idx, sample_idx, 0] = diag_first["success"]
+                conv_success[effect_index, repeat_idx, sample_idx, 1] = diag_second["success"]
+                conv_fun[effect_index, repeat_idx, sample_idx, 0] = diag_first["fun"]
+                conv_fun[effect_index, repeat_idx, sample_idx, 1] = diag_second["fun"]
+                conv_nit[effect_index, repeat_idx, sample_idx, 0] = diag_first["nit"]
+                conv_nit[effect_index, repeat_idx, sample_idx, 1] = diag_second["nit"]
+                theta_hat[effect_index, repeat_idx, sample_idx, 0] = theta_first
+                theta_hat[effect_index, repeat_idx, sample_idx, 1] = theta_second
 
-        conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
-        accuracies.append(accuracy)
-        confusions.append(conf)
-        true_by_effect.append(design.true_change)
-        inferred_by_effect.append(inferred)
+                diff = np.abs(theta_second - theta_first)
+                max_diff = float(np.max(diff))
+                inferred[sample_idx] = (
+                    int(np.argmax(diff) + 1) if max_diff > threshold else 0
+                )
+
+            conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
+            accuracy_arr[effect_index, repeat_idx] = accuracy
+            conf_arr[effect_index, repeat_idx] = conf
+            true_arr[effect_index, repeat_idx, :n_samples] = design.true_change
+            inferred_arr[effect_index, repeat_idx, :n_samples] = inferred
 
     return SweepResult(
         effect_size=np.array([d.effect_size for d in designs], dtype=np.float64),
-        accuracy=np.array(accuracies, dtype=np.float64),
-        confusion_matrices=np.stack(confusions, axis=0),
-        true_change=np.stack(true_by_effect, axis=0),
-        inferred_change=np.stack(inferred_by_effect, axis=0),
+        accuracy=accuracy_arr,
+        confusion_matrices=conf_arr,
+        true_change=true_arr,
+        inferred_change=inferred_arr,
+        convergence_success=conv_success,
+        convergence_fun=conv_fun,
+        convergence_nit=conv_nit,
+        theta_hat=theta_hat,
     )
 
 
@@ -572,32 +706,71 @@ def save_sweep_artifact(
     method_name: str,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(
-        path,
-        effect_size=result.effect_size,
-        accuracy=result.accuracy,
-        confusion_matrices=result.confusion_matrices,
-        true_change=result.true_change,
-        inferred_change=result.inferred_change,
-        labels=np.array(CLASS_LABELS),
-        param_names=np.array(PARAM_NAMES),
-        method=np.array(method_name),
-        setting=np.array(cfg.setting),
-        seed=np.array(cfg.seed, dtype=np.int64),
-        n_test_samples=np.array(cfg.n_test_samples, dtype=np.int64),
-        n_repeats=np.array(cfg.n_repeats, dtype=np.int64),
-        noise_mode=np.array(cfg.noise_mode),
-    )
+    payload: dict[str, np.ndarray] = {
+        "effect_size": result.effect_size,
+        "accuracy": result.accuracy,
+        "confusion_matrices": result.confusion_matrices,
+        "true_change": result.true_change,
+        "inferred_change": result.inferred_change,
+        "labels": np.array(CLASS_LABELS),
+        "param_names": np.array(PARAM_NAMES),
+        "method": np.array(method_name),
+        "setting": np.array(cfg.setting),
+        "seed": np.array(cfg.seed, dtype=np.int64),
+        "n_test_samples": np.array(cfg.n_test_samples, dtype=np.int64),
+        "n_repeats": np.array(cfg.n_repeats, dtype=np.int64),
+        "noise_mode": np.array(cfg.noise_mode),
+    }
+    # Inversion-arm-only convergence + fitted-theta arrays
+    if result.convergence_success is not None:
+        payload["convergence_success"] = result.convergence_success
+    if result.convergence_fun is not None:
+        payload["convergence_fun"] = result.convergence_fun
+    if result.convergence_nit is not None:
+        payload["convergence_nit"] = result.convergence_nit
+    if result.theta_hat is not None:
+        payload["theta_hat"] = result.theta_hat
+    np.savez(path, **payload)
 
 
 def load_sweep_artifact(path: Path) -> SweepResult:
+    """Load a SweepResult NPZ, promoting legacy 1D/3D shapes to (E, R)/(E, R, C, C).
+
+    Pre-PR-3 artifacts saved ``accuracy`` as 1D ``(E,)`` and
+    ``confusion_matrices`` as 3D ``(E, C, C)``. We add a singleton repeat
+    axis so all downstream code can rely on the new shape contract.
+    """
     artifact = np.load(path, allow_pickle=False)
+
+    def _maybe(key: str) -> np.ndarray | None:
+        return artifact[key] if key in artifact.files else None
+
+    accuracy = np.asarray(artifact["accuracy"])
+    if accuracy.ndim == 1:
+        accuracy = accuracy[:, np.newaxis]
+
+    confusion = np.asarray(artifact["confusion_matrices"])
+    if confusion.ndim == 3:
+        confusion = confusion[:, np.newaxis, :, :]
+
+    true_change = np.asarray(artifact["true_change"])
+    if true_change.ndim == 2:
+        true_change = true_change[:, np.newaxis, :]
+
+    inferred_change = np.asarray(artifact["inferred_change"])
+    if inferred_change.ndim == 2:
+        inferred_change = inferred_change[:, np.newaxis, :]
+
     return SweepResult(
         effect_size=artifact["effect_size"],
-        accuracy=artifact["accuracy"],
-        confusion_matrices=artifact["confusion_matrices"],
-        true_change=artifact["true_change"],
-        inferred_change=artifact["inferred_change"],
+        accuracy=accuracy,
+        confusion_matrices=confusion,
+        true_change=true_change,
+        inferred_change=inferred_change,
+        convergence_success=_maybe("convergence_success"),
+        convergence_fun=_maybe("convergence_fun"),
+        convergence_nit=_maybe("convergence_nit"),
+        theta_hat=_maybe("theta_hat"),
     )
 
 
@@ -613,9 +786,15 @@ def save_confusion_pickle(
     result: SweepResult,
     canonical_effect: float = 0.3,
 ) -> None:
+    """Persist the confusion matrix for the canonical effect size.
+
+    The matrix saved is the mean over the per-repeat axis so the on-disk
+    shape (n_classes, n_classes) is unchanged from the pre-PR-3 convention.
+    """
     idx = _canonical_effect_index(result, canonical_effect)
+    mean_confusion = result.confusion_mean[idx]
     with open(path, "wb") as f:
-        pickle.dump(result.confusion_matrices[idx], f)
+        pickle.dump(mean_confusion, f)
 
 
 def plot_accuracy_comparison(
@@ -632,16 +811,20 @@ def plot_accuracy_comparison(
     set_style()
     width, height = get_width_height_latex()
     fig, ax = plt.subplots(figsize=(width / 1.5, height * 0.75))
-    ax.plot(
+    ax.errorbar(
         bench_result.effect_size,
-        bench_result.accuracy,
+        bench_result.accuracy_mean,
+        yerr=bench_result.accuracy_sem,
         marker="o",
+        capsize=3,
         label="BENCH (PCA-4)",
     )
-    ax.plot(
+    ax.errorbar(
         inversion_result.effect_size,
-        inversion_result.accuracy,
+        inversion_result.accuracy_mean,
+        yerr=inversion_result.accuracy_sem,
         marker="s",
+        capsize=3,
         label="model inversion",
     )
     ax.axhline(1 / len(CLASS_LABELS), color="0.5", ls="--", lw=1, label="chance")
@@ -678,7 +861,7 @@ def plot_confusion_matrix(
     import seaborn as sns
 
     sns.heatmap(
-        result.confusion_matrices[idx],
+        result.confusion_mean[idx],
         annot=True,
         fmt=".2f",
         cmap=cmap,
