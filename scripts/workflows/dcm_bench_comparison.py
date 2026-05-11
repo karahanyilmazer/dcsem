@@ -24,6 +24,12 @@ from sklearn.metrics import confusion_matrix, mean_squared_error
 
 from dcsem import NOISE_CONFIG, PARAM_BOUNDS, get_colormap, set_style
 from dcsem.utils import stim_boxcar
+from scripts._artifact_metadata import (
+    compute_sha256,
+    read_sidecar,
+    sidecar_path,
+    write_sidecar,
+)
 from utils import get_out_dir, get_summary_measures, get_width_height_latex, simulate_bold
 
 PARAM_NAMES: tuple[str, ...] = ("a01", "a10", "c0", "c1")
@@ -41,7 +47,10 @@ class ComparisonConfig:
     effect_size_grid: tuple[float, ...] = DEFAULT_EFFECT_SIZE_GRID
     n_test_samples: int = 200
     n_train_samples: int = 5000
-    n_repeats: int = 50
+    # n_repeats was historically declared as 50 but never read; with the
+    # wiring planned for PR 3 it would multiply the inversion sweep cost by 50x.
+    # Default to 1 (no-op) until that PR explicitly opts in.
+    n_repeats: int = 1
     method: str = "PCA"
     ode_method: str = "BDF"
     summary_noise_floor: float = 1e-4
@@ -50,6 +59,13 @@ class ComparisonConfig:
     bench_parallel: bool = True
     inversion_verbose: bool = True
     reuse_bench_model: bool = True
+    # BENCH Trainer.train hyperparameters. Surfaced here so they participate
+    # in the cache fingerprint (mdl_{setting}.pkl.meta.json) and can be tuned
+    # without monkey-patching.
+    bench_dv0: float = 1e-6
+    bench_mu_poly_degree: int = 2
+    bench_sigma_poly_degree: int = 1
+    bench_alpha: float = 0.1
 
     @property
     def setting(self) -> str:
@@ -214,6 +230,117 @@ def _summary_noise_std(cfg: ComparisonConfig, paths: ComparisonPaths) -> float:
     return float(np.mean(noise_sigmas))
 
 
+def _pca_artifact_path(cfg: ComparisonConfig, paths: ComparisonPaths) -> Path:
+    return paths.model_dir / f"{cfg.method.lower()}_{cfg.setting}.pkl"
+
+
+def _trainer_config_dict(cfg: ComparisonConfig) -> dict[str, object]:
+    """Trainer hyperparams that should invalidate the cache when changed."""
+    bounds = _bounds_dict()
+    return {
+        "n_train_samples": cfg.n_train_samples,
+        "dv0": cfg.bench_dv0,
+        "mu_poly_degree": cfg.bench_mu_poly_degree,
+        "sigma_poly_degree": cfg.bench_sigma_poly_degree,
+        "alpha": cfg.bench_alpha,
+        "seed": cfg.seed,
+        "parallel": cfg.bench_parallel,
+        "change_vecs": [{p: 1} for p in PARAM_NAMES],
+        "lims": ["twosided"] * len(PARAM_NAMES),
+        "param_names": list(PARAM_NAMES),
+        "param_bounds": bounds,
+        "priors_kind": "uniform_per_param",
+        "method": cfg.method,
+        "n_components": cfg.n_components,
+        "noise_mode": cfg.noise_mode,
+        "normaliser": "default_normaliser",
+        "forward_model_name": f"dcm_{cfg.setting}_{cfg.method.lower()}_summary",
+    }
+
+
+def _can_reuse_cached_bench(
+    cfg: ComparisonConfig,
+    paths: ComparisonPaths,
+    model_path: Path,
+) -> bool:
+    """Multi-step staleness check; logs the reason when retraining is needed."""
+    if not model_path.exists():
+        print(f"[cache] {model_path.name}: artifact missing; retraining")
+        return False
+
+    mdl_meta = read_sidecar(model_path)
+    if mdl_meta is None:
+        print(f"[cache] {model_path.name}: sidecar missing; retraining")
+        return False
+
+    pca_path = _pca_artifact_path(cfg, paths)
+    if not pca_path.exists():
+        print(f"[cache] {pca_path.name}: upstream PCA missing; retraining")
+        return False
+    current_pca_sha = compute_sha256(pca_path)
+    recorded_pca_sha = mdl_meta.get("pca_sha256")
+    if recorded_pca_sha != current_pca_sha:
+        print(
+            f"[cache] {model_path.name}: upstream PCA hash changed "
+            f"({(recorded_pca_sha or '<missing>')[:12]}... -> "
+            f"{current_pca_sha[:12]}...); retraining"
+        )
+        return False
+
+    # JSON-roundtrip the desired config so tuples (e.g. param_bounds values)
+    # compare equal to the lists that come back from the sidecar JSON.
+    import json as _json
+
+    desired = _json.loads(_json.dumps(_trainer_config_dict(cfg), default=str))
+    drift = [
+        key
+        for key, want in desired.items()
+        if mdl_meta.get(key) != want
+    ]
+    if drift:
+        print(
+            f"[cache] {model_path.name}: trainer config drift in fields "
+            f"{drift}; retraining"
+        )
+        return False
+
+    if mdl_meta.get("git_dirty") and mdl_meta.get("git_sha") != _short_sha():
+        print(
+            f"[cache] {model_path.name}: artifact was built from a dirty "
+            f"worktree at {mdl_meta.get('git_sha')}; retraining"
+        )
+        return False
+
+    return True
+
+
+def _short_sha() -> str | None:
+    import subprocess
+
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=2,
+        ).stdout.strip()
+    except Exception:
+        return None
+
+
+def _write_bench_sidecar(
+    model_path: Path,
+    cfg: ComparisonConfig,
+    paths: ComparisonPaths,
+) -> None:
+    sidecar_payload: dict[str, object] = {**_trainer_config_dict(cfg)}
+    pca_path = _pca_artifact_path(cfg, paths)
+    if pca_path.exists():
+        sidecar_payload["pca_sha256"] = compute_sha256(pca_path)
+    write_sidecar(model_path, sidecar_payload, sha_key="mdl_sha256")
+
+
 def train_or_load_bench_model(
     cfg: ComparisonConfig,
     paths: ComparisonPaths,
@@ -222,7 +349,7 @@ def train_or_load_bench_model(
     """Train BENCH on the configured PCA summary, reusing a saved model if asked."""
 
     model_path = paths.model_dir / f"mdl_{cfg.setting}.pkl"
-    if cfg.reuse_bench_model and model_path.exists():
+    if cfg.reuse_bench_model and _can_reuse_cached_bench(cfg, paths, model_path):
         with open(model_path, "rb") as f:
             return pickle.load(f)
 
@@ -237,13 +364,22 @@ def train_or_load_bench_model(
         priors=priors,
         measurement_names=[f"PC{i + 1}" for i in range(cfg.n_components)],
     )
+    # BENCH samples prior draws via scipy.stats.rvs(), which routes through
+    # the global numpy RNG. Seed it so the training set is reproducible and
+    # the cache fingerprint actually corresponds to a deterministic fit.
+    np.random.seed(cfg.seed)
     model = trainer.train(
         n_samples=cfg.n_train_samples,
+        dv0=cfg.bench_dv0,
+        mu_poly_degree=cfg.bench_mu_poly_degree,
+        sigma_poly_degree=cfg.bench_sigma_poly_degree,
+        alpha=cfg.bench_alpha,
         verbose=True,
         parallel=cfg.bench_parallel,
     )
     with open(model_path, "wb") as f:
         pickle.dump(model, f)
+    _write_bench_sidecar(model_path, cfg, paths)
     return model
 
 
@@ -291,18 +427,16 @@ def run_bench_effect_size_sweep(
 
         sigma_n = (noise_std**2) * np.eye(baseline.shape[1])
         sigma_n = np.broadcast_to(sigma_n, (baseline.shape[0], *sigma_n.shape)).copy()
-        with warnings.catch_warnings():
-            warnings.filterwarnings(
-                "ignore",
-                message="Conversion of an array with ndim > 0 to a scalar",
-                category=DeprecationWarning,
-            )
-            _, inferred, _, _ = bench_model.infer(
-                baseline,
-                perturbed - baseline,
-                sigma_n,
-                parallel=cfg.bench_parallel,
-            )
+        # NB: a DeprecationWarning ("Conversion of an array with ndim > 0 to
+        # a scalar") used to be silenced here. It comes from BENCH's
+        # log-likelihood code path and may indicate sigma_n collapse; left
+        # visible so we can diagnose during the linearity / wald-test work.
+        _, inferred, _, _ = bench_model.infer(
+            baseline,
+            perturbed - baseline,
+            sigma_n,
+            parallel=cfg.bench_parallel,
+        )
 
         conf, accuracy = _confusion_and_accuracy(design.true_change, inferred)
         accuracies.append(accuracy)

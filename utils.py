@@ -46,11 +46,18 @@ def filter_params(params, keys, exclude=False):
     return {k: params[k] for k in keys}
 
 
-def initialize_parameters(bounds, params_to_sim, random=False):
+def initialize_parameters(bounds, params_to_sim, random=False, rng=None):
+    """Build an initial parameter vector by name from ``bounds``.
+
+    With ``random=False`` (default) returns midpoints. With ``random=True`` and
+    ``rng=None`` falls back to the *global* numpy RNG for backwards compat;
+    pass an explicit ``numpy.random.Generator`` to get reproducible draws.
+    """
+    sampler = rng.uniform if rng is not None else np.random.uniform
     initial_values = []
     for param in params_to_sim:
         if random:
-            initial_values.append(np.random.uniform(*bounds[param]))
+            initial_values.append(sampler(*bounds[param]))
         else:
             initial_values.append(np.mean(bounds[param]))
 

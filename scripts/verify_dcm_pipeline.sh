@@ -39,11 +39,15 @@ Stages (in order):
   04a-wf02_solver_snr           scripts/workflows/02-estimate_params_solver.py
   04b-wf03_off_diag             scripts/workflows/03-off_diag_errors.py
   04c-wf04_summary_measures     scripts/workflows/04-extract_summary_measures.py
-  04d-wf08_identifiability      scripts/workflows/08-identifiability_analysis.py
+  04d-pre_train_freshness       scripts/_verify_artifact_freshness.py --mode pre-train
+                                  (HARD-GATE: aborts pipeline on stale upstream PCA)
+  04e-wf08_identifiability      scripts/workflows/08-identifiability_analysis.py
   05a-wf05_bench_sweep          scripts/workflows/05-apply_bench.py
-  05b-wf05_bench_headline2000   scripts/workflows/05-apply_bench.py --n-test-samples 2000
+  05b-post_train_freshness      scripts/_verify_artifact_freshness.py --mode post-train
+                                  (HARD-GATE: aborts pipeline on stale BENCH model)
+  05c-wf05_bench_headline2000   scripts/workflows/05-apply_bench.py --n-test-samples 2000
                                   (skip with --skip-headline)
-  05c-wf06_investigate          scripts/workflows/06-investigate_bench.py
+  05d-wf06_investigate          scripts/workflows/06-investigate_bench.py
   06-wf07_inversion_confusion   scripts/workflows/07-model_inversion_confusion.py
 
 Total wall clock: ~50–90 min sequential.
@@ -310,6 +314,44 @@ run_stage() {
   return 0
 }
 
+# hard_run_stage runs like run_stage but ALWAYS aborts the whole pipeline on
+# non-zero exit, regardless of --stop-on-error. Use for freshness gates whose
+# failure means downstream stages would otherwise consume stale state.
+hard_run_stage() {
+  local name="$1"; shift
+  local env_str="$1"; shift
+  local log_file="$LOG_DIR/${name}.log"
+
+  log "START $name [HARD-GATE]${env_str:+ (env: $env_str)}"
+
+  if [[ $DRY_RUN -eq 1 ]]; then
+    log "DRYRUN ${env_str:+env $env_str }$* > $log_file"
+    log "END   $name exit=0 (dry-run)"
+    STAGES_RUN+=("$name|0")
+    return 0
+  fi
+
+  local status
+  set +e
+  if [[ -n "$env_str" ]]; then
+    # shellcheck disable=SC2086
+    env $env_str "$@" >"$log_file" 2>&1
+  else
+    "$@" >"$log_file" 2>&1
+  fi
+  status=$?
+  set -e
+
+  log "END   $name exit=$status"
+  STAGES_RUN+=("$name|$status")
+
+  if [[ $status -ne 0 ]]; then
+    log "HARD-GATE FAIL in $name (exit=$status); aborting pipeline"
+    exit "$status"
+  fi
+  return 0
+}
+
 # ----- Stages ----------------------------------------------------------------
 
 if [[ $SKIP_TESTS -eq 0 ]]; then
@@ -340,18 +382,28 @@ run_stage "04b-wf03_off_diag" "" \
   uv run python "scripts/workflows/03-off_diag_errors.py"
 run_stage "04c-wf04_summary_measures" "" \
   uv run python "scripts/workflows/04-extract_summary_measures.py"
-run_stage "04d-wf08_identifiability" "" \
+# Pre-train freshness gate: the PCA, ICA, and noise-sigma artifacts that
+# 05-apply_bench.py is about to consume must hash-match their sidecars.
+# A missing or mismatched PCA aborts the pipeline. Missing BENCH model is OK
+# here (we're about to build it).
+hard_run_stage "04d-pre_train_freshness" "" \
+  uv run python "scripts/_verify_artifact_freshness.py" --setting no_noise_4 --mode pre-train
+run_stage "04e-wf08_identifiability" "" \
   uv run python "scripts/workflows/08-identifiability_analysis.py"
 
 run_stage "05a-wf05_bench_sweep" "" \
   uv run python "scripts/workflows/05-apply_bench.py"
+# Post-train freshness gate: now everything must match - in particular the
+# BENCH model sidecar must declare a pca_sha256 that equals the current PCA.
+hard_run_stage "05b-post_train_freshness" "" \
+  uv run python "scripts/_verify_artifact_freshness.py" --setting no_noise_4 --mode post-train
 if [[ $SKIP_HEADLINE -eq 0 ]]; then
-  run_stage "05b-wf05_bench_headline2000" "" \
+  run_stage "05c-wf05_bench_headline2000" "" \
     uv run python "scripts/workflows/05-apply_bench.py" --n-test-samples 2000
 else
-  log "SKIP 05b-wf05_bench_headline2000 (--skip-headline set)"
+  log "SKIP 05c-wf05_bench_headline2000 (--skip-headline set)"
 fi
-run_stage "05c-wf06_investigate" "" \
+run_stage "05d-wf06_investigate" "" \
   uv run python "scripts/workflows/06-investigate_bench.py"
 
 run_stage "06-wf07_inversion_confusion" "" \

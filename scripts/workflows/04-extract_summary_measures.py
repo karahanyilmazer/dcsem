@@ -1,22 +1,40 @@
-# %%
-# !%load_ext autoreload
-# !%autoreload 2
-import os
-import pickle
+"""Fit PCA/ICA summary-measure projections for the BENCH-vs-inversion comparison.
+
+Produces, per ``(noise_mode, n_components)`` setting, the on-disk artifacts that
+``scripts/workflows/dcm_bench_comparison.py`` and friends read at run time:
+
+    results/models/bench_{setting}/
+        pca_{setting}.pkl                          fitted sklearn PCA
+        pca_{setting}.pkl.meta.json                content hash + config
+        ica_{setting}.pkl                          fitted sklearn FastICA
+        ica_{setting}.pkl.meta.json
+        noise_sigmas_pca_{setting}.pkl             per-sample noise std list
+        noise_sigmas_pca_{setting}.pkl.meta.json
+        noise_sigmas_ica_{setting}.pkl             (same data, ICA-side name)
+        noise_sigmas_ica_{setting}.pkl.meta.json
+
+Use ``--all-settings`` to iterate the four combinations
+``{no_noise, with_noise} x {3, 4}``; the bare CLI form runs the default single
+setting (``no_noise_4``).
+"""
+
+from __future__ import annotations
+
+import argparse
+import pickle as _pkl
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Iterable, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-try:
-    from IPython.display import Markdown, display
-except ImportError:
-    display = print
-    Markdown = lambda s: s
 from sklearn.decomposition import PCA, FastICA
 from tqdm import tqdm
 
 from dcsem import PARAM_BOUNDS
 from dcsem.utils import stim_boxcar
+from scripts._artifact_metadata import write_sidecar
 from utils import (
     get_out_dir,
     get_width_height_latex,
@@ -25,257 +43,286 @@ from utils import (
     simulate_bold,
 )
 
-set_style()
-width, height = get_width_height_latex()
-default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
-
-LATEX_DIR = get_out_dir(type="latex")
-IMG_DIR = get_out_dir(type="img", subfolder="bench")
-MODEL_DIR = get_out_dir(type="model", subfolder="bench")
-
-SEED = 42
-rng = np.random.default_rng(SEED)
-
-# %%
-# ======================================================================================
-# Bilinear neural model parameters
+# Bilinear neural model parameters - fixed for the BENCH 2-ROI workflow.
 NUM_LAYERS = 1
 NUM_ROIS = 2
-time = np.arange(100)
-u = stim_boxcar([[10, 20, 1]])  # Input stimulus
-# u = stim_boxcar([[0, 10, 1], [40, 10, 0.5], [50, 20, 1]])
+TIME = np.arange(100)
+STIM_SPEC = [[10, 20, 1]]
+PARAMS_TO_SET = ["a01", "a10", "c0", "c1"]
 
-# Parameters to set and estimate
-params_to_set = ["a01", "a10", "c0", "c1"]
+# The four legitimate (noise_mode, n_components) combinations that the
+# downstream comparison code currently reads.
+ALL_SETTINGS: tuple[tuple[str, int], ...] = (
+    ("no_noise", 3),
+    ("no_noise", 4),
+    ("with_noise", 3),
+    ("with_noise", 4),
+)
 
-# Parameter bounds from central config
-bounds = PARAM_BOUNDS.get_bounds_dict()
 
-# ======================================================================================
-# %%
-display(Markdown("## Data Generation"))
+@dataclass(frozen=True)
+class ExtractConfig:
+    noise_mode: Literal["no_noise", "with_noise"] = "no_noise"
+    n_components: int = 4
+    n_samples: int = 10000
+    seed: int = 42
 
-n_samples = 10000
-bolds_roi0 = []
-bolds_roi1 = []
-noise_sigmas = []
-for _ in tqdm(range(n_samples)):
-    initial_values = initialize_parameters(bounds, params_to_set, random=True)
+    @property
+    def setting(self) -> str:
+        return f"{self.noise_mode}_{self.n_components}"
 
-    # Initialize the BOLD signals
-    bold_true = simulate_bold(
-        dict(zip(params_to_set, initial_values)),
-        time=time,
-        u=u,
-        num_rois=NUM_ROIS,
+
+def _bounds_dict() -> dict[str, tuple[float, float]]:
+    return PARAM_BOUNDS.get_bounds_dict()
+
+
+def _stim_spec_metadata() -> dict[str, object]:
+    return {
+        "boxcar": STIM_SPEC,
+        "time_start": int(TIME[0]),
+        "time_stop": int(TIME[-1]) + 1,
+        "time_step": int(TIME[1] - TIME[0]) if len(TIME) > 1 else 1,
+        "n_timepoints": int(len(TIME)),
+    }
+
+
+def generate_training_bold(cfg: ExtractConfig) -> tuple[np.ndarray, list[float]]:
+    """Simulate ``n_samples`` BOLD draws under ``cfg``.
+
+    Returns the centred concatenated BOLD matrix ``(n_samples, 2*T)`` and the
+    per-sample noise sigma used (zero throughout when
+    ``noise_mode == 'no_noise'``).
+    """
+    rng = np.random.default_rng(cfg.seed)
+    bounds = _bounds_dict()
+    u = stim_boxcar(STIM_SPEC)
+
+    bolds_roi0: list[np.ndarray] = []
+    bolds_roi1: list[np.ndarray] = []
+    noise_sigmas: list[float] = []
+
+    for _ in tqdm(range(cfg.n_samples), desc=f"BOLD sim ({cfg.setting})"):
+        initial_values = initialize_parameters(
+            bounds, PARAMS_TO_SET, random=True, rng=rng
+        )
+        bold_true = simulate_bold(
+            dict(zip(PARAMS_TO_SET, initial_values)),
+            time=TIME,
+            u=u,
+            num_rois=NUM_ROIS,
+        )
+
+        if cfg.noise_mode == "no_noise":
+            bold_obsv = bold_true
+            noise_sigma = 0.0
+        else:
+            noise_sigma = float(0.10 * np.std(bold_true))
+            bold_obsv = bold_true + rng.normal(
+                0.0, noise_sigma, size=bold_true.shape
+            )
+
+        noise_sigmas.append(noise_sigma)
+        bolds_roi0.append(bold_obsv[:, 0])
+        bolds_roi1.append(bold_obsv[:, 1])
+
+    bolds_roi0_arr = np.asarray(bolds_roi0)
+    bolds_roi1_arr = np.asarray(bolds_roi1)
+    bold_concat = np.concatenate([bolds_roi0_arr, bolds_roi1_arr], axis=1)
+    bold_concat_c = bold_concat - np.mean(bold_concat, axis=1, keepdims=True)
+    return bold_concat_c, noise_sigmas
+
+
+def _plot_elbow(
+    bold_concat_c: np.ndarray,
+    fitter_kind: Literal["PCA", "ICA"],
+    elbow: int,
+    img_dir: Path,
+    latex_dir: Path | None,
+    setting: str,
+    seed: int,
+) -> None:
+    """Reconstruction-error sweep over n_components for visual diagnostics."""
+    n_vals = np.arange(1, 21)
+    errors: list[float] = []
+    for n in n_vals:
+        if fitter_kind == "ICA":
+            model: PCA | FastICA = FastICA(n_components=int(n), random_state=seed)
+        else:
+            model = PCA(n_components=int(n))
+        comps = model.fit_transform(bold_concat_c)
+        recon = model.inverse_transform(comps)
+        errors.append(float(np.mean((bold_concat_c - recon) ** 2)))
+
+    fig, ax = plt.subplots()
+    ax.plot(n_vals, errors)
+    ax.axvline(elbow, color="C1", linestyle="--", label="Elbow")
+    ax.set_xlabel(f"Number of {fitter_kind} Components")
+    ax.set_ylabel("Reconstruction Error")
+    ax.legend()
+    ax.grid(True)
+    img_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(img_dir / f"{fitter_kind.lower()}_elbow_{setting}.png")
+    if latex_dir is not None:
+        latex_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(latex_dir / f"{fitter_kind.lower()}_elbow_{setting}.pdf")
+    plt.close(fig)
+
+
+def _plot_components(
+    model: PCA | FastICA,
+    bold_concat_c: np.ndarray,
+    img_dir: Path,
+    latex_dir: Path | None,
+    setting: str,
+    name: Literal["PCA", "ICA"],
+) -> None:
+    width, height = get_width_height_latex()
+    components = model.transform(bold_concat_c)
+    fig, axs = plt.subplots(2, 1, figsize=(width, height * 1.2))
+    axs[0].plot(model.components_.T)
+    axs[0].set_title(f"{name} Components")
+    axs[0].set_xlabel("Time")
+    axs[0].set_ylabel("Amplitude")
+    axs[0].legend(
+        [f"Component {i + 1}" for i in range(model.components_.shape[0])]
     )
 
-    # bold_obsv = bold_true
-    # bold_obsv = add_noise(bold_true, snr_db=30)
-    noise_sigma = 0.10 * np.std(bold_true)  # 10% of signal std
-    noise_sigmas.append(noise_sigma)
-    bold_obsv = bold_true + rng.normal(0, noise_sigma, size=bold_true.shape)
+    axs[1].plot(components)
+    axs[1].set_title("Transformed Data")
+    axs[1].set_xlabel("Sample")
+    axs[1].set_ylabel(f"{name} Value")
+    fig.tight_layout()
 
-    bolds_roi0.append(bold_obsv[:, 0])
-    bolds_roi1.append(bold_obsv[:, 1])
-
-bolds_roi0 = np.array(bolds_roi0)
-bolds_roi1 = np.array(bolds_roi1)
-bold_concat = np.concatenate([bolds_roi0, bolds_roi1], axis=1)
-bold_concat_c = bold_concat - np.mean(bold_concat, axis=1, keepdims=True)  # Mean center
-
-# %%
-fig, axs = plt.subplots(1, 2)
-axs[0].plot(bolds_roi0.T, lw=0.8)
-axs[0].set_title("ROI 1")
-axs[0].set_xlabel("Time (s)")
-axs[0].set_ylabel("Amplitude (a.u.)")
-axs[0].set_ylim(-0.003, 0.07)
-
-axs[1].plot(bolds_roi1.T, lw=0.8)
-axs[1].set_title("ROI 2")
-axs[1].set_xlabel("Time (s)")
-axs[1].set_ylim(-0.003, 0.07)
-
-plt.savefig(IMG_DIR / "bold_signals.png")
-plt.savefig(LATEX_DIR / "bold_signals.pdf")
-plt.show(block=False)
-
-# %%
-display(Markdown("## Concatenated BOLD Signal"))
-plt.figure()
-plt.plot(bold_concat.T)
-plt.title("Concatenated BOLD Signal")
-plt.xlabel("Time (s)")
-plt.ylabel("Amplitude (a.u.)")
-plt.grid()
-plt.savefig(IMG_DIR / "bold_concat.png")
-plt.savefig(LATEX_DIR / "bold_concat.pdf")
-plt.show(block=False)
-
-# %%
-display(Markdown("## Fitting PCA"))
-errors = []
-n_vals = np.arange(1, 21)
-elbow_pca = max(4, 3)  # FIM analysis: need >= 4 for full parameter discriminability
-
-for n in n_vals:
-    pca = PCA(n_components=n)
-    bold_pca = pca.fit_transform(bold_concat_c)
-    bold_recon = pca.inverse_transform(bold_pca)
-
-    error = np.mean((bold_concat_c - bold_recon) ** 2)
-    errors.append(error)
-
-plt.figure()
-plt.plot(n_vals, errors)
-plt.axvline(elbow_pca, color=default_colors[1], linestyle="--", label="Elbow")
-plt.xlabel("Number of PCA Components")
-plt.ylabel("Reconstruction Error")
-plt.legend()
-plt.grid()
-plt.savefig(IMG_DIR / "pca_elbow.png")
-plt.savefig(LATEX_DIR / "pca_elbow.pdf")
-plt.show(block=False)
-
-# %%
-pca = PCA(n_components=elbow_pca)
-bold_pca = pca.fit_transform(bold_concat_c)
-
-fig, axs = plt.subplots(2, 1, figsize=(width, height * 1.2))
-# fig.suptitle("PCA Reconstruction")
-
-axs[0].plot(pca.components_.T)
-axs[0].set_title("Principal Components")
-axs[0].set_xlabel("Time")
-axs[0].set_ylabel("Amplitude")
-axs[0].legend([f"Component {i + 1}" for i in range(elbow_pca)])
-
-axs[1].plot(bold_pca)
-axs[1].set_title("Transformed Data")
-axs[1].set_xlabel("Sample")
-axs[1].set_ylabel("PCA Value")
-
-plt.tight_layout()
-plt.savefig(IMG_DIR / "pca_components.png")
-plt.savefig(LATEX_DIR / "pca_components.pdf")
-plt.show(block=False)
-
-# %%
-display(Markdown("## Fitting ICA"))
-errors = []
-n_vals = np.arange(1, 21)
-elbow_ica = max(4, 3)  # FIM analysis: need >= 4 for full parameter discriminability
-
-for n in n_vals:
-    ica = FastICA(n_components=n)
-    bold_ica = ica.fit_transform(bold_concat_c)
-    bold_recon = ica.inverse_transform(bold_ica)
-
-    error = np.mean((bold_concat_c - bold_recon) ** 2)
-    errors.append(error)
-
-plt.figure()
-plt.plot(n_vals, errors)
-plt.axvline(elbow_ica, color="red", linestyle="--", label="Elbow")
-plt.xlabel("Number of ICA Components")
-plt.ylabel("Reconstruction Error")
-plt.legend()
-plt.grid()
-plt.savefig(IMG_DIR / "ica_elbow.png")
-plt.savefig(LATEX_DIR / "ica_elbow.pdf")
-plt.show(block=False)
-
-# %%
-ica = FastICA(n_components=elbow_ica)
-bold_ica = ica.fit_transform(bold_concat_c)
-
-# Create a figure and a GridSpec layout
-fig = plt.figure(figsize=(width, height * 1.7))
-gs = fig.add_gridspec(2, 2)
-
-# Top left plot (Mixing Matrix)
-ax1 = fig.add_subplot(gs[0, 0])
-ax1.plot(ica.mixing_)
-ax1.set_title("Mixing Matrix")
-ax1.set_xlabel("Time")
-ax1.set_ylabel("Amplitude")
-
-# Top right plot (Components)
-ax2 = fig.add_subplot(gs[0, 1])
-ax2.plot(ica.components_.T)
-ax2.set_title("Components")
-ax2.set_xlabel("Time")
-ax2.legend([f"Component {i + 1}" for i in range(elbow_ica)])
-
-# Bottom plot spanning both columns (IC Value)
-ax3 = fig.add_subplot(gs[1, :])
-ax3.plot(bold_ica)
-ax3.set_title("Transformed Data")
-ax3.set_xlabel("Parameter Combination")
-ax3.set_ylabel("IC Value")
-
-# Adjust layout and display
-plt.tight_layout()
-plt.savefig(IMG_DIR / "ica_components.png")
-plt.savefig(LATEX_DIR / "ica_components.pdf")
-plt.show(block=False)
-
-# %%
-display(Markdown("## Reconstruction"))
-initial_values = initialize_parameters(bounds, params_to_set, random=True)
-
-# Initialize the BOLD signals
-bold_true = simulate_bold(
-    dict(zip(params_to_set, initial_values)),
-    time=time,
-    u=u,
-    num_rois=NUM_ROIS,
-)
-bold_obsv = bold_true
-tmp_bold = np.concatenate([bold_obsv[:, 0], bold_obsv[:, 1]]).reshape(1, -1)
-tmp_bold_c = tmp_bold - np.mean(tmp_bold, axis=1)
-
-# %%
-bold_pca = pca.transform(tmp_bold_c)
-bold_recon_pca = pca.inverse_transform(bold_pca)
-recon_error_pca = np.mean((tmp_bold_c - bold_recon_pca) ** 2)
-
-bold_ica = ica.transform(tmp_bold_c)
-bold_recon_ica = ica.inverse_transform(bold_ica)
-recon_error_ica = np.mean((tmp_bold_c - bold_recon_ica) ** 2)
-
-fig, axs = plt.subplots(2, 1, figsize=(width, height * 1.2))
-axs[0].plot(tmp_bold_c.T, label="True")
-axs[0].plot(bold_recon_pca.T, label="Reconstructed")
-axs[1].plot(tmp_bold_c.T, label="True")
-axs[1].plot(bold_recon_ica.T, label="Reconstructed")
-
-axs[0].set_title("PCA Reconstruction")
-axs[0].set_xlabel("Time")
-axs[0].set_ylabel("Amplitude")
-axs[0].legend()
-axs[1].set_title("ICA Reconstruction")
-axs[1].set_xlabel("Time")
-axs[1].set_ylabel("Amplitude")
-axs[1].legend()
-
-plt.tight_layout()
-
-plt.show(block=False)
-
-print(f"PCA Reconstruction Error: {recon_error_pca}")
-print(f"ICA Reconstruction Error: {recon_error_ica}")
-
-# %%
-display(Markdown("## Save the Fitted Models"))
-
-# Dump the PCA and ICA objects
-with open(MODEL_DIR / "pca.pkl", "wb") as f:
-    pickle.dump(pca, f)
-
-with open(MODEL_DIR / "ica.pkl", "wb") as f:
-    pickle.dump(ica, f)
+    img_dir.mkdir(parents=True, exist_ok=True)
+    fig.savefig(img_dir / f"{name.lower()}_components_{setting}.png")
+    if latex_dir is not None:
+        latex_dir.mkdir(parents=True, exist_ok=True)
+        fig.savefig(latex_dir / f"{name.lower()}_components_{setting}.pdf")
+    plt.close(fig)
 
 
-# %%
+def _dump_artifact(
+    obj: object,
+    artifact_path: Path,
+    sidecar_config: dict[str, object],
+    sha_key: str,
+) -> None:
+    """Serialise ``obj`` to ``artifact_path`` and write its sidecar JSON."""
+    artifact_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(artifact_path, "wb") as f:
+        _pkl.dump(obj, f)
+    write_sidecar(artifact_path, sidecar_config, sha_key=sha_key)
+
+
+def run_extract(cfg: ExtractConfig) -> None:
+    """Fit + save PCA, ICA, and noise-sigma artifacts for one setting."""
+    set_style()
+    setting = cfg.setting
+    print(f"\n=== Extracting summary measures for setting={setting} ===")
+
+    img_dir = get_out_dir(type="img", subfolder=f"bench_{setting}")
+    model_dir = get_out_dir(type="model", subfolder=f"bench_{setting}")
+    try:
+        latex_dir: Path | None = get_out_dir(type="latex", subfolder="figures")
+    except ValueError:
+        latex_dir = None
+
+    bold_concat_c, noise_sigmas = generate_training_bold(cfg)
+
+    pca = PCA(n_components=cfg.n_components)
+    pca.fit(bold_concat_c)
+    ica = FastICA(n_components=cfg.n_components, random_state=cfg.seed)
+    ica.fit(bold_concat_c)
+
+    _plot_elbow(
+        bold_concat_c, "PCA", cfg.n_components, img_dir, latex_dir, setting, cfg.seed
+    )
+    _plot_elbow(
+        bold_concat_c, "ICA", cfg.n_components, img_dir, latex_dir, setting, cfg.seed
+    )
+    _plot_components(pca, bold_concat_c, img_dir, latex_dir, setting, "PCA")
+    _plot_components(ica, bold_concat_c, img_dir, latex_dir, setting, "ICA")
+
+    base_config: dict[str, object] = {
+        "n_components": cfg.n_components,
+        "n_samples": cfg.n_samples,
+        "noise_mode": cfg.noise_mode,
+        "seed": cfg.seed,
+        "param_bounds": _bounds_dict(),
+        "params_to_set": list(PARAMS_TO_SET),
+        "stim_spec": _stim_spec_metadata(),
+        "num_rois": NUM_ROIS,
+        "num_layers": NUM_LAYERS,
+    }
+
+    pca_path = model_dir / f"pca_{setting}.pkl"
+    _dump_artifact(
+        pca, pca_path, {**base_config, "method": "PCA"}, sha_key="pca_sha256"
+    )
+
+    ica_path = model_dir / f"ica_{setting}.pkl"
+    _dump_artifact(
+        ica, ica_path, {**base_config, "method": "ICA"}, sha_key="ica_sha256"
+    )
+
+    noise_pca_path = model_dir / f"noise_sigmas_pca_{setting}.pkl"
+    _dump_artifact(
+        noise_sigmas,
+        noise_pca_path,
+        {**base_config, "method": "PCA", "kind": "noise_sigmas"},
+        sha_key="noise_sigmas_sha256",
+    )
+
+    noise_ica_path = model_dir / f"noise_sigmas_ica_{setting}.pkl"
+    _dump_artifact(
+        noise_sigmas,
+        noise_ica_path,
+        {**base_config, "method": "ICA", "kind": "noise_sigmas"},
+        sha_key="noise_sigmas_sha256",
+    )
+
+    print(f"  wrote {pca_path.name} (+ sidecar)")
+    print(f"  wrote {ica_path.name} (+ sidecar)")
+    print(f"  wrote {noise_pca_path.name} (+ sidecar)")
+    print(f"  wrote {noise_ica_path.name} (+ sidecar)")
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description=__doc__.splitlines()[0] if __doc__ else ""
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
+        "--all-settings",
+        action="store_true",
+        help="Iterate {no_noise, with_noise} x {3, 4}",
+    )
+    parser.add_argument(
+        "--noise-mode", choices=("no_noise", "with_noise"), default="no_noise"
+    )
+    parser.add_argument("--n-components", type=int, default=4)
+    parser.add_argument("--n-samples", type=int, default=10000)
+    parser.add_argument("--seed", type=int, default=42)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parse_args(argv)
+    settings: Iterable[tuple[str, int]]
+    if args.all_settings:
+        settings = ALL_SETTINGS
+    else:
+        settings = ((args.noise_mode, args.n_components),)
+    for noise_mode, n_components in settings:
+        run_extract(
+            ExtractConfig(
+                noise_mode=noise_mode,  # type: ignore[arg-type]
+                n_components=n_components,
+                n_samples=args.n_samples,
+                seed=args.seed,
+            )
+        )
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

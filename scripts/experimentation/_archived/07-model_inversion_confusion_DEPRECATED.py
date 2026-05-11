@@ -1,3 +1,15 @@
+"""ARCHIVED - superseded by scripts/workflows/07-model_inversion_confusion.py.
+
+This script reads from the unsuffixed ``results/models/bench/`` directory,
+which the current pipeline no longer produces. Kept here for historical
+reference only; do NOT run it.
+"""
+
+raise SystemExit(
+    "scripts/experimentation/_archived/07-model_inversion_confusion_DEPRECATED.py "
+    "is deprecated. Use scripts/workflows/07-model_inversion_confusion.py instead."
+)
+
 # %%
 # !%load_ext autoreload
 # !%autoreload 2
