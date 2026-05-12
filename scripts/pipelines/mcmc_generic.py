@@ -1,0 +1,818 @@
+"""emcee MCMC inversion driver — model registry + run_single_mcmc(cfg) entrypoint.
+
+Stage 2.6: refactored from a linear notebook-style script into a
+``run_single_mcmc(cfg)`` function so stage-3 sweep harnesses can dispatch
+parameter studies without going through ``runpy``.  Behaviour for the
+``__main__`` entry path is preserved via env-var overrides.
+"""
+
+import os
+from dataclasses import dataclass
+from typing import Callable, Optional
+
+import corner
+import emcee
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+from pypalettes import load_cmap
+from scipy import optimize
+from sklearn.metrics import mean_squared_error
+
+from dcsem import NOISE_CONFIG, PARAM_BOUNDS
+from dcsem.numerics import compute_correlation_matrix, compute_standard_errors
+from dcsem.utils import is_chain_converged, stim_boxcar
+from utils import (
+    get_colormap,
+    get_out_dir,
+    get_width_height_latex,
+    log_run,
+    set_style,
+    simulate_bold,
+    to_latex_label,
+)
+
+set_style()
+width, height = get_width_height_latex()
+cmap = get_colormap("YlGnBu_r")
+conf_cmap = load_cmap("Revolucion", cmap_type="continuous")
+default_colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+
+
+# =============================================================================
+# MODEL REGISTRY
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class ModelSpec:
+    name: str
+    display_name: str
+    func: Callable
+    param_names: list[str]
+    theta_true: np.ndarray
+    theta_zero: np.ndarray
+    priors: list[tuple[float, float]]  # [(mu, sigma), ...] Normal priors
+    is_dcm: bool = False
+    param_bounds: Optional[list[tuple[float, float]]] = None
+    num_rois: Optional[int] = None
+    time: Optional[np.ndarray] = None
+    u: Optional[Callable] = None
+    ode_method: Optional[str] = None
+    x_min: float = -20.0
+    x_max: float = 20.0
+    n_samples: int = 50
+
+
+@dataclass(frozen=True)
+class RunConfig:
+    """Configuration for a single emcee MCMC inversion run.
+
+    Mirrors ``spdcm_mcmc_generic.RunConfig`` plus the time-domain registry
+    selector.  Plot toggles stay as hardcoded locals inside
+    ``run_single_mcmc`` to match the spectral pattern.
+    """
+
+    model_name: str = "dcm_2roi"  # key into MODEL_REGISTRY
+    seed: int = 42
+    n_walkers: Optional[int] = None  # None → max(24, 2 * n_params)
+    n_burn: int = 300
+    n_samples_mcmc: int = 10000  # ≥ 1000 effective samples for reliable posteriors
+
+
+# =============================================================================
+# MODEL FUNCTIONS
+# =============================================================================
+
+
+def _quadratic(theta, x):
+    a, b, c = theta
+    return a * x**2 + b * x + c
+
+
+def _product_degen(theta, x):
+    a, b, c = theta
+    return (a * b) * x + c
+
+
+def _product_reparam(theta, x):
+    alpha, c = theta
+    return alpha * x + c
+
+
+def _sum_of_exponentials(theta, x):
+    A1, k1, A2, k2 = theta
+    return A1 * np.exp(-k1 * x) + A2 * np.exp(-k2 * x)
+
+
+def _michaelis_menten(theta, x):
+    Vmax, KM = theta
+    return Vmax * x / (KM + x)
+
+
+def _logistic_sigmoid(theta, x):
+    L, k, x0 = theta
+    return L / (1 + np.exp(-k * (x - x0)))
+
+
+def _power_law(theta, x):
+    a, b = theta
+    return a * x**b
+
+
+def _make_dcm_func(param_names, time, u, num_rois, ode_method):
+    """Factory returning a closure over DCM config."""
+
+    def _dcm_func(theta, x):
+        params = dict(zip(param_names, theta))
+        bold = simulate_bold(
+            params, time=time, u=u, num_rois=num_rois, ode_method=ode_method
+        )
+        return bold  # Shape: (T, R)
+
+    return _dcm_func
+
+
+# =============================================================================
+# BUILD REGISTRY
+# =============================================================================
+
+_dcm_time = np.arange(100)
+_dcm_u = stim_boxcar([[10, 20, 1]])
+_dcm_param_names = ["a01", "a10", "c0", "c1"]
+_dcm_bounds = PARAM_BOUNDS.get_bounds_list(_dcm_param_names)
+
+MODEL_REGISTRY: dict[str, ModelSpec] = {
+    "quadratic": ModelSpec(
+        name="quadratic",
+        display_name="Quadratic Model",
+        func=_quadratic,
+        param_names=["a", "b", "c"],
+        theta_true=np.array([1.0, -12.0, 20.0]),
+        theta_zero=np.array([0.5, 0.0, 0.0]),
+        priors=[(0.0, 3.0), (0.0, 20.0), (0.0, 40.0)],
+    ),
+    "product_degen": ModelSpec(
+        name="product_degen",
+        display_name="Product Model (Degenerate)",
+        func=_product_degen,
+        param_names=["a", "b", "c"],
+        theta_true=np.array([2.0, 3.0, 5.0]),
+        theta_zero=np.array([1.0, 1.0, 0.0]),
+        priors=[(0.0, 5.0), (0.0, 5.0), (0.0, 20.0)],
+    ),
+    "product_reparam": ModelSpec(
+        name="product_reparam",
+        display_name="Product Model (Reparametrized)",
+        func=_product_reparam,
+        param_names=["alpha", "c"],
+        theta_true=np.array([6.0, 5.0]),
+        theta_zero=np.array([1.0, 0.0]),
+        priors=[(0.0, 10.0), (0.0, 20.0)],
+    ),
+    "sum_of_exponentials": ModelSpec(
+        name="sum_of_exponentials",
+        display_name="Sum of Exponentials",
+        func=_sum_of_exponentials,
+        param_names=["A1", "k1", "A2", "k2"],
+        theta_true=np.array([5.0, 0.5, 3.0, 0.1]),
+        theta_zero=np.array([4.0, 0.4, 2.0, 0.15]),
+        priors=[(0.0, 10.0), (0.0, 2.0), (0.0, 10.0), (0.0, 2.0)],
+    ),
+    "michaelis_menten": ModelSpec(
+        name="michaelis_menten",
+        display_name="Michaelis-Menten",
+        func=_michaelis_menten,
+        param_names=["Vmax", "KM"],
+        theta_true=np.array([10.0, 2.0]),
+        theta_zero=np.array([8.0, 1.5]),
+        priors=[(0.0, 20.0), (0.0, 5.0)],
+    ),
+    "logistic_sigmoid": ModelSpec(
+        name="logistic_sigmoid",
+        display_name="Logistic Sigmoid",
+        func=_logistic_sigmoid,
+        param_names=["L", "k", "x0"],
+        theta_true=np.array([1.0, 1.0, 5.0]),
+        theta_zero=np.array([0.8, 0.8, 4.0]),
+        priors=[(0.0, 2.0), (0.0, 3.0), (0.0, 20.0)],
+    ),
+    "power_law": ModelSpec(
+        name="power_law",
+        display_name="Power Law",
+        func=_power_law,
+        param_names=["a", "b"],
+        theta_true=np.array([2.0, 1.5]),
+        theta_zero=np.array([1.5, 1.2]),
+        priors=[(0.0, 5.0), (0.0, 3.0)],
+    ),
+    "dcm_2roi": ModelSpec(
+        name="dcm_2roi",
+        display_name="2-ROI DCM",
+        func=_make_dcm_func(
+            _dcm_param_names, _dcm_time, _dcm_u, num_rois=2, ode_method="BDF"
+        ),
+        param_names=_dcm_param_names,
+        theta_true=np.array([0.4, 0.6, 0.9, 0.2]),
+        theta_zero=np.array([0.1, 0.1, 0.1, 0.1]),
+        priors=[
+            (0.0, 0.5),  # a01: shrinkage prior centred at 0 (Friston et al. 2003)
+            (0.0, 0.5),  # a10: shrinkage prior centred at 0
+            (0.5, 0.5),  # c0: weakly informative, centred at mid-range
+            (0.5, 0.5),  # c1: weakly informative, centred at mid-range
+        ],
+        is_dcm=True,
+        param_bounds=_dcm_bounds,
+        num_rois=2,
+        time=_dcm_time,
+        u=_dcm_u,
+        ode_method="BDF",
+    ),
+}
+
+
+# =============================================================================
+# RUN
+# =============================================================================
+
+
+def run_single_mcmc(cfg: RunConfig = RunConfig()) -> None:
+    """Single-run emcee MCMC: simulate → MAP-init → sample → diagnostics → NPZ."""
+
+    # ---- Unpack model spec ----
+    spec = MODEL_REGISTRY[cfg.model_name]
+    model = spec.func
+    model_name = spec.name
+    model_display_name = spec.display_name
+    param_names = spec.param_names
+    theta_true = spec.theta_true
+    theta_zero = spec.theta_zero
+    priors = spec.priors
+    IS_DCM_MODEL = spec.is_dcm
+    param_bounds = spec.param_bounds
+
+    rng = np.random.default_rng(cfg.seed)
+
+    # ---- Settings ----
+    n_params = len(theta_true)
+    n_walkers = cfg.n_walkers if cfg.n_walkers is not None else max(24, 2 * n_params)
+    n_burn = cfg.n_burn
+    n_samples_mcmc = cfg.n_samples_mcmc
+    opt_method = "MCMC"
+
+    IMG_DIR = get_out_dir(
+        type="img",
+        subfolder="inversion",
+        extra_subfolders=[opt_method, model_name],
+    )
+    LATEX_DIR = get_out_dir(type="latex", subfolder="figures")
+    IMG_DIR.mkdir(parents=True, exist_ok=True)
+
+    print(f"Using model: {model_display_name}")
+    print(f"Plots will be saved to: {IMG_DIR}")
+    print(f"Plots will be saved to: {LATEX_DIR}")
+
+    # Plot toggles (hardcoded locals, mirror spectral pattern)
+    PLOT_CORNER = True
+    PLOT_POSTERIOR_BANDS = True
+
+    # =========================================================================
+    # HELPER FUNCTIONS (close over param_bounds / priors / model)
+    # =========================================================================
+    def _in_bounds(theta):
+        """Hard-bounds check.  Mirrors ``spdcm_mcmc_generic.py:235-239``."""
+        if param_bounds is None:
+            return True
+        for val, (low, high) in zip(theta, param_bounds):
+            if val < low or val > high:
+                return False
+        return True
+
+    def log_prior(theta):
+        """Independent Normal priors specified in priors list, gated by bounds.
+
+        Returning ``-np.inf`` outside the feasible box stops emcee walkers
+        from wandering into unstable A-matrix territory and wasting samples
+        on rejections.
+        """
+        if not _in_bounds(theta):
+            return -np.inf
+        logp = 0.0
+        for i, (mu, sigma) in enumerate(priors):
+            z = (theta[i] - mu) / sigma
+            logp += -0.5 * (z * z + np.log(2.0 * np.pi * sigma * sigma))
+        return logp
+
+    def log_likelihood(theta, x, y, sigma):
+        """Gaussian likelihood with known noise std."""
+        if sigma <= 0 or not np.isfinite(sigma):
+            return -np.inf
+        try:
+            y_pred = model(theta, x)
+            if y_pred.shape != y.shape:
+                return -np.inf
+            r = (y - y_pred) / sigma
+            return -0.5 * (np.sum(r * r) + r.size * np.log(2.0 * np.pi * sigma * sigma))
+        except Exception:
+            return -np.inf
+
+    def log_posterior(theta, x, y, sigma):
+        """Unnormalized log posterior."""
+        lp = log_prior(theta)
+        if not np.isfinite(lp):
+            return -np.inf
+        ll = log_likelihood(theta, x, y, sigma)
+        return lp + ll
+
+    def map_estimate(theta0, x, y, sigma):
+        """Find MAP estimate via L-BFGS-B."""
+
+        def neg_logpost(th):
+            return -log_posterior(th, x, y, sigma)
+
+        # DCM forward models integrate stiff ODEs (BDF); scipy's default FD step
+        # (~1.5e-8) falls below the solver's relative tolerance, so the gradient
+        # comes back as integration noise. Mirror the fix in inversion_generic.py.
+        opts = {"eps": 1e-3} if IS_DCM_MODEL else {}
+
+        res = optimize.minimize(
+            neg_logpost,
+            theta0,
+            method="L-BFGS-B",
+            bounds=param_bounds,
+            options=opts,
+        )
+        return res.x
+
+    # =========================================================================
+    # DATA GENERATION
+    # =========================================================================
+    x_min, x_max = spec.x_min, spec.x_max
+    n_samples = spec.n_samples
+
+    if not IS_DCM_MODEL:
+        x_data = np.linspace(x_min, x_max, n_samples)
+        y_true = model(theta_true, x_data)
+        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
+        y_obs = y_true + rng.normal(0.0, noise_sigma, size=n_samples)
+        noise_std_actual = noise_sigma
+    else:
+        x_data = None
+        y_true = model(theta_true, x_data)  # Shape: (T, R)
+        noise_sigma = NOISE_CONFIG.get_noise_std(np.std(y_true))
+        y_obs = y_true + rng.normal(0.0, noise_sigma, size=y_true.shape)
+        noise_std_actual = noise_sigma
+
+    # =========================================================================
+    # MCMC SAMPLING
+    # =========================================================================
+    theta_est = map_estimate(theta_zero, x_data, y_obs, noise_sigma)
+    scale = np.maximum(0.05 * np.ones(n_params), 0.05 * np.abs(theta_est))
+    p0 = theta_est + rng.normal(0.0, scale, size=(n_walkers, n_params))
+    # Clip out-of-bounds initial walkers so emcee does not waste burn-in
+    # rejecting them (only matters when bounds are specified for this model).
+    if param_bounds is not None:
+        _lb = np.array([b[0] for b in param_bounds])
+        _ub = np.array([b[1] for b in param_bounds])
+        p0 = np.clip(p0, _lb, _ub)
+
+    sampler = emcee.EnsembleSampler(
+        n_walkers, n_params, log_posterior, args=(x_data, y_obs, noise_sigma)
+    )
+
+    print(f"Running MCMC: {n_burn} burn-in + {n_samples_mcmc} production samples...")
+    state = sampler.run_mcmc(p0, n_burn, progress=True)
+    sampler.reset()
+    sampler.run_mcmc(state, n_samples_mcmc, progress=True)
+
+    # Extract chain and filter invalid samples
+    chain = sampler.get_chain(flat=True)
+    logp = sampler.get_log_prob(flat=True)
+    mask = np.isfinite(logp)
+    chain = chain[mask]
+    logp = logp[mask]
+
+    # Posterior summaries
+    theta_mean = np.mean(chain, axis=0)
+    theta_median = np.median(chain, axis=0)
+    map_idx = int(np.argmax(logp))
+    theta_est_post = chain[map_idx]
+    q025, q975 = np.percentile(chain, [2.5, 97.5], axis=0)
+
+    print("\nPosterior summary:")
+    print(f"  True params: {np.round(theta_true, 4)}")
+    print(f"  Mean       : {np.round(theta_mean, 4)}")
+    print(f"  Median     : {np.round(theta_median, 4)}")
+    print(f"  MAP        : {np.round(theta_est_post, 4)}")
+    print("  95% Credible intervals:")
+    for i, name in enumerate(param_names):
+        print(f"    {name}: [{q025[i]:.4f}, {q975[i]:.4f}] (True: {theta_true[i]:.4f})")
+
+    # =========================================================================
+    # DIAGNOSTICS
+    # =========================================================================
+    try:
+        tau = sampler.get_autocorr_time(quiet=True)
+        eff_per_walker = n_samples_mcmc / tau
+        eff_total = np.sum(eff_per_walker)
+        tau_str = np.round(tau, 1)
+    except Exception:
+        tau_str = "n/a"
+        eff_total = np.nan
+
+    acc_frac = np.mean(sampler.acceptance_fraction)
+
+    # Gelman-Rubin R̂ — split each walker's chain in half and treat halves as
+    # independent chains.  R̂ near 1 indicates convergence.
+    _full_chain = sampler.get_chain()  # (n_steps, n_walkers, n_params)
+    n_steps_half = _full_chain.shape[0] // 2
+    _split = np.concatenate(
+        [_full_chain[:n_steps_half], _full_chain[n_steps_half : 2 * n_steps_half]],
+        axis=1,
+    )  # (n_steps_half, 2*n_walkers, n_params)
+    _N = _split.shape[0]  # length of each chain
+    _chain_means = _split.mean(axis=0)  # (M, n_params)
+    _chain_vars = _split.var(axis=0, ddof=1)  # (M, n_params)
+    _W = _chain_vars.mean(axis=0)  # within-chain variance
+    _B = _N * _chain_means.var(axis=0, ddof=1)  # between-chain variance
+    _var_est = (1 - 1 / _N) * _W + (1 / _N) * _B
+    r_hat = np.sqrt(_var_est / (_W + 1e-30))
+
+    print("\nDiagnostics:")
+    print(f"  Acceptance fraction (mean): {acc_frac:.3f}")
+    print(f"  Autocorr time (per param) : {tau_str}")
+    if np.isfinite(eff_total):
+        print(f"  Approx. effective samples : {int(eff_total)}")
+    print(f"  Gelman-Rubin R̂ (per param): {np.round(r_hat, 3)}")
+    if np.any(r_hat > 1.1):
+        print("  ⚠️  R̂ > 1.1 for some parameters — chain may not have converged!")
+
+    if acc_frac < 0.05:
+        print("  ⚠️  Low acceptance (<0.05) - walkers may be stuck!")
+    elif acc_frac > 0.8:
+        print("  ⚠️  High acceptance (>0.8) - proposal may be too narrow!")
+
+    # Real convergence flag (mirrors spdcm_mcmc_generic.py:374-390): acceptance
+    # in healthy band AND enough effective samples.  Asymptotic-Gaussian
+    # credible intervals are reliable only when the chain has actually
+    # converged, so cov_is_calibrated tracks the same criterion.
+    acc_ok = 0.15 <= acc_frac <= 0.80
+    ess_ok = bool(np.isfinite(eff_total)) and eff_total > 50 * n_params
+    converged = is_chain_converged(acc_frac, eff_total, n_params)
+    cov_is_calibrated = converged
+    if not converged:
+        reasons = []
+        if not acc_ok:
+            reasons.append(f"acceptance={acc_frac:.3f} outside [0.15, 0.80]")
+        if not ess_ok:
+            reasons.append(
+                f"ESS={'n/a' if not np.isfinite(eff_total) else int(eff_total)} "
+                f"≤ 50 × n_params={50 * n_params}"
+            )
+        print(
+            "⚠️  MCMC chain not converged ({}); credible intervals are not "
+            "calibrated.".format("; ".join(reasons))
+        )
+
+    # =========================================================================
+    # PLOT: DATA AND FITTED CURVE
+    # =========================================================================
+    if not IS_DCM_MODEL:
+        x_plot = np.linspace(x_data.min(), x_data.max(), 400)
+        y_mean_plot = model(theta_mean, x_plot)
+        y_true_plot = model(theta_true, x_plot)
+
+        plt.figure(figsize=(width, height / 1.5))
+        plt.scatter(x_data, y_obs, s=20, alpha=0.7, label="data")
+        plt.plot(x_plot, y_mean_plot, color=default_colors[2], label="posterior mean")
+        plt.plot(x_plot, y_true_plot, color=default_colors[1], linestyle="--", label="true")
+
+        plt.xlabel("x")
+        plt.ylabel("y")
+        plt.title(rf"\textbf{{{model_display_name} - Data and Fit}}")
+        plt.legend()
+
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "data_fit.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+        plt.show(block=False)
+    else:
+        y_mean_plot = model(theta_mean, None)  # Shape: (T, R)
+        y_true_plot = model(theta_true, None)  # Shape: (T, R)
+
+        time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
+        num_rois = y_obs.shape[1]
+        fig, axes = plt.subplots(1, num_rois, sharex=True, figsize=(width, height / 1.5))
+
+        if num_rois == 1:
+            axes = [axes]
+
+        for r in range(num_rois):
+            axes[r].plot(
+                time_vec,
+                y_obs[:, r],
+                alpha=0.7,
+                color=default_colors[0],
+                label="observed",
+            )
+            axes[r].plot(
+                time_vec,
+                y_mean_plot[:, r],
+                color=default_colors[2],
+                label="posterior mean",
+            )
+            axes[r].plot(
+                time_vec,
+                y_true_plot[:, r],
+                linestyle="--",
+                color=default_colors[1],
+                label="true",
+            )
+            axes[r].set_title(f"ROI {r + 1}")
+            axes[r].set_xlabel("Time (s)")
+            axes[r].grid(True, alpha=0.3)
+
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(
+            handles,
+            labels,
+            loc="lower center",
+            ncol=4,
+            bbox_to_anchor=(0.5, -0.1),
+            frameon=True,
+        )
+
+        axes[0].set_ylabel("BOLD amplitude (a.u.)")
+        fig.suptitle(rf"\textbf{{{model_display_name} - Best Fit ({opt_method})}}")
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "data_fit.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_data_fit.pdf")
+        plt.show(block=False)
+
+    # =========================================================================
+    # POSTERIOR PREDICTIVE BANDS
+    # =========================================================================
+    if PLOT_POSTERIOR_BANDS:
+        nsamp = min(400, chain.shape[0])
+        idx = rng.choice(chain.shape[0], size=nsamp, replace=False)
+        thetas = chain[idx]
+
+        if not IS_DCM_MODEL:
+            Y = np.array([model(th, x_plot) for th in thetas])
+            y_lo = np.percentile(Y, 2.5, axis=0)
+            y_hi = np.percentile(Y, 97.5, axis=0)
+
+            plt.figure()
+            plt.scatter(x_data, y_obs, s=18, alpha=0.6, label="data")
+            plt.plot(
+                x_plot, y_true_plot, color=default_colors[1], linestyle="--", label="true"
+            )
+            plt.plot(x_plot, y_mean_plot, color=default_colors[2], label="posterior mean")
+            plt.fill_between(
+                x_plot,
+                y_lo,
+                y_hi,
+                color=default_colors[2],
+                alpha=0.2,
+                label="95% posterior band",
+            )
+            plt.xlabel("x")
+            plt.ylabel("y")
+            plt.title(f"{model_display_name} - Best Fit")
+            plt.legend()
+
+            plt.tight_layout()
+            plt.savefig(IMG_DIR / "posterior_predictive.png")
+            plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
+            plt.show(block=False)
+        else:
+            time_vec = spec.time if spec.time is not None else np.arange(y_obs.shape[0])
+            num_rois = y_obs.shape[1]
+
+            Y = np.array([model(th, None) for th in thetas])  # (nsamp, T, R)
+            y_lo = np.percentile(Y, 2.5, axis=0)  # (T, R)
+            y_hi = np.percentile(Y, 97.5, axis=0)  # (T, R)
+
+            fig, axes = plt.subplots(
+                1, num_rois, sharex=True, figsize=(width, height * 0.8)
+            )
+            if num_rois == 1:
+                axes = [axes]
+
+            for r in range(num_rois):
+                axes[r].plot(time_vec, y_obs[:, r], label="observed", alpha=0.7)
+                axes[r].plot(
+                    time_vec,
+                    y_mean_plot[:, r],
+                    color=default_colors[2],
+                    label="posterior mean",
+                )
+                axes[r].fill_between(
+                    time_vec,
+                    y_lo[:, r],
+                    y_hi[:, r],
+                    color=default_colors[2],
+                    alpha=0.2,
+                    label="95% posterior band",
+                )
+                axes[r].plot(
+                    time_vec,
+                    y_true_plot[:, r],
+                    color=default_colors[1],
+                    linestyle="--",
+                    label="true",
+                )
+                axes[r].set_title(f"ROI {r + 1}")
+                axes[r].set_xlabel("Time (s)")
+                axes[r].grid(True, alpha=0.3)
+
+            handles, labels = axes[0].get_legend_handles_labels()
+            fig.legend(
+                handles,
+                labels,
+                loc="lower center",
+                ncol=4,
+                bbox_to_anchor=(0.5, -0.07),
+                frameon=True,
+            )
+
+            axes[0].set_ylabel("BOLD Amplitude (a.u.)")
+            fig.suptitle(
+                rf"\textbf{{{model_display_name} - Posterior Predictive ({opt_method})}}"
+            )
+
+            plt.tight_layout()
+            plt.savefig(IMG_DIR / "posterior_predictive.png")
+            plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_posterior_predictive.pdf")
+            plt.show(block=False)
+
+    # =========================================================================
+    # CORNER PLOT
+    # =========================================================================
+    if PLOT_CORNER:
+        latex_labels = [to_latex_label(name) for name in param_names]
+        fig = plt.figure(figsize=(width, width))
+        fig = corner.corner(
+            chain,
+            labels=latex_labels,
+            truths=theta_true,
+            show_titles=True,
+            title_fmt=".3f",
+            quantiles=[0.16, 0.5, 0.84],
+            bins=50,
+            smooth=0.8,
+            truth_color=default_colors[1],
+            fig=fig,
+        )
+        fig.suptitle(
+            rf"\textbf{{{model_display_name} - Posterior Distributions ({opt_method})}}"
+        )
+        plt.tight_layout()
+        plt.savefig(IMG_DIR / "corner_plot.png")
+        plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_corner_plot.pdf")
+        plt.show(block=False)
+
+    # =========================================================================
+    # CORRELATION PLOT
+    # =========================================================================
+    cov = np.cov(chain, rowvar=False)
+    se = compute_standard_errors(cov, warn_negative=True)
+    # NOTE: NPZ ``ci`` is built from posterior quantiles (q025/q975) below,
+    # not from MAP ± 1.96·σ — quantiles handle asymmetric posteriors better
+    # and match the spectral MCMC artifact schema.
+    corr = compute_correlation_matrix(cov, handle_degenerate=True)
+    max_offdiag_corr = np.nanmax(np.abs(corr - np.eye(n_params)))
+
+    latex_labels = [to_latex_label(name) for name in param_names]
+    fig, ax = plt.subplots()
+    heatmap = sns.heatmap(
+        corr,
+        annot=True,
+        fmt=".2f",
+        cmap=conf_cmap,
+        vmin=-1,
+        vmax=1,
+        xticklabels=latex_labels,
+        yticklabels=latex_labels,
+        square=True,
+        ax=ax,
+    )
+
+    ax.tick_params(which="both", left=False, bottom=False)
+    cbar = heatmap.collections[0].colorbar
+    cbar.ax.tick_params(which="both", size=0)
+
+    ax.set_title(
+        rf"\textbf{{{model_display_name} - Parameter Correlation Matrix ({opt_method})}}"
+    )
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "correlation_matrix.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_correlation_matrix.pdf")
+    plt.show(block=False)
+
+    # =========================================================================
+    # NPZ ARTIFACT SAVE
+    # =========================================================================
+    # Mirrors spdcm_mcmc_generic.py:777-795 so stage-3 sweep harnesses can ingest
+    # time-domain and spectral runs through a single loader. ``cov_is_calibrated``
+    # tracks the convergence criterion (acceptance band + ESS).
+    np.savez(
+        IMG_DIR / "run_results.npz",
+        y_obs=y_obs,
+        y_pred=model(theta_mean, x_data),
+        theta_mean=theta_mean,
+        theta_median=theta_median,
+        theta_map=theta_est_post,
+        theta_true=theta_true,
+        theta_zero=theta_zero,
+        se=se,
+        ci=np.stack([q025, q975], axis=1),
+        cov=cov,
+        converged=np.array([bool(converged)]),
+        cov_is_calibrated=np.array([bool(cov_is_calibrated)]),
+        acceptance_fraction=np.array([float(acc_frac)]),
+        ess_total=np.array([float(eff_total) if np.isfinite(eff_total) else np.nan]),
+    )
+    print(f"\nArtifacts saved to: {IMG_DIR}")
+
+    # =========================================================================
+    # LOGGING
+    # =========================================================================
+    theta_std = np.std(chain, axis=0)
+
+    log_run(
+        model_name=model_name,
+        method="MCMC",
+        seed=cfg.seed,
+        settings={
+            "n_samples": n_samples if not IS_DCM_MODEL else y_obs.shape[0],
+            "noise_sigma": noise_std_actual,
+            "n_walkers": n_walkers,
+            "n_burn": n_burn,
+            "n_samples_mcmc": n_samples_mcmc,
+        },
+        params={
+            "names": param_names,
+            "true": theta_true.tolist(),
+            "init": theta_zero.tolist(),
+            "mean": theta_mean.tolist(),
+            "median": theta_median.tolist(),
+            "map": theta_est_post.tolist(),
+            "std": theta_std.tolist(),
+            "ci_lower": q025.tolist(),
+            "ci_upper": q975.tolist(),
+            "corr_max": float(max_offdiag_corr) if np.isfinite(max_offdiag_corr) else None,
+        },
+        diagnostics={
+            "acceptance_fraction": float(acc_frac),
+            "autocorr_time": tau_str if isinstance(tau_str, str) else tau_str.tolist(),
+            "eff_samples": float(eff_total) if np.isfinite(eff_total) else None,
+            "converged": bool(converged),
+            "cov_is_calibrated": bool(cov_is_calibrated),
+        },
+        performance={
+            "mse_mean": float(mean_squared_error(y_obs, model(theta_mean, x_data))),
+            "mse_map": float(mean_squared_error(y_obs, model(theta_est_post, x_data))),
+        },
+        hessian=None,
+        correlation=corr.tolist() if corr is not None else None,
+        overwrite=False,
+    )
+
+    # =========================================================================
+    # TRACE PLOTS
+    # =========================================================================
+    samples = sampler.get_chain()  # Shape: (n_steps, n_walkers, n_params)
+
+    fig, axes = plt.subplots(n_params, figsize=(width, 2 * n_params), sharex=True)
+    if n_params == 1:
+        axes = [axes]
+
+    for i in range(n_params):
+        ax = axes[i]
+        ax.plot(samples[:, :, i], "k", alpha=0.3, linewidth=0.5)
+        ax.axhline(theta_true[i], color=default_colors[1], linestyle="--", label="true")
+        ax.axhline(theta_mean[i], color=default_colors[2], linestyle="-", label="mean")
+        ax.set_ylabel(to_latex_label(param_names[i]))
+        ax.grid(True, alpha=0.3)
+        if i == 0:
+            ax.legend(loc="upper right")
+
+    axes[-1].set_xlabel("Step number")
+    fig.suptitle(rf"\textbf{{MCMC Trace Plots - {model_display_name}}}")
+    plt.tight_layout()
+    plt.savefig(IMG_DIR / "trace_plots.png")
+    plt.savefig(LATEX_DIR / f"{model_name}_{opt_method}_trace_plots.pdf")
+    plt.show(block=False)
+
+
+if __name__ == "__main__":
+    n_walkers_env = os.environ.get("DCSEM_N_WALKERS")
+    cfg = RunConfig(
+        model_name=os.environ.get("DCSEM_ACTIVE_MODEL", "dcm_2roi"),
+        seed=int(os.environ.get("DCSEM_SEED", 42)),
+        n_walkers=int(n_walkers_env) if n_walkers_env else None,
+        n_burn=int(os.environ.get("DCSEM_N_BURN", 300)),
+        n_samples_mcmc=int(os.environ.get("DCSEM_N_SAMPLES_MCMC", 10000)),
+    )
+    run_single_mcmc(cfg)

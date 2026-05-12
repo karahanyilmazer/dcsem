@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["dcsem"]
+
+[project]
+name = "dcsem"
+version = "0.1.0"
+description = "Simulates fMRI signals with Dynamic Causal Modeling. Demonstrates model degeneracy through model inversion. Addresses this issue with BENCH (Bayesian EstimatioN of CHange)."
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "bench",
+    "corner>=2.2.3",
+    "emcee>=3.1.6",
+    "huggingface-hub>=1.7.2",
+    "ipykernel>=7.1.0",
+    "lmfit>=1.3.4",
+    "matplotlib>=3.10.8",
+    "numdifftools>=0.9.42",
+    "numpy>=2.3.5",
+    "onnxruntime>=1.24.4",
+    "palettable>=3.3.0",
+    "pandas>=3.0.0",
+    "pypalettes>=0.1.0",
+    "pytest>=9.0.2",
+    "python-dotenv>=1.0.0",
+    "scikit-learn>=1.8.0",
+    "scipy>=1.17.0",
+    "sdeint>=0.3.0",
+    "seaborn>=0.13.2",
+    "statsmodels>=0.14.6",
+    "tokenizers>=0.22.2",
+]
+
+[tool.uv.sources]
+bench = { git = "https://git.fmrib.ox.ac.uk/hossein/bench.git" }
+
+[tool.pytest.ini_options]
+cache_dir = ".cache/pytest"
+
+[tool.ruff]
+cache-dir = ".cache/ruff"

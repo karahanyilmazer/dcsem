@@ -6,12 +6,16 @@ This library implements DCM and SEM for FMRI data. In addition, it implements "L
 
 ## Getting started
 
-Clone the repo and install
-```commandline
+Clone the repo and install. The project uses `uv` for environment management:
+
+```bash
 git clone https://git.fmrib.ox.ac.uk/saad/dcsem.git
 cd dcsem
-pip install .
+uv sync                              # creates .venv, installs deps
+uv run pytest dcsem/tests/ -v        # smoke check
 ```
+
+`pip install -e .` works too if you prefer to manage the venv yourself.
 
 ## Usage
 
@@ -110,6 +114,19 @@ bold, state_tc = dcm.simulate(tvec, u)
 import matplotlib.pyplot as plt
 plt.plot(tvec, bold)
 ```
+
+#### Fitting a DCM
+
+For deterministic DCMs, `method="NL"` now uses bounded `L-BFGS-B` rather than unconstrained Nelder-Mead. The fit objective is a Gaussian negative log-likelihood on the BOLD residuals. If `noise_std` is omitted, the residual variance is estimated from the current residual energy.
+
+```python
+res = dcm.fit(bold, tvec=tvec, u=u, method="NL", noise_std=0.02)
+print(res.x)                  # fitted parameters
+print(res.se)                 # local standard errors from Hessian curvature
+print(res.cov_is_calibrated)  # True for proper neg-log-likelihood fits
+```
+
+The nonlinear fitter enforces negative self-connections and positive hemodynamic parameters. If a parameter set is unstable or produces invalid trajectories, it is penalized rather than treated as a valid fit.
 
 Below is how you can generate data for layer DCM. We generate a 1 ROI layer DCM, and we change the value of the blood draining parameter $\lambda_d$ (see theory section) and examine its effect on the activity in the two layers (replicating the result from Heinzle et al, figure 2c).
 
@@ -245,6 +262,142 @@ $$
 \end{array}
 $$
 
+## Spectral DCM
+
+The package also includes a simplified linear stochastic spectral DCM implementation in `dcsem.spectral.SpectralDCM`. This is an LS-spDCM approximation, not a full SPM-style spectral DCM. Its key assumptions are:
+
+- linear neural dynamics with white, ROI-independent innovations
+- a shared fixed HRF across ROIs
+- stationarity of the observed BOLD signal
+- Welch-estimated cross-spectral density as the observation target
+
+The public helpers `get_param_names()` and `get_bounds()` expose the expected parameter layout for a given number of ROIs:
+
+```python
+from dcsem import SpectralDCM
+
+spdcm = SpectralDCM(n_rois=2, TR=1.0)
+print(spdcm.get_param_names())  # ['a01', 'a10', 'log_sigma_e']
+print(spdcm.get_bounds())       # default optimization bounds
+```
+
+The standalone scripts `scripts/pipelines/spdcm_generic.py`, `scripts/pipelines/spdcm_mcmc_generic.py`, and `scripts/experimentation/spdcm_noise_sweep.py` use the same parameter metadata. When fitting empirical BOLD, the safest workflow is to check that the time series is approximately stationary and that the fitted `A` matrix remains stable.
+
+
+## Inversion pipelines
+
+Four production scripts under `scripts/pipelines/` invert (sp)DCM and analytical
+models on synthetic or empirical BOLD. Each wraps its work in `run_single(cfg)` /
+`run_single_mcmc(cfg)` with a `RunConfig` dataclass.
+
+| Script | Method | Data target |
+|---|---|---|
+| `inversion_generic.py` | L-BFGS-B | time-domain BOLD |
+| `mcmc_generic.py` | emcee MCMC | time-domain BOLD |
+| `spdcm_generic.py` | L-BFGS-B | cross-spectral density (LS-spDCM) |
+| `spdcm_mcmc_generic.py` | emcee MCMC | cross-spectral density (LS-spDCM) |
+
+Each pipeline writes a `run_results.npz` artifact under `results/images/...`
+with a uniform schema across methods: `y_obs`, `y_pred`, `theta_est`,
+`theta_true`, `theta_zero`, `se`, `ci`, `cov`, `hess_cond`,
+`cov_is_calibrated`, `hess_is_near_singular`, `converged`, plus method-specific
+diagnostics (`acceptance_fraction`, `ess_total` for MCMC).
+
+Cell-by-cell counterparts under `scripts/playground/` mirror the production
+bodies with `# %%` markers — open one in VS Code's Interactive Window or
+Jupyter to step through each stage and inspect intermediate state.
+
+### Picking a model
+
+Time-domain pipelines pick from `MODEL_REGISTRY` by name (`quadratic`,
+`product_degen`, `michaelis_menten`, `logistic_sigmoid`, `power_law`,
+`sum_of_exponentials`, `dcm_2roi`):
+
+```python
+from scripts.pipelines.inversion_generic import RunConfig, run_single
+run_single(RunConfig(model_name="dcm_2roi", seed=42))
+```
+
+Spectral pipelines accept the model dimension directly:
+
+```python
+from scripts.pipelines.spdcm_generic import RunConfig, run_single
+run_single(RunConfig(n_rois=2, TR=1.0, data_mode="synthetic_csd", snr=10.0))
+```
+
+`data_mode` selects the simulation path: `"synthetic_csd"` (fast, default),
+`"synthetic_bold"` (slow, requires `sdeint`), or `"empirical"` (needs `bold_path`
+pointing at an NPZ with `bold: float32 (T, R)` and optional `TR: float`).
+
+### DCM 2-ROI parameter conventions
+
+| Param | Meaning | Typical range |
+|---|---|---|
+| `a01`, `a10` | Inter-ROI connection strengths (excitatory `+`, inhibitory `−`) | `[-1.5, 1.5]` |
+| `c0`, `c1` | Stimulus → ROI inputs | `[0, 1.5]` |
+| `log_sigma_e` | Log of innovation noise SD (spDCM only) | `[-5, 0]` |
+
+### Diagnostics
+
+- **`cov_is_calibrated = False`** — the Hessian was indefinite or singular at
+  the optimum. The run still completed, but Hessian-derived standard errors
+  are unreliable; treat them as ordinal.
+- **MCMC convergence** — `dcsem.utils.is_chain_converged(acc_frac, eff_total,
+  n_params)` is the shared helper. Healthy bands: acceptance ∈ [0.15, 0.80]
+  and ESS > 50·n_params.
+- **DCM stiffness** — use `ode_method="BDF"` (the registry default) when
+  simulating time-domain BOLD; default Runge-Kutta can blow up on stiff
+  parameter sets.
+
+## Identifiability and PCA validation for BENCH
+
+The 2-ROI deterministic DCM with free parameters `{a01, a10, c0, c1}` was
+analysed for structural identifiability via the forward-model Fisher
+Information Matrix (FIM). At each of 200 random baselines drawn uniformly
+from `PARAM_BOUNDS`, the central-difference Jacobian `∂BOLD/∂θ` was
+computed and the FIM `J'J / σ²` formed (noise σ from
+`NOISE_CONFIG.get_noise_std`). Driver: `scripts/workflows/08-identifiability_analysis.py`.
+
+**Identifiability findings** (run 2026-05-10):
+
+- All four parameters are structurally identifiable at every tested baseline
+  (smallest FIM eigenvalue stays above the 1e-6 floor).
+- FIM eigenvalue spread spans ~4× on average (9.5e6 to 4.0e7) — moderately
+  sloppy but invertible.
+- Median FIM condition number ~26 500; worst-case ~3.1e9 (a small fraction
+  of baselines is severely ill-conditioned). The least-identifiable direction
+  is dominated by `a10` (loading +0.748) with anti-correlated `c1` (-0.493) —
+  i.e. trade-offs between an upstream connection and the corresponding input.
+
+**PCA-as-summary validation for BENCH** (the open methodological item from
+the March 2026 review):
+
+The BENCH pipeline (`scripts/workflows/05-apply_bench.py`) compresses the
+forward simulation into the top-k principal components of BOLD across 5000
+prior-sampled simulations. We checked whether this PCA basis preserves the
+parameter-space directions that the FIM identifies as informative, by
+projecting Jacobians: `J_pca = V_k' · J`, then measuring rank and
+condition number of `J_pca`.
+
+| `n_components` | Projected Jacobian full-rank | Median condition number |
+|---|---|---|
+| 3 | 0% of baselines (rank-deficient) | 33.5 |
+| 4 | 100% | 644 |
+| 5 | 100% | 452 |
+| 6 | 100% | 219 |
+
+Four PCA components is the minimum that preserves discriminability across
+all four DCM parameters — which justifies the `n_comps=4` default in
+`05-apply_bench.py`. With three components the projected Jacobian collapses
+to rank 3 in every tested baseline, meaning at least one parameter
+direction is invisible to BENCH. Increasing `n_components` beyond 4 only
+reduces the condition number of the projection; the rank ceiling is set by
+the parameter dimension.
+
+Figures: `results/images/identifiability/{fim_eigenvalue_spectrum,
+fim_correlation, bold_sensitivity}.png`. This closes the item flagged in
+the March 2026 review (PCA validation via Jacobian projection).
+
 
 ## SEM and Layer SEM
 
@@ -267,5 +420,4 @@ where $\{P_k\}$ are partial volume matrices that combine signals from different 
 $y_k = P_k (I-A)^{-1}(u)$
 
 and therefore $C_k = \sigma^2  P_k(I-A)^{-1}(I-A)^{-T} P_k^T$. These model convariances are compared to the observed covariances in order to fit the free parameters (again, these are the non-zero elements of $A$ and the noise variance).
-
 

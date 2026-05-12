@@ -1,0 +1,21 @@
+
+summarymeasures
+    {subject}.nii.gz (summary)
+glm
+    covariances.nii.gz
+    data.nii.gz (baseline)
+    delta_data.nii.gz (delta)
+    summary_names.txt
+    valid_mask.nii.gz
+
+results
+    {model}
+        {parameter}_amount.nii.gz
+        {parameter}_probability.nii.gz
+        sigma_deviations.nii.gz
+log
+    summary_tasklist.txt
+
+models
+    {model}
+

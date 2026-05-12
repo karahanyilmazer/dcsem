@@ -10,6 +10,7 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from dcsem import models, utils
 
@@ -136,6 +137,51 @@ def test_stim_boxcar():
     assert sum(u(tvec)) == 60.0
     stim_file = str(testsPath / "test_data" / "3col_1stim.txt")
     u = utils.stim_boxcar(stim_file)
+
+
+def test_stim_boxcar_overlapping():
+    """Overlapping stimuli should sum their amplitudes."""
+    u = utils.stim_boxcar([[0, 10, 1.0], [5, 10, 0.5]])
+    # t=3: only first stimulus active → 1.0
+    assert u(3.0) == 1.0
+    # t=7: both active → 1.0 + 0.5 = 1.5
+    assert u(7.0) == 1.5
+    # t=12: only second stimulus active → 0.5
+    assert u(12.0) == 0.5
+    # t=20: neither active → 0.0
+    assert u(20.0) == 0.0
+
+
+def test_calc_bold_v_near_zero():
+    """calc_BOLD should not produce inf/nan when v is near zero."""
+    dcm = models.DCM(2, params={"A": [[-1, 0], [0, -1]], "C": [1, 0]})
+    q = np.array([1.0, 1.0])
+    v_tiny = np.array([1e-10, 1e-10])
+    bold = dcm.calc_BOLD(q, v_tiny)
+    assert np.all(np.isfinite(bold)), f"BOLD contains non-finite values: {bold}"
+
+
+def test_hemodynamic_steady_state():
+    """With zero input, hemodynamic states should return to resting values."""
+    dcm = models.DCM(2, params={"A": [[-1, 0], [0, -1]], "C": [1, 0]})
+    tvec = np.arange(200)  # long enough for transient to decay
+    # No stimulus — system should stay at (or return to) resting state
+    bold, states = dcm.simulate(tvec, u=lambda t: 0)
+    # At resting state: f=1, v=1, q=1
+    assert np.allclose(states["f"][-1], 1.0, atol=0.01), f"f not at rest: {states['f'][-1]}"
+    assert np.allclose(states["v"][-1], 1.0, atol=0.01), f"v not at rest: {states['v'][-1]}"
+    assert np.allclose(states["q"][-1], 1.0, atol=0.01), f"q not at rest: {states['q'][-1]}"
+
+
+def test_set_p_length_validation():
+    """set_p should reject parameter vectors of wrong length."""
+    dcm = models.DCM(2, params={"A": [[-1, 0.2], [0.3, -1]], "C": [1, 0]})
+    p_correct = dcm.get_p()
+    # Wrong length should raise
+    import pytest
+
+    with pytest.raises(ValueError, match="length mismatch"):
+        dcm.set_p(np.zeros(len(p_correct) + 1))
 
 
 # test models
@@ -370,3 +416,144 @@ def test_state_tc_to_dict():
     state_tc = lsem.state_tc_to_dict(state_tc)
     assert len(state_tc["x"]) == 12
     assert len(state_tc["x"]["R0L3"]) == 300
+
+
+def test_state_tc_to_dict_multilayer_dcm():
+    """Regression test for B1 — MultiLayerDCM with num_layers >= 3.
+
+    Previously crashed with IndexError because the loop assumed every state
+    variable had width num_rois * num_layers, but vs/qs are inter-layer-only
+    (width num_rois * (num_layers - 1)). Now widths are derived per-variable.
+    """
+    tvec = np.linspace(0, 50, 100)
+    u = utils.stim_boxcar([[0, 5, 1]])
+    A = utils.create_A_matrix(2, 3, [], -1)
+    C = utils.create_C_matrix(2, 3, ["R0,L0=1"])
+    ldcm = models.MultiLayerDCM(2, 3, params={"A": A, "C": C})
+    _, state_tc = ldcm.simulate(tvec, u=u)
+
+    state_tc = ldcm.state_tc_to_dict(state_tc)
+
+    # 4-state-per-layer vars are full-width: num_rois * num_layers = 6
+    assert len(state_tc["q"]) == 6
+    assert "R0L2" in state_tc["q"]
+    # vs / qs are inter-layer-only: num_rois * (num_layers - 1) = 4
+    assert len(state_tc["vs"]) == 4
+    assert "R0L1" in state_tc["vs"]
+
+
+def test_dcm_simulate_does_not_corrupt_p_on_failure():
+    """``simulate(p=p_bad)`` must restore ``self.p`` even when integration
+    raises (try/finally guarantees roll-back).
+
+    Triggers a fast, deterministic failure by setting ``ode_method`` to an
+    invalid string — ``scipy.integrate.solve_ivp`` raises ``ValueError`` on
+    the first step. Without the try/finally in ``simulate``, the mutated
+    ``self.p`` (with V0 changed) would stay corrupt after the exception.
+    """
+    dcm = models.DCM(2, params={"A": [[-1.0, 0.0], [0.2, -1.0]], "C": [1.0, 0.0]})
+    p_before = dcm.get_p().copy()
+    V0_before = dcm.p.V0
+
+    names = dcm.get_p_names()
+    p_bad = dcm.get_p().copy()
+    p_bad[names.index("V0")] = 0.99  # noticeably different from default 0.02
+
+    # Force solve_ivp to raise on the first call.
+    dcm.ode_method = "BOGUS_NOT_A_REAL_METHOD"
+
+    tvec = np.linspace(0, 30, 120)
+    u = utils.stim_boxcar([[0, 5, 1]])
+
+    with pytest.raises(ValueError):
+        dcm.simulate(tvec, p=p_bad, u=u)
+
+    # self.p must be restored to its pre-call state
+    assert dcm.p.V0 == V0_before, (
+        f"dcm.p.V0 was corrupted: {dcm.p.V0} (expected {V0_before})"
+    )
+    assert np.allclose(dcm.get_p(), p_before)
+
+
+def test_sem_simulate_does_not_corrupt_p_on_failure():
+    """``SEM.simulate(p=p_bad)`` must restore ``self.p`` if the matrix
+    inversion fails.
+
+    Construct an SEM with all-nonzero A (so set_p can write all four
+    entries), then route a parameter vector through ``simulate(p=...)``
+    that makes ``A = I``. ``(I - I) = 0`` ⇒ ``np.linalg.inv`` raises
+    ``LinAlgError`` and we assert that ``self.p`` is rolled back.
+    """
+    sem = models.SEM(num_rois=2, params={"A": [[1.0, 1.0], [1.0, 1.0]]})
+    A_before = sem.p.A.copy()
+    sigma_before = sem.p.sigma
+
+    # set_p walks Anz in row-major order over the original nonzero pattern.
+    # All four entries are in Anz ⇒ p_bad = [A00, A01, A10, A11, sigma].
+    # [1, 0, 0, 1] makes A = I ⇒ (I - A) is the zero matrix ⇒ inv fails.
+    p_bad = np.array([1.0, 0.0, 0.0, 1.0, sigma_before])
+    tvec = np.linspace(0, 1, 50)
+
+    with pytest.raises(np.linalg.LinAlgError):
+        sem.simulate(tvec, p=p_bad)
+
+    assert np.allclose(sem.p.A, A_before), (
+        f"sem.p.A was corrupted: {sem.p.A} (expected {A_before})"
+    )
+    assert sem.p.sigma == sigma_before
+
+
+def test_fit_nl_hessian_is_pd_for_well_identified_1param_dcm():
+    """Hessian should be PD when only one well-identified parameter is free.
+
+    Regression guard for the ODE-tolerance fix in fit_NL: fitting a single
+    gain parameter (c0) with all else fixed gives an identifiable problem where
+    the true MLE curvature is strictly positive.  Before the fix, integration
+    noise (rtol=1e-3) amplified to O(1e7) through second-order finite
+    differences, producing spurious indefinite Hessians.
+    """
+    dcm = models.DCM(2)
+    A = np.array([[-2.0, 0.0], [0.3, -2.0]])
+    C = np.array([1.0, 0.0])
+    dcm.set_params({"A": A, "C": C})
+
+    tvec = np.linspace(0, 20, 80)
+    u = utils.stim_boxcar([[0, 5, 1]])
+    y, _ = dcm.simulate(tvec, u=u)
+
+    names = dcm.get_p_names()
+    p0 = dcm.get_p().copy()
+    p0[names.index("c0")] = 10.0
+    fixed = [name for name in names if name != "c0"]
+
+    res = dcm.fit(y, tvec, u=u, p0=p0, method="NL", fixed_vars=fixed)
+
+    assert res.success
+    assert res.cov_is_calibrated
+    assert res.hessian_diagnostics["n_negative_eigvals"] == 0
+    assert np.isclose(res.x[names.index("c0")], 1.0, atol=1e-2)
+
+
+def test_dcm_simulate_IR_smoke():
+    """simulate_IR runs end-to-end on a single-layer DCM and returns finite
+    output of the right shape for each TI.
+
+    Regression test for B4 — DCM previously stored T1s as a scalar, which
+    broke get_Pmat's enumeration. Now T1s is np.array([...]) of length
+    num_layers consistently across DCM / TwoLayerDCM / MultiLayerDCM.
+    """
+    dcm = models.DCM(num_rois=2)
+    A = np.array([[-1.5, 0.0], [0.4, -1.5]])
+    C = np.array([1.0, 0.0])
+    dcm.set_params({"A": A, "C": C})
+    tvec = np.linspace(0, 30, 120)
+    u = utils.stim_boxcar([[0, 5, 1]])
+
+    TIs = [400, 800]
+    ir = dcm.simulate_IR(tvec, TIs, u=u)
+
+    assert isinstance(ir, list)
+    assert len(ir) == len(TIs)
+    for y in ir:
+        assert y.shape == (len(tvec), dcm.num_rois)
+        assert np.all(np.isfinite(y))

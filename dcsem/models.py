@@ -33,13 +33,12 @@ class BaseModel(object):
         )  # Parameters of the model, everything that could be fitted to data
         self.num_rois = None  # Number of ROIs
         self.num_layers = None  # Number of layers per ROI
-        self.state_vars = (
-            []
-        )  # Stave variables (things changing with time that are not directly observed)
+        self.state_vars = []  # Stave variables (things changing with time that are not directly observed)
         self.Anz = None  # Non-zero entries of the connectivity matrix
         self.Cnz = None  # non-zero entries of the input modulation matrix
         # Base class knows about T1s so it can generate IR-BOLD
         self.T1s = None
+        self.objective_kind = "loss"
 
     def __str__(self):
         """Print out model parameters"""
@@ -92,32 +91,149 @@ class BaseModel(object):
         return p
 
     def fit_NL(self, p0, fn_negloglik, fn_neglogpr, fixed_vars=None):
-        import lmfit
+        import numdifftools as nd
+        from scipy.optimize import minimize
 
-        params = lmfit.Parameters()
-        for idx, p in enumerate(self.get_p_names()):
-            params.add(
-                p,
-                value=p0[idx],
-                vary=True if fixed_vars is None else p not in fixed_vars,
+        from dcsem.diagnostics import compute_hessian_diagnostics
+        from dcsem.numerics import (
+            compute_correlation_matrix,
+            compute_standard_errors,
+            safe_hessian_inversion,
+        )
+
+        names = self.get_p_names()
+        p0 = np.asarray(p0, dtype=float)
+        LB, UB = self.get_bounds()
+        LB = np.asarray(LB, dtype=float)
+        UB = np.asarray(UB, dtype=float)
+
+        if fixed_vars is not None:
+            free_mask = np.array([name not in fixed_vars for name in names], dtype=bool)
+        else:
+            free_mask = np.ones(len(names), dtype=bool)
+        free_idx = np.flatnonzero(free_mask)
+        fixed_idx = np.flatnonzero(~free_mask)
+
+        if np.any((p0[fixed_idx] < LB[fixed_idx]) | (p0[fixed_idx] > UB[fixed_idx])):
+            raise ValueError("Fixed parameter initial values violate model bounds.")
+
+        p0 = np.clip(p0, LB, UB)
+        p_fixed = p0.copy()
+
+        def expand_free_params(p_free):
+            x_full = p_fixed.copy()
+            x_full[free_idx] = np.asarray(p_free, dtype=float)
+            return x_full
+
+        invalid_objective = 1e12
+
+        def fn_neglogpost_free(p_free):
+            x_full = expand_free_params(p_free)
+            try:
+                objective = fn_negloglik(x_full) + fn_neglogpr(x_full)
+            except Exception:
+                return invalid_objective
+            if not np.isfinite(objective):
+                return invalid_objective
+            return float(objective)
+
+        if free_idx.size == 0:
+            results = None
+            x_opt = p_fixed.copy()
+        else:
+            x0_free = p0[free_idx]
+            bounds_free = [(LB[idx], UB[idx]) for idx in free_idx]
+            results = minimize(
+                fn_neglogpost_free,
+                x0_free,
+                method="L-BFGS-B",
+                bounds=bounds_free,
             )
+            x_opt = expand_free_params(results.x)
 
-        def fn_neglogpost(params):
-            x = params
-            if type(x) == lmfit.parameter.Parameters:
-                x = [params[name] for name in self.get_p_names()]
-            return fn_negloglik(x) + fn_neglogpr(x)
-
-        results = lmfit.minimize(fn_neglogpost, params, method="nelder")
         p = Parameters()
-        p.x = np.array([results.params[name].value for name in self.get_p_names()])
-        if results.covar is None:
-            import numdifftools as nd
-
-            Hfun = nd.Hessian(fn_neglogpost)
-            p.hessian = Hfun(p.x)
-            p.cov = np.linalg.inv(p.hessian)
+        p.x = np.asarray(x_opt, dtype=float)
+        p.param_names = names
         p.samples = None
+        p.success = True if results is None else bool(results.success)
+        p.message = "All parameters fixed." if results is None else str(results.message)
+        p.nit = 0 if results is None else getattr(results, "nit", 0)
+        p.result = results
+
+        n_params = len(names)
+        if free_idx.size == 0:
+            p.hessian = np.zeros((n_params, n_params))
+            p.cov = np.zeros((n_params, n_params))
+            p.se = np.zeros(n_params)
+            p.corr = np.eye(n_params)
+            p.hessian_diagnostics = None
+            p.covariance_diagnostics = None
+            p.uncertainty_kind = None
+            p.cov_is_calibrated = False
+            p.at_bounds = np.zeros(n_params, dtype=bool)
+        else:
+            try:
+                # Tighten ODE tolerances during Hessian evaluation only.
+                # Default rtol=1e-3 introduces integration noise ~O(1e-3);
+                # numdifftools uses steps ~O(1e-5), so noise amplification for
+                # second differences is O(ε/h²) ≈ O(1e7) — above Hessian
+                # eigenvalues of O(100). Tight tolerances reduce noise to
+                # O(1e-8/1e-10) = O(100), yielding PD Hessians at the MLE.
+                _orig_rtol = getattr(self, "ode_rtol", None)
+                _orig_atol = getattr(self, "ode_atol", None)
+                self.ode_rtol = 1e-8
+                self.ode_atol = 1e-10
+                try:
+                    Hfun = nd.Hessian(fn_neglogpost_free)
+                    hessian_free = np.asarray(Hfun(results.x), dtype=float)
+                finally:
+                    self.ode_rtol = _orig_rtol
+                    self.ode_atol = _orig_atol
+                cov_free, cov_diag = safe_hessian_inversion(
+                    hessian_free,
+                    sigma_sq=1.0,
+                    method="adaptive_ridge",
+                )
+
+                p.hessian = np.zeros((n_params, n_params))
+                p.hessian[np.ix_(free_idx, free_idx)] = hessian_free
+
+                p.cov = np.zeros((n_params, n_params))
+                p.cov[np.ix_(free_idx, free_idx)] = cov_free
+
+                p.se = np.zeros(n_params)
+                p.se[free_idx] = compute_standard_errors(cov_free, warn_negative=False)
+
+                p.corr = np.eye(n_params)
+                p.corr[np.ix_(free_idx, free_idx)] = compute_correlation_matrix(cov_free)
+
+                p.hessian_diagnostics = compute_hessian_diagnostics(hessian_free)
+                p.covariance_diagnostics = cov_diag
+                p.uncertainty_kind = (
+                    "hessian_negloglik"
+                    if self.objective_kind == "negloglik"
+                    else "local_curvature"
+                )
+                # Calibrated only if (a) the objective is true NLL and (b) the
+                # Hessian inversion did not require a significant ridge to
+                # restore positive definiteness. A significant ridge means the
+                # covariance is regularised, not the asymptotic inverse-Hessian.
+                p.cov_is_calibrated = (
+                    self.objective_kind == "negloglik"
+                    and not cov_diag.get("regularization_warning", False)
+                )
+            except Exception as exc:
+                p.hessian = np.full((n_params, n_params), np.nan)
+                p.cov = np.full((n_params, n_params), np.nan)
+                p.se = np.full(n_params, np.nan)
+                p.corr = np.full((n_params, n_params), np.nan)
+                p.hessian_diagnostics = None
+                p.covariance_diagnostics = {"error": str(exc)}
+                p.uncertainty_kind = None
+                p.cov_is_calibrated = False
+
+            p.at_bounds = np.isclose(p.x, LB) | np.isclose(p.x, UB)
+
         p.negloglik = fn_negloglik(p.x)
         p.neglogpr = fn_neglogpr(p.x)
         return p
@@ -133,6 +249,8 @@ class BaseModel(object):
         """
         if p0 is None:
             p0 = self.init_free_params(y)
+        if kwargs is None:
+            kwargs = {}
 
         fn_negloglik = lambda p: self.fn_negloglik(p, **kwargs)
         fn_neglogpr = self.fn_neglogpr
@@ -207,6 +325,12 @@ class BaseModel(object):
         :param p: list
         :return: None
         """
+        expected = len(self.get_p())
+        if len(p) != expected:
+            raise ValueError(
+                f"Parameter vector length mismatch: expected {expected}, got {len(p)}. "
+                "Did the A/C matrix structure change since get_p() was called?"
+            )
         idx = 0
         for param in self.p:
             if isinstance(self.p[param], (int, float)):
@@ -259,12 +383,21 @@ class BaseModel(object):
         Results = {}
         for v in self.state_vars:
             D = {}
-            if state_tc[v].shape[1] == self.num_rois:
+            width = state_tc[v].shape[1]
+            if width == self.num_rois:
+                # single-layer-shaped state (or one-entry-per-ROI inter-layer
+                # quantity in a 2-layer model)
                 for roi in range(self.num_rois):
                     name = f"R{roi}"
                     D[name] = state_tc[v][:, roi]
             else:
-                for layer in range(self.num_layers):
+                # multi-layer-shaped state. For 4-state-per-layer vars (s, f,
+                # v, q, x) this is num_rois * num_layers; for inter-layer
+                # delay vars (vs, qs in MultiLayerDCM) it is
+                # num_rois * (num_layers - 1). Derive from width to handle
+                # both cases.
+                effective_layers = width // self.num_rois
+                for layer in range(effective_layers):
                     for roi in range(self.num_rois):
                         idx = roi + layer * self.num_rois
                         name = f"R{roi}L{layer}"
@@ -324,8 +457,19 @@ class BaseModel(object):
 class DCM(BaseModel):
     def __init__(self, num_rois, params=None, stochastic=False):
         """Set default values for all parameters of Balloon model
+
         num_rois (int)
         params (dict) : use this to set up all or a subset of the parameters
+
+        Notes on Balloon-Windkessel BOLD weights (k1, k2, k3):
+        Defaults follow Friston 2003 (1.5 T convention): k1 = 7·E0,
+        k2 = 2.0, k3 = 2·E0 − 0.2. After construction these coefficients are
+        independent attributes — mutating ``self.p.E0`` does NOT update k1
+        or k3. If E0 is fitted while k1/k2/k3 are also fitted (as in the
+        default ``init_free_params``), the model is over-parameterised. For
+        scientific work, fix the haemodynamic parameters by passing them in
+        ``fixed_vars`` to ``fit``, or recompute k1/k3 explicitly when
+        changing E0.
         """
         super().__init__()
         # conn params
@@ -347,6 +491,7 @@ class DCM(BaseModel):
         self.p.k2 = 2.0
         self.p.k3 = 2.0 * self.p.E0 - 0.2
         self.p.V0 = 0.02  # Resting blood volume fraction
+        self.objective_kind = "negloglik"
         # Set user-specified parameters
         if params is not None:
             self.set_params(params)
@@ -358,24 +503,35 @@ class DCM(BaseModel):
         # Define default values for T1s
         from dcsem.utils import constants
 
-        self.T1s = (constants["LowerLayerT1"] + constants["UpperLayerT1"]) / 2.0
+        # Single-layer DCM: T1s is a 1-element array so get_Pmat / simulate_IR
+        # can iterate over layers uniformly across DCM, TwoLayerDCM, and
+        # MultiLayerDCM (which use np.linspace with num_layers).
+        self.T1s = np.array(
+            [(constants["LowerLayerT1"] + constants["UpperLayerT1"]) / 2.0]
+        )
         # SDE or ODE
         self.stochastic = stochastic
         self.state_noise_std = 0.05
+        # ODE solver controls (optional)
+        # If left as None, scipy.integrate.solve_ivp defaults (RK45) are used
+        self.ode_method = None  # e.g., "BDF" or "Radau" for stiff systems
+        self.ode_rtol = None
+        self.ode_atol = None
+        self.ode_max_step = None
 
     def calc_BOLD(self, q, v):
         """Convert dHb (q) and blood volume (v) to BOLD signal change"""
+        v_safe = np.maximum(v, 1e-8)  # guard against division by zero
         return self.p.V0 * (
-            self.p.k1 * (1 - q) + self.p.k2 * (1 - q / v) + self.p.k3 * (1 - v)
+            self.p.k1 * (1 - q) + self.p.k2 * (1 - q / v_safe) + self.p.k3 * (1 - v_safe)
         )
 
     def init_states(self):
         zeros = np.full(self.num_rois, 0.0)
         ones = np.full(self.num_rois, 1.0)
-        s0, x0 = zeros, zeros
         s0 = zeros
         f0, v0, q0 = ones, ones, ones
-        return np.r_[s0, f0, v0, q0]  # , x0]
+        return np.r_[s0, f0, v0, q0]
 
     def collect_results(self, ivp, x_vec):
         BOLD_tc = []
@@ -385,8 +541,9 @@ class DCM(BaseModel):
             p = ivp[:, idx]
             s, f, v, q = np.array_split(p, num_state)
             x = x_vec.T[idx]
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
             BOLD_tc.append(self.calc_BOLD(q, v))
 
         # Turn to numpy arrays and add bold timecourse
@@ -400,24 +557,108 @@ class DCM(BaseModel):
         return self.get_p()
 
     def get_bounds(self):
-        LB = [-np.infty] * len(self.get_p())
-        UB = [np.infty] * len(self.get_p())
+        scalar_bounds = {
+            "kappa": (1e-3, 10.0),
+            "gamma": (1e-3, 10.0),
+            "alpha": (0.05, 2.0),
+            "E0": (1e-4, 0.99),
+            "tau": (0.05, 10.0),
+            "k1": (1e-4, 20.0),
+            "k2": (1e-4, 20.0),
+            "k3": (-5.0, 20.0),
+            "V0": (1e-4, 1.0),
+            "l_d": (0.0, 5.0),
+            "tau_d": (0.05, 10.0),
+        }
+
+        LB = []
+        UB = []
+        for name in self.get_p_names():
+            if name.startswith("a") and "_" in name:
+                row, col = [int(idx) for idx in name[1:].split("_")]
+                bounds = (-6.0, -1e-6) if row == col else (-4.0, 4.0)
+            elif name.startswith("c"):
+                bounds = (-4.0, 4.0)
+            else:
+                bounds = scalar_bounds.get(name, (-np.inf, np.inf))
+            LB.append(bounds[0])
+            UB.append(bounds[1])
         return LB, UB
 
-    def fn_negloglik(self, p, y, tvec, u):
+    @staticmethod
+    def _gaussian_negloglik(residuals, noise_std=None):
+        residuals = np.asarray(residuals, dtype=float)
+        if not np.all(np.isfinite(residuals)):
+            return np.inf
+
+        n_obs = residuals.size
+        if noise_std is None:
+            sigma_sq = max(np.mean(residuals**2), 1e-12)
+            return 0.5 * n_obs * (np.log(2 * np.pi * sigma_sq) + 1.0)
+
+        sigma_sq = float(noise_std) ** 2
+        if sigma_sq <= 0:
+            raise ValueError("noise_std must be positive.")
+        return 0.5 * (
+            n_obs * np.log(2 * np.pi * sigma_sq) + np.sum(residuals**2) / sigma_sq
+        )
+
+    def parameters_are_admissible(self, p):
+        table = self.p_to_table(p)
+        A = np.asarray(table["A"], dtype=float)
+
+        if not np.all(np.isfinite(A)):
+            return False
+        if A.size > 0:
+            if np.any(np.diag(A) >= 0):
+                return False
+            if np.any(np.linalg.eigvals(A).real >= 0):
+                return False
+
+        positive_scalars = ["kappa", "gamma", "alpha", "tau", "V0"]
+        for key in positive_scalars:
+            if key in table and (not np.isfinite(table[key]) or table[key] <= 0):
+                return False
+
+        if not (0 < table["E0"] < 1):
+            return False
+
+        if "l_d" in table and (not np.isfinite(table["l_d"]) or table["l_d"] < 0):
+            return False
+        if "tau_d" in table and (
+            not np.isfinite(table["tau_d"]) or table["tau_d"] <= 0
+        ):
+            return False
+
+        return True
+
+    def fn_negloglik(self, p, y, tvec, u, noise_std=None):
         if self.stochastic:
             raise (Exception("Fitting stochastic DCMs has not yet been implemented"))
-        # self.set_p(p)
-        y_pred, _ = self.simulate(tvec, p=p, u=u)
-        mse = np.mean((y - y_pred) ** 2)
-        return mse
+        if not self.parameters_are_admissible(p):
+            return 1e12
+
+        try:
+            y_pred, _ = self.simulate(tvec, p=p, u=u)
+        except (FloatingPointError, RuntimeError, ValueError, np.linalg.LinAlgError):
+            return 1e12
+
+        if not np.all(np.isfinite(y_pred)):
+            return 1e12
+
+        residuals = np.asarray(y, dtype=float) - np.asarray(y_pred, dtype=float)
+        return self._gaussian_negloglik(residuals, noise_std=noise_std)
 
     def fn_neglogpr(self, p):
         return 0
 
-    def fit(self, y, tvec, p0=None, u=None, method="MH", fixed_vars=None):
+    def fit(self, y, tvec, p0=None, u=None, method="MH", fixed_vars=None, noise_std=None):
         return super().fit(
-            y, p0, method, fixed_vars, kwargs={"y": y, "tvec": tvec, "u": u}
+            y,
+            p0,
+            method,
+            fixed_vars,
+            kwargs={"y": y, "tvec": tvec, "u": u, "noise_std": noise_std},
         )
 
     ####################################################
@@ -430,23 +671,35 @@ class DCM(BaseModel):
 
         def F(t, p, x):
             s, f, v, q = np.array_split(p, num_state)
+
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)  # ensure positive flow for exponent
+
+            # Stable computation of 1 - (1 - E0) ** (1 / f)
+            log_base = np.log1p(-self.p.E0)  # log(1 - E0) < 0
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
             dsdt = x(t) - self.p.kappa * s - self.p.gamma * (f - 1)
             dfdt = s
-            dvdt = (1 / self.p.tau) * (f - np.power(v, 1 / self.p.alpha))
+            dvdt = (1 / self.p.tau) * (f - np.power(v_eff, 1 / self.p.alpha))
             dqdt = (1 / self.p.tau) * (
-                f * (1 - np.power(1 - self.p.E0, 1 / f)) / self.p.E0
-                - np.power(v, 1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0
+                - np.power(v_eff, 1 / self.p.alpha - 1) * q
             )
             return np.r_[dsdt, dfdt, dvdt, dqdt]
 
         return F
 
-    def integrate(self, tvec, p0, u=None):
+    def integrate(self, tvec, p0, u=None, generator=None):
         """Integrate the ODE/SDE
 
         :param tvec: array
         :param p0: initial state
         :param u: input
+        :param generator: numpy.random.Generator for stochastic mode
         :return: 2D array (states x time), 1D array (x)
         """
         # if no input, set to zero
@@ -455,7 +708,7 @@ class DCM(BaseModel):
         # get main function
         F = self.get_func()
         # integrate to get x
-        x = self.integrate_x(tvec, u=u)
+        x = self.integrate_x(tvec, u=u, generator=generator)
         # create interpolator to get x(t) for all t
         from scipy.interpolate import CubicSpline
 
@@ -466,11 +719,30 @@ class DCM(BaseModel):
         def func(t, p):
             return F(t, p, x_fun)
 
-        ivp = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec).y
+        solve_kwargs = {}
+        if getattr(self, "ode_method", None) is not None:
+            solve_kwargs["method"] = self.ode_method
+        if getattr(self, "ode_rtol", None) is not None:
+            solve_kwargs["rtol"] = self.ode_rtol
+        if getattr(self, "ode_atol", None) is not None:
+            solve_kwargs["atol"] = self.ode_atol
+        if getattr(self, "ode_max_step", None) is not None:
+            solve_kwargs["max_step"] = self.ode_max_step
 
-        return ivp, x
+        ivp = solve_ivp(
+            func, t_span=[min(tvec), max(tvec)], y0=p0, t_eval=tvec, **solve_kwargs
+        )
 
-    def integrate_x(self, tvec, x0=None, u=None):
+        if not ivp.success:
+            raise RuntimeError(f"DCM hemodynamic integration failed: {ivp.message}")
+        if not np.all(np.isfinite(ivp.y)):
+            raise FloatingPointError(
+                "DCM hemodynamic integration produced non-finite states."
+            )
+
+        return ivp.y, x
+
+    def integrate_x(self, tvec, x0=None, u=None, generator=None):
         if u is None:
             u = lambda x: 0.0
         if x0 is None:
@@ -489,23 +761,46 @@ class DCM(BaseModel):
             def func(p, t):
                 return F(t, p, u)
 
-            x = itoint(f=func, G=G, y0=x0, tspan=tvec).T
+            x = itoint(f=func, G=G, y0=x0, tspan=tvec, generator=generator).T
         else:  # integrate ODE
             from scipy.integrate import solve_ivp
 
             def func(t, p):
                 return F(t, p, u)
 
-            x = solve_ivp(func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec).y
+            solve_kwargs = {}
+            if getattr(self, "ode_method", None) is not None:
+                solve_kwargs["method"] = self.ode_method
+            if getattr(self, "ode_rtol", None) is not None:
+                solve_kwargs["rtol"] = self.ode_rtol
+            if getattr(self, "ode_atol", None) is not None:
+                solve_kwargs["atol"] = self.ode_atol
+            if getattr(self, "ode_max_step", None) is not None:
+                solve_kwargs["max_step"] = self.ode_max_step
+
+            ivp = solve_ivp(
+                func, t_span=[min(tvec), max(tvec)], y0=x0, t_eval=tvec, **solve_kwargs
+            )
+            if not ivp.success:
+                raise RuntimeError(f"DCM neural integration failed: {ivp.message}")
+            x = ivp.y
+        if not np.all(np.isfinite(x)):
+            raise FloatingPointError("DCM neural integration produced non-finite states.")
         return x
 
-    def simulate(self, tvec, u=None, p=None, CNR=None):
+    def simulate(
+        self, tvec, u=None, p=None, CNR=None, generator=None, allow_unstable=False
+    ):
         """Generate BOLD+state time courses using ODE solver
         params:
-        tvec (array)  - Times where states are evaluated
-        p (array)     - The parameters used to simulate
-        u (function)  - Input function u(t) should be scalar for t scalar
-        CNR (float)   - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
+        tvec (array)     - Times where states are evaluated
+        p (array)        - The parameters used to simulate
+        u (function)     - Input function u(t) should be scalar for t scalar
+        CNR (float)      - Contrast to noise ratio [CNR defined as std(signal)/std(noise) ]
+        generator        - numpy.random.Generator for stochastic mode (pass for reproducibility)
+        allow_unstable   - bypass the stability pre-check on A (research only;
+                           an unstable system makes the adaptive ODE solver
+                           grind forever and effectively hang)
 
         returns:
         array (BOLD time course)
@@ -515,16 +810,22 @@ class DCM(BaseModel):
         # initialise
         p0 = self.init_states()
 
-        # run solver
+        # run solver — try/finally ensures self.p is restored even if
+        # integrate() raises (e.g., solve_ivp failure or non-finite states).
         if p is not None:
-            # save a copy of the params
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        ivp, x = self.integrate(tvec, p0, u)
+        try:
+            # Stability pre-check: max real eigenvalue of A must be < 0,
+            # otherwise neural dynamics diverge and the integrator hangs.
+            if not allow_unstable:
+                from dcsem.validation import assert_dcm_stable
 
-        if p is not None:
-            # get params back
-            self.p = Parameters(p_copy)
+                assert_dcm_stable(self.p.A, name="A")
+            ivp, x = self.integrate(tvec, p0, u, generator=generator)
+        finally:
+            if p is not None:
+                self.p = Parameters(p_copy)
 
         # create results dict
         bold, state_tc = self.collect_results(ivp, x)
@@ -594,10 +895,17 @@ class TwoLayerDCM(DCM):
             # drain effect here
             drain_v = np.r_[0 * vs, self.p.l_d * vs]
             drain_q = np.r_[0 * qs, self.p.l_d * qs]
-            dvdt = (1 / self.p.tau) * (f - v ** (1 / self.p.alpha)) + drain_v
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)
+            log_base = np.log1p(-self.p.E0)
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
+            dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (1 - (1 - self.p.E0) ** (1 / f)) / self.p.E0
-                - v ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl, _ = np.array_split(v, self.num_layers)
@@ -620,8 +928,9 @@ class TwoLayerDCM(DCM):
             x = x_vec.T[idx]
             vs, qs = np.array_split(vqs, self.num_layers)
             BOLD_tc.append(self.calc_BOLD(q, v))
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x, "vs": vs, "qs": qs}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
 
         # Turn lists into numpy arrays and add BOLD
         state_tc = {key: np.asarray(state_tc[key]) for key in state_tc}
@@ -633,7 +942,10 @@ class MultiLayerDCM(DCM):
         super().__init__(num_rois, params, stochastic)
         self.num_rois = num_rois
         self.num_layers = num_layers
-        self.num_states = 5 * num_rois * num_layers + 2 * num_rois * (num_layers - 1)
+        # Note: the haemodynamic ODE state is 4·num_rois·num_layers (s, f, v,
+        # q) plus 2·num_rois·(num_layers−1) inter-layer delay states (vs, qs).
+        # The neural state x is integrated separately via ``integrate_x`` and
+        # interpolated, so it is not part of this state vector.
         self.p.A = np.zeros(
             (self.num_rois * self.num_layers, self.num_rois * self.num_layers)
         )
@@ -690,10 +1002,17 @@ class MultiLayerDCM(DCM):
             # drain effect here
             drain_v = np.r_[np.zeros(self.num_rois), self.p.l_d * vs]
             drain_q = np.r_[np.zeros(self.num_rois), self.p.l_d * qs]
-            dvdt = (1 / self.p.tau) * (f - v ** (1 / self.p.alpha)) + drain_v
+            # Numerical stabilisation
+            eps = 1e-8
+            v_eff = np.maximum(v, eps)
+            f_eff = np.maximum(f, eps)
+            log_base = np.log1p(-self.p.E0)
+            exp_arg = np.clip(log_base / f_eff, -100.0, 100.0)
+            one_minus_pow = 1.0 - np.exp(exp_arg)
+
+            dvdt = (1 / self.p.tau) * (f - v_eff ** (1 / self.p.alpha)) + drain_v
             dqdt = (1 / self.p.tau) * (
-                f * (1 - (1 - self.p.E0) ** (1 / f)) / self.p.E0
-                - v ** (1 / self.p.alpha - 1) * q
+                f * (one_minus_pow) / self.p.E0 - v_eff ** (1 / self.p.alpha - 1) * q
             ) + drain_q
             # delay eqs
             vl = v[: self.num_rois * (self.num_layers - 1)]
@@ -716,8 +1035,9 @@ class MultiLayerDCM(DCM):
             s, f, v, q, vs, qs = self.split_p(p)
             x = x_vec.T[idx]
             BOLD_tc.append(self.calc_BOLD(q, v))
+            local_vars = {"s": s, "f": f, "v": v, "q": q, "x": x, "vs": vs, "qs": qs}
             for key in self.state_vars:
-                state_tc[key].append(eval(key))
+                state_tc[key].append(local_vars[key])
 
         # Turn lists into numpy arrays and add BOLD
         state_tc = {key: np.asarray(state_tc[key]) for key in state_tc}
@@ -729,6 +1049,7 @@ class MultiLayerDCM(DCM):
 class SEM(BaseModel):
     def __init__(self, num_rois, params=None):
         super().__init__()
+        self.objective_kind = "negloglik"
         self.num_rois = num_rois
         self.num_layers = 1
         self.num_states = num_rois * self.num_layers
@@ -752,14 +1073,16 @@ class SEM(BaseModel):
         if p is not None:
             p_copy = copy.deepcopy(self.p)
             self.p = Parameters(self.p_to_table(p))
-        u = np.random.normal(
-            loc=0.0, scale=self.p.sigma, size=(self.num_states, len(tvec))
-        )
-        I = np.identity(self.num_states)
-        A = self.p.A
-        x = np.dot(np.linalg.inv(I - A), u).T
-        if p is not None:
-            self.p = Parameters(p_copy)
+        try:
+            u = np.random.normal(
+                loc=0.0, scale=self.p.sigma, size=(self.num_states, len(tvec))
+            )
+            I = np.identity(self.num_states)
+            A = self.p.A
+            x = np.dot(np.linalg.inv(I - A), u).T
+        finally:
+            if p is not None:
+                self.p = Parameters(p_copy)
 
         return x, x
 
@@ -789,7 +1112,7 @@ class SEM(BaseModel):
         if y is None:
             return self.p_from_A_sigma(self.p.A, self.p.sigma)
         else:
-            return self.p_from_A_sigma(self.p.A * 0.0, np.std(y))
+            return self.p_from_A_sigma(np.zeros_like(self.p.A), np.std(y))
 
     def A_sigma_from_p(self, p):
         D = self.p_to_table(p)
@@ -797,14 +1120,14 @@ class SEM(BaseModel):
         return A, sigma
 
     def p_from_A_sigma(self, A, sigma):
-        return self.get_p({"A": self.p.A * 0, "sigma": sigma})
+        return self.get_p({"A": np.asarray(A, dtype=float), "sigma": sigma})
 
     #
     def get_bounds(self):
         p = self.get_p()
         n = self.get_p_names()
-        UB = np.full(p.shape, np.infty)
-        LB = np.full(p.shape, -np.infty)
+        UB = np.full(p.shape, np.inf)
+        LB = np.full(p.shape, -np.inf)
         LB[n.index("sigma")] = 0
         return LB, UB
 
